@@ -42,6 +42,8 @@ projection when the plotbox is small enough that a flat table is cheaper than a
 """
 struct DensePixelHits{S}
     stacks::Vector{Union{Nothing,S}}
+
+    DensePixelHits{S}(stacks::Vector{Union{Nothing,S}}) where {S} = new{S}(stacks)
 end
 
 struct DenseUpperPixelHits
@@ -146,6 +148,8 @@ struct PreparedInterceptionData
     emitter_nir_power_per_node::Dict{Int,Float64}
     emitter_par_power_by_index::Vector{Float64}
     emitter_nir_power_by_index::Vector{Float64}
+    emitter_power_per_band_per_node::Dict{String,Dict{Int,Float64}}
+    emitter_power_per_band_by_index::Dict{String,Vector{Float64}}
     emitter_nodes::Set{Int}
     emitter_node_mask::Vector{Bool}
     component_area_per_node::Union{Nothing,Dict{Int,Float64}}
@@ -460,6 +464,38 @@ function _raycore_scene_shape_summary(data::Union{Nothing,RaycoreSceneData})
     )
 end
 
+function _emitter_source_node_map(
+    prepared::PreparedInterceptionData,
+    values::AbstractVector{<:Real},
+)
+    out = Dict{Int,Float64}()
+    sizehint!(out, length(prepared.emitter_nodes))
+    for nid in prepared.emitter_nodes
+        @inbounds out[nid] = Float64(values[prepared.geometry.node_index[nid]])
+    end
+    return out
+end
+
+"""
+Discrete Lambertian transfer accounting for scene emitters.
+
+`sector_fraction` is the cosine- and solid-angle-weighted hemispherical
+quadrature, normalized to one over the non-solar turtle sectors.
+`received_fraction` maps `(receiver, source)` to the fraction of the source's
+hemispherical emission intercepted by the first physical receiver.
+`observed_fraction` stores non-consuming observations by virtual sensors along
+the same rays. `escaped_fraction_per_node` stores the complementary fraction
+which leaves the represented scene without a physical hit. For every source,
+physical receiver plus escaped fractions sum to one; sensor observations do not
+participate in that closure.
+"""
+struct EmitterTransferResult
+    received_fraction::Dict{Tuple{Int,Int},Float64}
+    observed_fraction::Dict{Tuple{Int,Int},Float64}
+    escaped_fraction_per_node::Dict{Int,Float64}
+    sector_fraction::Vector{Float64}
+end
+
 Base.IndexStyle(::Type{<:SmallHitStack}) = IndexLinear()
 Base.size(stack::SmallHitStack) = (Int(stack.len),)
 Base.length(stack::SmallHitStack) = Int(stack.len)
@@ -694,40 +730,78 @@ end
     return @inbounds Int(stack.parent.nodes[_flat_stack_start(stack)+i-1])
 end
 
+@inline function _same_emitter_origin_depth(a::Real, b::Real)
+    scale = max(abs(Float64(a)), abs(Float64(b)), 1.0)
+    return abs(Float64(a) - Float64(b)) <= 16 * eps(Float32) * scale
+end
+
+@inline function _duplicate_emitter_origin(stack, j::Int, src::Int)
+    j <= firstindex(stack) && return false
+    origin_height = _stack_hit_height(stack, j)
+    @inbounds for k in (j-1):-1:firstindex(stack)
+        hit_height = _stack_hit_height(stack, k)
+        _same_emitter_origin_depth(hit_height, origin_height) || break
+        _stack_hit_node(stack, k) == src && return true
+    end
+    return false
+end
+
 @inline function _accumulate_emitter_transfer_counts_dense!(
     edge_counts::Dict{UInt64,Int},
+    observed_edge_counts::Dict{UInt64,Int},
     total_from::Dict{Int,Int},
     stack,
     emitter_node_mask::Vector{Bool},
+    virtual_node_mask::Vector{Bool},
     node_ids::Vector{Int},
 )
     @inbounds for j in eachindex(stack)
         src_idx = _stack_hit_node(stack, j)
         emitter_node_mask[src_idx] || continue
+        _duplicate_emitter_origin(stack, j, src_idx) && continue
+        origin_height = _stack_hit_height(stack, j)
+
+        src = node_ids[src_idx]
+        total_from[src] = get(total_from, src, 0) + 1
 
         to_idx = 0
+        last_observer_idx = 0
+        last_observer_height = 0.0
         for k in (j+1):length(stack)
             node_idx = _stack_hit_node(stack, k)
-            emitter_node_mask[node_idx] && continue
+            hit_height = _stack_hit_height(stack, k)
+            # Adjacent triangles of the emitting surface can contribute the
+            # same node/depth hit to a raster pixel. Skip that duplicate origin,
+            # but let a distinct surface of the same component occlude normally.
+            node_idx == src_idx && _same_emitter_origin_depth(hit_height, origin_height) && continue
+            if virtual_node_mask[node_idx]
+                if node_idx != last_observer_idx || !_same_emitter_origin_depth(hit_height, last_observer_height)
+                    edge = _pack_emitter_edge(node_ids[node_idx], src)
+                    observed_edge_counts[edge] = get(observed_edge_counts, edge, 0) + 1
+                    last_observer_idx = node_idx
+                    last_observer_height = hit_height
+                end
+                continue
+            end
             to_idx = node_idx
             break
         end
         to_idx == 0 && continue
 
-        src = node_ids[src_idx]
         to = node_ids[to_idx]
         edge = _pack_emitter_edge(to, src)
         edge_counts[edge] = get(edge_counts, edge, 0) + 1
-        total_from[src] = get(total_from, src, 0) + 1
     end
     return nothing
 end
 
 @inline function _accumulate_emitter_transfer_counts_dense!(
     edge_counts::Dict{UInt64,Int},
+    observed_edge_counts::Dict{UInt64,Int},
     total_from::Dict{Int,Int},
     stack::FlatPixelHitStack,
     emitter_node_mask::Vector{Bool},
+    virtual_node_mask::Vector{Bool},
     node_ids::Vector{Int},
 )
     start = _flat_stack_start(stack)
@@ -737,20 +811,45 @@ end
         src_idx = Int(nodes[start+j])
         emitter_node_mask[src_idx] || continue
 
+        origin_height = Float64(stack.parent.heights[start+j])
+        duplicate_origin = false
+        for k in (j-1):-1:0
+            hit_height = Float64(stack.parent.heights[start+k])
+            _same_emitter_origin_depth(hit_height, origin_height) || break
+            if Int(nodes[start+k]) == src_idx
+                duplicate_origin = true
+                break
+            end
+        end
+        duplicate_origin && continue
+
+        src = node_ids[src_idx]
+        total_from[src] = get(total_from, src, 0) + 1
+
         to_idx = 0
+        last_observer_idx = 0
+        last_observer_height = 0.0
         for k in (j+1):(n_hits-1)
             node_idx = Int(nodes[start+k])
-            emitter_node_mask[node_idx] && continue
+            hit_height = Float64(stack.parent.heights[start+k])
+            node_idx == src_idx && _same_emitter_origin_depth(hit_height, origin_height) && continue
+            if virtual_node_mask[node_idx]
+                if node_idx != last_observer_idx || !_same_emitter_origin_depth(hit_height, last_observer_height)
+                    edge = _pack_emitter_edge(node_ids[node_idx], src)
+                    observed_edge_counts[edge] = get(observed_edge_counts, edge, 0) + 1
+                    last_observer_idx = node_idx
+                    last_observer_height = hit_height
+                end
+                continue
+            end
             to_idx = node_idx
             break
         end
         to_idx == 0 && continue
 
-        src = node_ids[src_idx]
         to = node_ids[to_idx]
         edge = _pack_emitter_edge(to, src)
         edge_counts[edge] = get(edge_counts, edge, 0) + 1
-        total_from[src] = get(total_from, src, 0) + 1
     end
     return nothing
 end
@@ -766,8 +865,10 @@ end
 )
     isempty(stack) && return nothing
     node_idx = _stack_hit_node(stack, 1)
+    intercepted_fraction = 1.0 - node_transparency_by_index[node_idx]
+    intercepted_fraction > 0.0 || return nothing
     ratio = _projection_area_ratio(projection, options, node_idx)
-    visible_area[node_idx] += pixel_area * ratio
+    visible_area[node_idx] += pixel_area * intercepted_fraction * ratio
     return nothing
 end
 
@@ -835,7 +936,8 @@ end
 const _DENSE_PIXEL_HITS_MAX_CELLS = 500_000
 const _AUTO_VECTOR_PIXEL_HITS_MIN_CELLS = 300_000
 
-DensePixelHits(::Type{S}, n::Int) where {S} = DensePixelHits{S}(fill(nothing, n))
+DensePixelHits(::Type{S}, n::Int) where {S} =
+    DensePixelHits{S}(Vector{Union{Nothing,S}}(nothing, n))
 function DenseUpperPixelHits(n::Int)
     occupied = Int[]
     # Dense upper-hit tables already commit to per-pixel arrays, so reserving
@@ -850,7 +952,7 @@ Base.get(pixel_hits::DensePixelHits, idx::Int, default) =
 Base.get(pixel_hits::DenseUpperPixelHits, idx::Int, default) =
     (1 <= idx <= length(pixel_hits.nodes) && pixel_hits.nodes[idx] != 0) ? UpperHitStack(pixel_hits, idx) : default
 
-function Base.get!(f::F, pixel_hits::DensePixelHits, idx::Int) where {F}
+function Base.get!(f::Function, pixel_hits::DensePixelHits, idx::Int)
     stack = pixel_hits.stacks[idx]
     if stack === nothing
         stack = f()
@@ -1112,6 +1214,11 @@ function _first_order_result_from_dense(
     incident_power_nir::Vector{Float64},
     hits_per_node::Vector{Int},
     materialize_public::Bool=true,
+    ;
+    emitter_escaped_power::SpectralNodeValues=SpectralNodeValues(
+        Dict{Int,Float64}(),
+        Dict{Int,Float64}(),
+    ),
 )
     projected_area_map =
         materialize_public ? _all_dense_float_node_map(node_ids, projected_area_per_node) : Dict{Int,Float64}()
@@ -1128,6 +1235,7 @@ function _first_order_result_from_dense(
             incident_nir_map,
         ),
         hits_map,
+        emitter_escaped_power,
         DenseFirstOrderResult(
             node_ids,
             projected_area_per_node,
@@ -1154,6 +1262,7 @@ function _materialize_first_order_result(first::FirstOrderResult)
         dense.incident_power.nir,
         dense.hits_per_node,
         true,
+        emitter_escaped_power=first.emitter_escaped_power,
     )
 end
 
@@ -1174,6 +1283,61 @@ end
 
 function _cfg_toricity(options::LightOptions)
     options.toricity
+end
+
+function _cfg_debug_drop_leading_hit(options::LightOptions)
+    options.debug_drop_leading_hit
+end
+
+function _apply_debug_drop_leading_hit!(
+    pixel_hits,
+    node_hits,
+    projected_pixels_area,
+    plotbox,
+    options::LightOptions,
+)
+    spec = _cfg_debug_drop_leading_hit(options)
+    spec === nothing && return nothing
+    idx = spec.x + 1 + spec.y * plotbox.nx
+    stack = get(pixel_hits, idx, nothing)
+    (stack === nothing || isempty(stack)) && return nothing
+
+    _sort_hit_stack!(stack)
+    top_nid = _stack_hit_node(stack, 1)
+    top_nid == spec.node_id || return nothing
+
+    deleteat!(stack, 1)
+    isempty(stack) && delete!(pixel_hits, idx)
+    node_hits[top_nid] = max(0, get(node_hits, top_nid, 0) - 1)
+    projected_pixels_area[top_nid] =
+        max(0.0, get(projected_pixels_area, top_nid, 0.0) - plotbox.pixel_area)
+    return nothing
+end
+
+function _apply_debug_drop_leading_hit!(
+    pixel_hits,
+    node_hits::Vector{Int},
+    projected_pixels_area::Vector{Float64},
+    plotbox,
+    options::LightOptions,
+    node_ids::Vector{Int},
+)
+    spec = _cfg_debug_drop_leading_hit(options)
+    spec === nothing && return nothing
+    idx = spec.x + 1 + spec.y * plotbox.nx
+    stack = get(pixel_hits, idx, nothing)
+    (stack === nothing || isempty(stack)) && return nothing
+
+    _sort_hit_stack!(stack)
+    top_idx = _stack_hit_node(stack, 1)
+    node_ids[top_idx] == spec.node_id || return nothing
+
+    deleteat!(stack, 1)
+    isempty(stack) && delete!(pixel_hits, idx)
+    node_hits[top_idx] = max(0, node_hits[top_idx] - 1)
+    projected_pixels_area[top_idx] =
+        max(0.0, projected_pixels_area[top_idx] - plotbox.pixel_area)
+    return nothing
 end
 
 function _is_sensor_interception(interception::InterceptionModel)
@@ -1337,36 +1501,48 @@ function _scene_group_type_maps(scene::PlantGeom.SceneGeometry, node_ids)
     return node_group, node_type
 end
 
+function _emitter_gamma_coefficients(emitter::EmitterModel)
+    coefficients = Dict{String,Float64}()
+    gamma = emitter.gamma
+    get(gamma.extras, "__has_par", true) && (coefficients["PAR"] = gamma.par)
+    get(gamma.extras, "__has_nir", true) && (coefficients["NIR"] = gamma.nir)
+    for (name, raw_value) in gamma.extras
+        band = uppercase(strip(String(name)))
+        (isempty(band) || startswith(band, "__") || band == "TIR") && continue
+        value = try
+            _as_float(raw_value, NaN)
+        catch
+            NaN
+        end
+        isfinite(value) || continue
+        coefficients[band] = value
+    end
+    return coefficients
+end
+
+@inline function _is_active_lambertian_emitter(emitter)
+    emitter === nothing && return false
+    lowercase(strip(emitter.model)) == "lambertianemitter" || return false
+    return emitter.radiance > 0.0
+end
+
 function _group_light_emitters(models::LightModels)
-    out = Dict{Tuple{String,String},NamedTuple{(:par, :nir),Tuple{Float64,Float64}}}()
+    out = Dict{Tuple{String,String},Dict{String,Float64}}()
     for group_model in values(models)
         group = strip(group_model.group)
         isempty(group) && continue
         for (type_name0, type_model) in group_model.types
             emitter = type_model.light_emitter
-            emitter === nothing && continue
+            _is_active_lambertian_emitter(emitter) || continue
             type_name = strip(type_name0)
-            lowercase(strip(emitter.model)) == "lambertianemitter" || continue
-
-            radiance = emitter.radiance
-            radiance > 0.0 || continue
-
-            gpar = emitter.gamma.par
-            gnir = emitter.gamma.nir
-            gpar = max(gpar, 0.0)
-            gnir = max(gnir, 0.0)
-            gsum = gpar + gnir
-            if gsum > 0.0
-                gpar /= gsum
-                gnir /= gsum
-            else
-                gpar = 0.48
-                gnir = 0.52
-            end
 
             key = (group, type_name)
-            cur = get(out, key, (par=0.0, nir=0.0))
-            out[key] = (par=cur.par + radiance * gpar, nir=cur.nir + radiance * gnir)
+            current = get!(out, key) do
+                Dict{String,Float64}()
+            end
+            for (band, gamma) in _emitter_gamma_coefficients(emitter)
+                current[band] = get(current, band, 0.0) + emitter.radiance * gamma
+            end
         end
     end
     out
@@ -1401,6 +1577,7 @@ function _resolved_type_key(group_model::GroupModel, type_name::AbstractString)
                         (
                             interception.optical_properties.par,
                             interception.optical_properties.nir,
+                            interception.optical_properties.extras,
                         ),
                     )
                 end,
@@ -1414,6 +1591,7 @@ function _resolved_type_key(group_model::GroupModel, type_name::AbstractString)
                         emitter.radiance,
                         emitter.gamma.par,
                         emitter.gamma.nir,
+                        emitter.gamma.extras,
                     )
                 end,
             )
@@ -1480,38 +1658,37 @@ function _use_upper_hit_pixel_table(models::LightModels, options::LightOptions)
     return true
 end
 
-function _emitter_power_per_node(scene::PlantGeom.SceneGeometry, models::LightModels)
-    by_group_type = _group_light_emitters(models)
-    isempty(by_group_type) && return Dict{Int,Float64}(), Dict{Int,Float64}()
+function _emitter_power_per_band_per_node(scene::PlantGeom.SceneGeometry, models::LightModels)
+    power_per_band = Dict{String,Dict{Int,Float64}}()
+    for nid in keys(scene.nodes)
+        group = _normalize_group_name_local(_scene_group(scene, nid, ""))
+        type_name = strip(_scene_type(scene, nid, ""))
+        type_model = _type_model(models, group, type_name)
+        type_model === nothing && continue
+        emitter = type_model.light_emitter
+        _is_active_lambertian_emitter(emitter) || continue
 
-    par = Dict{Int,Float64}()
-    nir = Dict{Int,Float64}()
-    for ((group, type_name), pwr) in by_group_type
-        nids = Int[
-            nid for nid in keys(scene.nodes) if _scene_group(scene, nid, "") == group && _scene_type(scene, nid, "") == type_name
-        ]
-        if isempty(nids)
-            # Fallback for scenes where type labels are unavailable.
-            nids = Int[nid for nid in keys(scene.nodes) if _scene_group(scene, nid, "") == group]
-        end
-        isempty(nids) && continue
-
-        atot = sum(_scene_area(scene, nid, 0.0) for nid in nids)
-        if atot > 0.0
-            for nid in nids
-                w = _scene_area(scene, nid, 0.0) / atot
-                par[nid] = get(par, nid, 0.0) + pwr.par * w
-                nir[nid] = get(nir, nid, 0.0) + pwr.nir * w
+        # `radiance` is a Lambertian spectral radiance per unit emitting area
+        # and solid angle. Integrating L*cos(theta) over a hemisphere gives
+        # pi*L, so pi*A*L*gamma is the node's total emitted power in each band.
+        area = max(_scene_area(scene, nid, 0.0), 0.0)
+        scale = pi * area * emitter.radiance
+        for (band, gamma) in _emitter_gamma_coefficients(emitter)
+            band_power = get!(power_per_band, band) do
+                Dict{Int,Float64}()
             end
-        else
-            w = 1.0 / length(nids)
-            for nid in nids
-                par[nid] = get(par, nid, 0.0) + pwr.par * w
-                nir[nid] = get(nir, nid, 0.0) + pwr.nir * w
-            end
+            band_power[nid] = scale * gamma
         end
     end
-    return par, nir
+    return power_per_band
+end
+
+function _emitter_power_per_node(scene::PlantGeom.SceneGeometry, models::LightModels)
+    power_per_band = _emitter_power_per_band_per_node(scene, models)
+    return (
+        get(power_per_band, "PAR", Dict{Int,Float64}()),
+        get(power_per_band, "NIR", Dict{Int,Float64}()),
+    )
 end
 
 @inline function _pack_emitter_edge(to::Int, from::Int)
@@ -1521,37 +1698,140 @@ end
 @inline _unpack_emitter_to(edge::UInt64) = Int(UInt32(edge >> 32))
 @inline _unpack_emitter_from(edge::UInt64) = Int(UInt32(edge & 0xffffffff))
 
-function _emitter_weights_from_packed_counts(edge_counts::Dict{UInt64,Int}, total_from::Dict{Int,Int})
-    weights = Dict{Tuple{Int,Int},Float64}()
+function _lambertian_projected_solid_angles(turtle::TurtleGrid)
+    projected = zeros(Float64, length(turtle.sectors))
+    for i in eachindex(turtle.sectors)
+        sector = turtle.sectors[i]
+        sector.source == :sun && continue
+
+        # Turtle weights are normalized solid-angle shares of the upward
+        # hemisphere. Convert them to steradians before applying Lambert's
+        # cosine law.
+        solid_angle = 2pi * max(sector.weight, 0.0)
+        projected[i] = solid_angle * max(Float64(sector.direction[3]), 0.0)
+    end
+
+    quadrature = sum(projected)
+    quadrature > 0.0 || return projected
+
+    # Coarse turtles do not integrate cos(theta) exactly. Apply one global
+    # quadrature correction so that the discrete hemisphere still integrates
+    # to integral(cos(theta) dOmega) = pi while retaining all relative
+    # cosine/solid-angle weights.
+    projected .*= pi / quadrature
+    return projected
+end
+
+function _lambertian_sector_fractions(turtle::TurtleGrid)
+    return _lambertian_projected_solid_angles(turtle) ./ pi
+end
+
+function _merge_emitter_direction_transfer!(
+    received_fraction::Dict{Tuple{Int,Int},Float64},
+    observed_fraction::Dict{Tuple{Int,Int},Float64},
+    escaped_fraction_per_node::Dict{Int,Float64},
+    emitter_nodes::Set{Int},
+    sector_fraction::Float64,
+    edge_counts::Dict{UInt64,Int},
+    observed_edge_counts::Dict{UInt64,Int},
+    total_from::Dict{Int,Int},
+)
+    sector_fraction > 0.0 || return nothing
+
+    received_counts = Dict{Int,Int}()
     for (edge, count) in edge_counts
-        to = _unpack_emitter_to(edge)
         src = _unpack_emitter_from(edge)
         n = get(total_from, src, 0)
         n > 0 || continue
-        weights[(to, src)] = count / n
+
+        to = _unpack_emitter_to(edge)
+        key = (to, src)
+        received_fraction[key] = get(received_fraction, key, 0.0) + sector_fraction * count / n
+        received_counts[src] = get(received_counts, src, 0) + count
     end
-    return weights
+
+    for (edge, count) in observed_edge_counts
+        src = _unpack_emitter_from(edge)
+        n = get(total_from, src, 0)
+        n > 0 || continue
+
+        observer = _unpack_emitter_to(edge)
+        key = (observer, src)
+        observed_fraction[key] = get(observed_fraction, key, 0.0) + sector_fraction * count / n
+    end
+
+    for src in emitter_nodes
+        n = get(total_from, src, 0)
+        escaped_share = n == 0 ? 1.0 : max(0.0, 1.0 - get(received_counts, src, 0) / n)
+        escaped_fraction_per_node[src] =
+            get(escaped_fraction_per_node, src, 0.0) + sector_fraction * escaped_share
+    end
+    return nothing
+end
+
+function _finish_emitter_transfer(
+    received_fraction::Dict{Tuple{Int,Int},Float64},
+    observed_fraction::Dict{Tuple{Int,Int},Float64},
+    escaped_fraction_per_node::Dict{Int,Float64},
+    emitter_nodes::Set{Int},
+    sector_fraction::Vector{Float64},
+)
+    for src in emitter_nodes
+        received = sum(
+            (value for ((_, from), value) in received_fraction if from == src);
+            init=0.0,
+        )
+        escaped = get(escaped_fraction_per_node, src, 0.0)
+        residual = 1.0 - received - escaped
+        if residual > 0.0 || abs(residual) <= 64 * eps(Float64)
+            escaped_fraction_per_node[src] = escaped + residual
+        end
+    end
+    return EmitterTransferResult(
+        received_fraction,
+        observed_fraction,
+        escaped_fraction_per_node,
+        sector_fraction,
+    )
 end
 
 function _accumulate_emitter_transfer_counts!(
     edge_counts::Dict{UInt64,Int},
+    observed_edge_counts::Dict{UInt64,Int},
     total_from::Dict{Int,Int},
     projection::DirectionProjectionResult,
     emitter_nodes::Set{Int};
+    virtual_nodes::Set{Int}=Set{Int}(),
     stacks_sorted::Bool=false,
 )
     for stack in values(projection.pixel_hits)
-        length(stack) <= 1 && continue
+        isempty(stack) && continue
         stacks_sorted || _sort_hit_stack!(stack)
 
         for j in eachindex(stack)
             src = _stack_hit_node(stack, j)
             src in emitter_nodes || continue
+            _duplicate_emitter_origin(stack, j, src) && continue
+            origin_height = _stack_hit_height(stack, j)
+
+            total_from[src] = get(total_from, src, 0) + 1
 
             to = 0
+            last_observer = 0
+            last_observer_height = 0.0
             for k in (j+1):length(stack)
                 nid = _stack_hit_node(stack, k)
-                nid in emitter_nodes && continue
+                hit_height = _stack_hit_height(stack, k)
+                nid == src && _same_emitter_origin_depth(hit_height, origin_height) && continue
+                if nid in virtual_nodes
+                    if nid != last_observer || !_same_emitter_origin_depth(hit_height, last_observer_height)
+                        edge = _pack_emitter_edge(nid, src)
+                        observed_edge_counts[edge] = get(observed_edge_counts, edge, 0) + 1
+                        last_observer = nid
+                        last_observer_height = hit_height
+                    end
+                    continue
+                end
                 to = nid
                 break
             end
@@ -1559,7 +1839,6 @@ function _accumulate_emitter_transfer_counts!(
 
             edge = _pack_emitter_edge(to, src)
             edge_counts[edge] = get(edge_counts, edge, 0) + 1
-            total_from[src] = get(total_from, src, 0) + 1
         end
     end
     return nothing
@@ -1567,16 +1846,26 @@ end
 
 function _accumulate_emitter_transfer_counts!(
     edge_counts::Dict{UInt64,Int},
+    observed_edge_counts::Dict{UInt64,Int},
     total_from::Dict{Int,Int},
     projection::DenseDirectionProjectionResult,
     emitter_node_mask::Vector{Bool},
+    virtual_node_mask::Vector{Bool},
     node_ids::Vector{Int};
     stacks_sorted::Bool=false,
 )
     for stack in values(projection.pixel_hits)
-        length(stack) <= 1 && continue
+        isempty(stack) && continue
         stacks_sorted || _sort_hit_stack!(stack)
-        _accumulate_emitter_transfer_counts_dense!(edge_counts, total_from, stack, emitter_node_mask, node_ids)
+        _accumulate_emitter_transfer_counts_dense!(
+            edge_counts,
+            observed_edge_counts,
+            total_from,
+            stack,
+            emitter_node_mask,
+            virtual_node_mask,
+            node_ids,
+        )
     end
     return nothing
 end
@@ -1589,53 +1878,179 @@ function _emitter_transfer_weights(
     options::LightOptions,
     plotbox,
     emitter_nodes::Set{Int},
+    emitter_node_mask::Vector{Bool},
+    virtual_nodes::Set{Int},
+    virtual_node_mask::Vector{Bool},
+    node_ids::Vector{Int},
     cache_ctx,
 )
-    isempty(emitter_nodes) && return Dict{Tuple{Int,Int},Float64}()
+    sector_fraction = _lambertian_sector_fractions(turtle)
+    isempty(emitter_nodes) &&
+        return EmitterTransferResult(
+            Dict{Tuple{Int,Int},Float64}(),
+            Dict{Tuple{Int,Int},Float64}(),
+            Dict{Int,Float64}(),
+            sector_fraction,
+        )
 
-    edge_counts = Dict{UInt64,Int}()
-    total_from = Dict{Int,Int}()
+    received_fraction = Dict{Tuple{Int,Int},Float64}()
+    observed_fraction = Dict{Tuple{Int,Int},Float64}()
+    escaped_fraction_per_node = Dict{Int,Float64}()
 
-    for sector in turtle.sectors
-        sector.source == :sun && continue
+    for i in eachindex(turtle.sectors)
+        sector_fraction[i] > 0.0 || continue
+        sector = turtle.sectors[i]
         projection =
             _direction_projection_cached(vertices, faces, face2node, sector.direction, options, plotbox, cache_ctx, upper_hit=false)
-        _accumulate_emitter_transfer_counts!(
+        edge_counts = Dict{UInt64,Int}()
+        observed_edge_counts = Dict{UInt64,Int}()
+        total_from = Dict{Int,Int}()
+        if projection isa DenseDirectionProjectionResult
+            _accumulate_emitter_transfer_counts!(
+                edge_counts,
+                observed_edge_counts,
+                total_from,
+                projection,
+                emitter_node_mask,
+                virtual_node_mask,
+                node_ids;
+                stacks_sorted=false,
+            )
+        else
+            _accumulate_emitter_transfer_counts!(
+                edge_counts,
+                observed_edge_counts,
+                total_from,
+                projection,
+                emitter_nodes;
+                virtual_nodes=virtual_nodes,
+                stacks_sorted=false,
+            )
+        end
+        _merge_emitter_direction_transfer!(
+            received_fraction,
+            observed_fraction,
+            escaped_fraction_per_node,
+            emitter_nodes,
+            sector_fraction[i],
             edge_counts,
+            observed_edge_counts,
             total_from,
-            projection,
-            emitter_nodes;
-            stacks_sorted=false,
         )
     end
 
-    return _emitter_weights_from_packed_counts(edge_counts, total_from)
+    return _finish_emitter_transfer(
+        received_fraction,
+        observed_fraction,
+        escaped_fraction_per_node,
+        emitter_nodes,
+        sector_fraction,
+    )
 end
 
 function _emitter_transfer_weights_from_projections(
-    projections::AbstractVector{DirectionProjectionResult},
+    projections::AbstractVector,
     turtle::TurtleGrid,
     emitter_nodes::Set{Int},
-    stacks_sorted::Bool=false,
+    stacks_sorted::Bool=false;
+    emitter_node_mask::Union{Nothing,Vector{Bool}}=nothing,
+    virtual_nodes::Set{Int}=Set{Int}(),
+    virtual_node_mask::Union{Nothing,Vector{Bool}}=nothing,
+    node_ids::Union{Nothing,Vector{Int}}=nothing,
 )
-    isempty(emitter_nodes) && return Dict{Tuple{Int,Int},Float64}()
+    sector_fraction = _lambertian_sector_fractions(turtle)
+    isempty(emitter_nodes) &&
+        return EmitterTransferResult(
+            Dict{Tuple{Int,Int},Float64}(),
+            Dict{Tuple{Int,Int},Float64}(),
+            Dict{Int,Float64}(),
+            sector_fraction,
+        )
 
-    edge_counts = Dict{UInt64,Int}()
-    total_from = Dict{Int,Int}()
+    received_fraction = Dict{Tuple{Int,Int},Float64}()
+    observed_fraction = Dict{Tuple{Int,Int},Float64}()
+    escaped_fraction_per_node = Dict{Int,Float64}()
 
     for i in eachindex(turtle.sectors)
-        turtle.sectors[i].source == :sun && continue
+        sector_fraction[i] > 0.0 || continue
         projection = projections[i]
-        _accumulate_emitter_transfer_counts!(
+        edge_counts = Dict{UInt64,Int}()
+        observed_edge_counts = Dict{UInt64,Int}()
+        total_from = Dict{Int,Int}()
+        if projection isa DenseDirectionProjectionResult
+            emitter_node_mask === nothing && error("Dense emitter projections require emitter_node_mask")
+            virtual_node_mask === nothing && error("Dense emitter projections require virtual_node_mask")
+            node_ids === nothing && error("Dense emitter projections require node_ids")
+            _accumulate_emitter_transfer_counts!(
+                edge_counts,
+                observed_edge_counts,
+                total_from,
+                projection,
+                emitter_node_mask,
+                virtual_node_mask,
+                node_ids;
+                stacks_sorted=stacks_sorted,
+            )
+        else
+            _accumulate_emitter_transfer_counts!(
+                edge_counts,
+                observed_edge_counts,
+                total_from,
+                projection,
+                emitter_nodes;
+                virtual_nodes=virtual_nodes,
+                stacks_sorted=stacks_sorted,
+            )
+        end
+        _merge_emitter_direction_transfer!(
+            received_fraction,
+            observed_fraction,
+            escaped_fraction_per_node,
+            emitter_nodes,
+            sector_fraction[i],
             edge_counts,
+            observed_edge_counts,
             total_from,
-            projection,
-            emitter_nodes;
-            stacks_sorted=stacks_sorted,
         )
     end
 
-    return _emitter_weights_from_packed_counts(edge_counts, total_from)
+    return _finish_emitter_transfer(
+        received_fraction,
+        observed_fraction,
+        escaped_fraction_per_node,
+        emitter_nodes,
+        sector_fraction,
+    )
+end
+
+function _emitter_band_power_by_index(
+    prepared::PreparedInterceptionData,
+    band::Union{Nothing,AbstractString},
+)
+    band === nothing && return nothing
+    return get(prepared.emitter_power_per_band_by_index, uppercase(String(band)), nothing)
+end
+
+function _accumulate_emitter_band_power!(
+    incident_power::Vector{Float64},
+    escaped_power::Vector{Float64},
+    transfer::EmitterTransferResult,
+    source_power::Union{Nothing,Vector{Float64}},
+    geometry::InterceptionSceneData,
+)
+    source_power === nothing && return nothing
+    for fractions in (transfer.received_fraction, transfer.observed_fraction)
+        for ((to, src), fraction) in fractions
+            idx = geometry.node_index[to]
+            src_idx = geometry.node_index[src]
+            incident_power[idx] += fraction * source_power[src_idx]
+        end
+    end
+    for (src, fraction) in transfer.escaped_fraction_per_node
+        src_idx = geometry.node_index[src]
+        escaped_power[src_idx] += fraction * source_power[src_idx]
+    end
+    return nothing
 end
 
 function _emitter_transfer_weights_from_raycore(
@@ -1644,26 +2059,50 @@ function _emitter_transfer_weights_from_raycore(
     options::LightOptions,
 )
     prepared = data.prepared
-    isempty(prepared.emitter_nodes) && return Dict{Tuple{Int,Int},Float64}()
+    isempty(prepared.emitter_nodes) && return nothing
 
-    edge_counts = Dict{UInt64,Int}()
-    total_from = Dict{Int,Int}()
     geometry = prepared.geometry
+    sector_fraction = _lambertian_sector_fractions(turtle)
+    received_fraction = Dict{Tuple{Int,Int},Float64}()
+    observed_fraction = Dict{Tuple{Int,Int},Float64}()
+    escaped_fraction = Dict{Int,Float64}()
 
-    for sector in turtle.sectors
-        sector.source == :sun && continue
+    for (sector_idx, sector) in pairs(turtle.sectors)
+        fraction = sector_fraction[sector_idx]
+        fraction > 0.0 || continue
         projection = _raycore_direction_projection_full_stack(data, sector.direction, options)
+        edge_counts = Dict{UInt64,Int}()
+        observed_edge_counts = Dict{UInt64,Int}()
+        total_from = Dict{Int,Int}()
         _accumulate_emitter_transfer_counts!(
             edge_counts,
+            observed_edge_counts,
             total_from,
             projection,
             prepared.emitter_node_mask,
+            prepared.virtual_node_mask,
             geometry.node_ids;
             stacks_sorted=false,
         )
+        _merge_emitter_direction_transfer!(
+            received_fraction,
+            observed_fraction,
+            escaped_fraction,
+            prepared.emitter_nodes,
+            fraction,
+            edge_counts,
+            observed_edge_counts,
+            total_from,
+        )
     end
 
-    return _emitter_weights_from_packed_counts(edge_counts, total_from)
+    return _finish_emitter_transfer(
+        received_fraction,
+        observed_fraction,
+        escaped_fraction,
+        prepared.emitter_nodes,
+        sector_fraction,
+    )
 end
 
 function _cfg_cache_pixel_table(options::LightOptions)
@@ -2716,6 +3155,7 @@ KernelAbstractions.@kernel function _rastergpu_project_tile_bins_top_hit_kernel!
     face_j,
     face_k,
     face2node_index,
+    node_transparency,
     dirx::Float32,
     diry::Float32,
     dirz::Float32,
@@ -2834,7 +3274,10 @@ KernelAbstractions.@kernel function _rastergpu_project_tile_bins_top_hit_kernel!
                 pixels_area = projected_pixels_area[top_node]
                 ratio = pixels_area > 0.0f0 ? projected_mesh_area[top_node] / pixels_area : 1.0f0
             end
-            @atomic :monotonic sector_area[top_node] += pixel_area * ratio
+            intercepted_fraction = 1.0f0 - node_transparency[top_node]
+            if intercepted_fraction > 0.0f0
+                @atomic :monotonic sector_area[top_node] += pixel_area * intercepted_fraction * ratio
+            end
         end
     end
 end
@@ -3007,7 +3450,10 @@ KernelAbstractions.@kernel function _rastergpu_sort_and_reduce_kernel!(
                         pixels_area = projected_pixels_area[node_idx]
                         ratio = pixels_area > 0.0f0 ? projected_mesh_area[node_idx] / pixels_area : 1.0f0
                     end
-                    @atomic :monotonic sector_area[node_idx] += pixel_area * ratio
+                    intercepted_fraction = 1.0f0 - node_transparency[node_idx]
+                    if intercepted_fraction > 0.0f0
+                        @atomic :monotonic sector_area[node_idx] += pixel_area * intercepted_fraction * ratio
+                    end
                 end
             else
                 area_active = true
@@ -3761,6 +4207,13 @@ function _direction_projection_materialized(
     node_hits_map = _dense_int_node_map(node_ids, node_hits)
     projected_mesh_area_map = _dense_float_node_map(node_ids, projected_mesh_area)
     projected_pixels_area_map = _dense_float_node_map(node_ids, projected_pixels_area)
+    _apply_debug_drop_leading_hit!(
+        pixel_hits,
+        node_hits_map,
+        projected_pixels_area_map,
+        plotbox,
+        options,
+    )
     return DirectionProjectionResult(pixel_hits, node_hits_map, projected_mesh_area_map, projected_pixels_area_map)
 end
 
@@ -3811,6 +4264,14 @@ function _direction_projection_prepared(
         stack_type,
     )
     use_flat_hit_pool && (pixel_hits = _finalize_flat_pixel_hits(pixel_hits))
+    _apply_debug_drop_leading_hit!(
+        pixel_hits,
+        node_hits,
+        projected_pixels_area,
+        plotbox,
+        options,
+        node_ids,
+    )
     return DenseDirectionProjectionResult(pixel_hits, node_hits, projected_mesh_area, projected_pixels_area)
 end
 
@@ -4554,16 +5015,34 @@ function _prepare_interception_data(
     virtual_node_mask = [nid in virtual_nodes for nid in geometry.node_ids]
     upper_hit = _use_upper_hit_pixel_table(models, options)
     cache_ctx = _projection_cache_context(geometry.vertices, geometry.faces, geometry.face2node, geometry.plotbox, options)
-    emit_par, emit_nir = _emitter_power_per_node(scene, models)
-    emitter_par_power_by_index = zeros(Float64, length(geometry.node_ids))
-    emitter_nir_power_by_index = zeros(Float64, length(geometry.node_ids))
-    for (nid, power) in emit_par
-        emitter_par_power_by_index[geometry.node_index[nid]] = power
+    emitter_power_per_band_per_node = _emitter_power_per_band_per_node(scene, models)
+    emit_par = get(emitter_power_per_band_per_node, "PAR", Dict{Int,Float64}())
+    emit_nir = get(emitter_power_per_band_per_node, "NIR", Dict{Int,Float64}())
+    emitter_power_per_band_by_index = Dict{String,Vector{Float64}}()
+    for (band, power_per_node) in emitter_power_per_band_per_node
+        values = zeros(Float64, length(geometry.node_ids))
+        for (nid, power) in power_per_node
+            haskey(geometry.node_index, nid) || continue
+            values[geometry.node_index[nid]] = power
+        end
+        emitter_power_per_band_by_index[band] = values
     end
-    for (nid, power) in emit_nir
-        emitter_nir_power_by_index[geometry.node_index[nid]] = power
+    emitter_par_power_by_index = get(
+        emitter_power_per_band_by_index,
+        "PAR",
+        zeros(Float64, length(geometry.node_ids)),
+    )
+    emitter_nir_power_by_index = get(
+        emitter_power_per_band_by_index,
+        "NIR",
+        zeros(Float64, length(geometry.node_ids)),
+    )
+    emitter_nodes = Set{Int}()
+    for power_per_node in values(emitter_power_per_band_per_node)
+        for nid in keys(power_per_node)
+            haskey(geometry.node_index, nid) && push!(emitter_nodes, nid)
+        end
     end
-    emitter_nodes = Set(union(keys(emit_par), keys(emit_nir)))
     emitter_node_mask = [nid in emitter_nodes for nid in geometry.node_ids]
 
     component_area_per_node =
@@ -4587,6 +5066,8 @@ function _prepare_interception_data(
         emit_nir,
         emitter_par_power_by_index,
         emitter_nir_power_by_index,
+        emitter_power_per_band_per_node,
+        emitter_power_per_band_by_index,
         emitter_nodes,
         emitter_node_mask,
         component_area_per_node,
@@ -7328,7 +7809,9 @@ function _compute_first_order_raycore_from_projections(
     data::RaycoreSceneData,
     turtle::TurtleGrid,
     fluxes::DirectionalFluxes,
-    options::LightOptions,
+    options::LightOptions;
+    emitter_band_par::Union{Nothing,AbstractString}="PAR",
+    emitter_band_nir::Union{Nothing,AbstractString}="NIR",
 )
     prepared = data.prepared
     geometry = prepared.geometry
@@ -7336,6 +7819,8 @@ function _compute_first_order_raycore_from_projections(
     projected_area_per_node = zeros(Float64, length(geometry.node_ids))
     incident_power_par = zeros(Float64, length(geometry.node_ids))
     incident_power_nir = zeros(Float64, length(geometry.node_ids))
+    emitter_escaped_power_par = zeros(Float64, length(geometry.node_ids))
+    emitter_escaped_power_nir = zeros(Float64, length(geometry.node_ids))
     hits_per_node = zeros(Int, length(geometry.node_ids))
 
     for (k, sector) in enumerate(turtle.sectors)
@@ -7353,7 +7838,7 @@ function _compute_first_order_raycore_from_projections(
         _accumulate_projection_hits!(hits_per_node, projection, geometry)
 
         par_flux = fluxes.par[k]
-        nir_flux = fluxes.nir[k]
+        nir_flux = options.nir_interception ? fluxes.nir[k] : 0.0
         if par_flux == 0.0 && nir_flux == 0.0
             continue
         end
@@ -7368,13 +7853,24 @@ function _compute_first_order_raycore_from_projections(
     end
 
     if !isempty(prepared.emitter_nodes)
-        w = _emitter_transfer_weights_from_raycore(data, turtle, options)
-        for ((to, src), ww) in w
-            idx = geometry.node_index[to]
-            src_idx = geometry.node_index[src]
-            incident_power_par[idx] += ww * prepared.emitter_par_power_by_index[src_idx]
-            incident_power_nir[idx] += ww * prepared.emitter_nir_power_by_index[src_idx]
-        end
+        transfer = _emitter_transfer_weights_from_raycore(data, turtle, options)
+        _accumulate_emitter_band_power!(
+            incident_power_par,
+            emitter_escaped_power_par,
+            transfer,
+            _emitter_band_power_by_index(prepared, emitter_band_par),
+            geometry,
+        )
+        _accumulate_emitter_band_power!(
+            incident_power_nir,
+            emitter_escaped_power_nir,
+            transfer,
+            _emitter_band_power_by_index(
+                prepared,
+                options.nir_interception ? emitter_band_nir : nothing,
+            ),
+            geometry,
+        )
     end
 
     return _first_order_result_from_dense(
@@ -7383,6 +7879,10 @@ function _compute_first_order_raycore_from_projections(
         incident_power_par,
         incident_power_nir,
         hits_per_node,
+        emitter_escaped_power=SpectralNodeValues(
+            _emitter_source_node_map(prepared, emitter_escaped_power_par),
+            _emitter_source_node_map(prepared, emitter_escaped_power_nir),
+        ),
     )
 end
 
@@ -7390,7 +7890,9 @@ function _compute_first_order_raycore_top_hit(
     data::RaycoreSceneData,
     turtle::TurtleGrid,
     fluxes::DirectionalFluxes,
-    options::LightOptions,
+    options::LightOptions;
+    emitter_band_par::Union{Nothing,AbstractString}="PAR",
+    emitter_band_nir::Union{Nothing,AbstractString}="NIR",
 )
     prepared = data.prepared
     geometry = prepared.geometry
@@ -7398,7 +7900,14 @@ function _compute_first_order_raycore_top_hit(
     if !prepared.upper_hit ||
        !isempty(prepared.emitter_nodes) ||
        geometry.plotbox.nx * geometry.plotbox.ny < _AUTO_VECTOR_PIXEL_HITS_MIN_CELLS
-        return _compute_first_order_raycore_from_projections(data, turtle, fluxes, options)
+        return _compute_first_order_raycore_from_projections(
+            data,
+            turtle,
+            fluxes,
+            options;
+            emitter_band_par=emitter_band_par,
+            emitter_band_nir=emitter_band_nir,
+        )
     end
 
     projected_area_per_node = zeros(Float64, length(geometry.node_ids))
@@ -7425,7 +7934,7 @@ function _compute_first_order_raycore_top_hit(
             _accumulate_projection_hits!(hits_per_node, projection, geometry)
 
             par_flux = fluxes.par[k]
-            nir_flux = fluxes.nir[k]
+            nir_flux = options.nir_interception ? fluxes.nir[k] : 0.0
             if par_flux != 0.0 || nir_flux != 0.0
                 @inbounds for idx in eachindex(visible_area)
                     pa = visible_area[idx]
@@ -7439,7 +7948,7 @@ function _compute_first_order_raycore_top_hit(
         end
 
         par_flux = fluxes.par[k]
-        nir_flux = fluxes.nir[k]
+        nir_flux = options.nir_interception ? fluxes.nir[k] : 0.0
         if !options.area_ratio
             if Float32(sector.direction[3]) > 0.0f0
                 nodes = _raycore_trace_direction_top_nodes_direct(data, sector.direction, options)
@@ -7449,9 +7958,13 @@ function _compute_first_order_raycore_top_hit(
                     1 <= node_idx <= length(geometry.node_ids) ||
                         error("Raycore hit returned invalid Archimed node index metadata: $node_idx")
                     hits_per_node[node_idx] += 1
-                    projected_area_per_node[node_idx] += pixel_area
-                    par_flux != 0.0 && (incident_power_par[node_idx] += par_flux * pixel_area)
-                    nir_flux != 0.0 && (incident_power_nir[node_idx] += nir_flux * pixel_area)
+                    (par_flux != 0.0 || nir_flux != 0.0) || continue
+                    intercepted_fraction = 1.0 - prepared.node_transparency_by_index[node_idx]
+                    intercepted_fraction > 0.0 || continue
+                    intercepted_area = pixel_area * intercepted_fraction
+                    projected_area_per_node[node_idx] += intercepted_area
+                    par_flux != 0.0 && (incident_power_par[node_idx] += par_flux * intercepted_area)
+                    nir_flux != 0.0 && (incident_power_nir[node_idx] += nir_flux * intercepted_area)
                 end
             end
             continue
@@ -7485,24 +7998,16 @@ function _compute_first_order_raycore_top_hit(
             count == 0 && continue
             hits_per_node[idx] += count
             ratio = sector_area_ratio[idx]
+            intercepted_fraction = 1.0 - prepared.node_transparency_by_index[idx]
+            intercepted_fraction > 0.0 || continue
             pa = 0.0
             for _ in 1:count
-                pa += pixel_area * ratio
+                pa += pixel_area * intercepted_fraction * ratio
             end
             pa <= 0.0 && continue
             projected_area_per_node[idx] += pa
             incident_power_par[idx] += par_flux * pa
             incident_power_nir[idx] += nir_flux * pa
-        end
-    end
-
-    if !isempty(prepared.emitter_nodes)
-        w = _emitter_transfer_weights_from_raycore(data, turtle, options)
-        for ((to, src), ww) in w
-            idx = geometry.node_index[to]
-            src_idx = geometry.node_index[src]
-            incident_power_par[idx] += ww * prepared.emitter_par_power_by_index[src_idx]
-            incident_power_nir[idx] += ww * prepared.emitter_nir_power_by_index[src_idx]
         end
     end
 
@@ -7895,6 +8400,7 @@ function _rastergpu_scene_data(
         _rastergpu_device_buffer_bytes_i128(Float32, 1)
     fused_dense_candidate =
         !stackless_top_hit &&
+        isempty(prepared.emitter_nodes) &&
         dense_pairs <= Int128(typemax(Int)) &&
         tile_size == 1 &&
         _rastergpu_fused_dense_supported(config)
@@ -7985,7 +8491,11 @@ function _rastergpu_scene_data(
             context=base_context,
         ) :
         0
-    fused_dense_enabled = dense_enabled && tile_size == 1 && _rastergpu_fused_dense_supported(config)
+    fused_dense_enabled =
+        dense_enabled &&
+        isempty(prepared.emitter_nodes) &&
+        tile_size == 1 &&
+        _rastergpu_fused_dense_supported(config)
     stackless_projection = stackless_top_hit || fused_dense_enabled
     stack_len = stackless_projection ? 0 : _rastergpu_checked_product(
         "RasterGPU nodes_dev/heights_dev",
@@ -8386,6 +8896,7 @@ function _rastergpu_project_direction!(
                 data.face_j_dev,
                 data.face_k_dev,
                 data.face2node_index_dev,
+                data.node_transparency_dev,
                 Float32(direction[1]),
                 Float32(direction[2]),
                 Float32(direction[3]),
@@ -8481,6 +8992,94 @@ function _rastergpu_copy_direction_response_host!(data::RasterGPUSceneData)
     )
 end
 
+function _rastergpu_copy_direction_stacks_host!(data::RasterGPUSceneData)
+    geometry = data.prepared.geometry
+    n_pixels = geometry.plotbox.nx * geometry.plotbox.ny
+    stack_len = n_pixels * data.max_hits_per_pixel
+    length(data.nodes_dev) == stack_len || error(
+        "RasterGPU emitter transfer requires full per-pixel hit stacks.",
+    )
+    length(data.nodes_host) == stack_len || resize!(data.nodes_host, stack_len)
+    length(data.heights_host) == stack_len || resize!(data.heights_host, stack_len)
+    length(data.counts_host) == n_pixels || resize!(data.counts_host, n_pixels)
+    copyto!(data.counts_host, data.counts_dev)
+    copyto!(data.nodes_host, data.nodes_dev)
+    copyto!(data.heights_host, data.heights_dev)
+    return (
+        counts=data.counts_host,
+        nodes=data.nodes_host,
+        heights=data.heights_host,
+        max_hits=data.max_hits_per_pixel,
+    )
+end
+
+function _accumulate_emitter_transfer_counts_rastergpu!(
+    edge_counts::Dict{UInt64,Int},
+    observed_edge_counts::Dict{UInt64,Int},
+    total_from::Dict{Int,Int},
+    stacks,
+    emitter_node_mask::Vector{Bool},
+    virtual_node_mask::Vector{Bool},
+    node_ids::Vector{Int},
+)
+    counts = stacks.counts
+    nodes = stacks.nodes
+    heights = stacks.heights
+    max_hits = stacks.max_hits
+    @inbounds for pixel_idx in eachindex(counts)
+        n_hits = Int(counts[pixel_idx])
+        n_hits == 0 && continue
+        offset = (pixel_idx - 1) * max_hits
+        for j in 1:n_hits
+            src_idx = Int(nodes[offset+j])
+            emitter_node_mask[src_idx] || continue
+            origin_height = Float64(heights[offset+j])
+
+            duplicate_origin = false
+            for k in (j-1):-1:1
+                hit_height = Float64(heights[offset+k])
+                _same_emitter_origin_depth(hit_height, origin_height) || break
+                if Int(nodes[offset+k]) == src_idx
+                    duplicate_origin = true
+                    break
+                end
+            end
+            duplicate_origin && continue
+
+            src = node_ids[src_idx]
+            total_from[src] = get(total_from, src, 0) + 1
+            to_idx = 0
+            last_observer_idx = 0
+            last_observer_height = 0.0
+            for k in (j+1):n_hits
+                node_idx = Int(nodes[offset+k])
+                hit_height = Float64(heights[offset+k])
+                node_idx == src_idx &&
+                    _same_emitter_origin_depth(hit_height, origin_height) &&
+                    continue
+                if virtual_node_mask[node_idx]
+                    if node_idx != last_observer_idx ||
+                       !_same_emitter_origin_depth(hit_height, last_observer_height)
+                        edge = _pack_emitter_edge(node_ids[node_idx], src)
+                        observed_edge_counts[edge] =
+                            get(observed_edge_counts, edge, 0) + 1
+                        last_observer_idx = node_idx
+                        last_observer_height = hit_height
+                    end
+                    continue
+                end
+                to_idx = node_idx
+                break
+            end
+            to_idx == 0 && continue
+
+            edge = _pack_emitter_edge(node_ids[to_idx], src)
+            edge_counts[edge] = get(edge_counts, edge, 0) + 1
+        end
+    end
+    return nothing
+end
+
 function _rastergpu_direction_response!(data::RasterGPUSceneData, direction, options::LightOptions)
     _rastergpu_project_direction!(data, direction, options)
     return _rastergpu_copy_direction_response_host!(data)
@@ -8490,25 +9089,58 @@ function _compute_first_order_rastergpu(
     data::RasterGPUSceneData,
     turtle::TurtleGrid,
     fluxes::DirectionalFluxes,
-    options::LightOptions,
+    options::LightOptions;
+    emitter_band_par::Union{Nothing,AbstractString}="PAR",
+    emitter_band_nir::Union{Nothing,AbstractString}="NIR",
 )
     prepared = data.prepared
     geometry = prepared.geometry
-    isempty(prepared.emitter_nodes) || error(
-        "RasterGPUBackend does not yet support emitter transfer; refusing CPU fallback.",
-    )
+    has_emitters = !isempty(prepared.emitter_nodes)
 
     projected_area_per_node = zeros(Float64, length(geometry.node_ids))
     incident_power_par = zeros(Float64, length(geometry.node_ids))
     incident_power_nir = zeros(Float64, length(geometry.node_ids))
+    emitter_escaped_power_par = zeros(Float64, length(geometry.node_ids))
+    emitter_escaped_power_nir = zeros(Float64, length(geometry.node_ids))
     hits_per_node = zeros(Int, length(geometry.node_ids))
+    sector_fraction = has_emitters ? _lambertian_sector_fractions(turtle) : Float64[]
+    received_fraction = Dict{Tuple{Int,Int},Float64}()
+    observed_fraction = Dict{Tuple{Int,Int},Float64}()
+    escaped_fraction_per_node = Dict{Int,Float64}()
 
     for (k, sector) in enumerate(turtle.sectors)
         response = _rastergpu_direction_response!(data, sector.direction, options)
+        if has_emitters && sector_fraction[k] > 0.0
+            stacks = _rastergpu_copy_direction_stacks_host!(data)
+            edge_counts = Dict{UInt64,Int}()
+            observed_edge_counts = Dict{UInt64,Int}()
+            total_from = Dict{Int,Int}()
+            _accumulate_emitter_transfer_counts_rastergpu!(
+                edge_counts,
+                observed_edge_counts,
+                total_from,
+                stacks,
+                prepared.emitter_node_mask,
+                prepared.virtual_node_mask,
+                geometry.node_ids,
+            )
+            _merge_emitter_direction_transfer!(
+                received_fraction,
+                observed_fraction,
+                escaped_fraction_per_node,
+                prepared.emitter_nodes,
+                sector_fraction[k],
+                edge_counts,
+                observed_edge_counts,
+                total_from,
+            )
+        end
         par_flux = fluxes.par[k]
-        nir_flux = fluxes.nir[k]
+        nir_flux = options.nir_interception ? fluxes.nir[k] : 0.0
+        has_flux = par_flux != 0.0 || nir_flux != 0.0
         @inbounds for idx in eachindex(geometry.node_ids)
             hits_per_node[idx] += Int(response.node_counts[idx])
+            has_flux || continue
             pa = Float64(response.sector_area[idx])
             pa <= 0.0 && continue
             projected_area_per_node[idx] += pa
@@ -8517,12 +9149,43 @@ function _compute_first_order_rastergpu(
         end
     end
 
+    if has_emitters
+        transfer = _finish_emitter_transfer(
+            received_fraction,
+            observed_fraction,
+            escaped_fraction_per_node,
+            prepared.emitter_nodes,
+            sector_fraction,
+        )
+        _accumulate_emitter_band_power!(
+            incident_power_par,
+            emitter_escaped_power_par,
+            transfer,
+            _emitter_band_power_by_index(prepared, emitter_band_par),
+            geometry,
+        )
+        _accumulate_emitter_band_power!(
+            incident_power_nir,
+            emitter_escaped_power_nir,
+            transfer,
+            _emitter_band_power_by_index(
+                prepared,
+                options.nir_interception ? emitter_band_nir : nothing,
+            ),
+            geometry,
+        )
+    end
+
     return _first_order_result_from_dense(
         geometry.node_ids,
         projected_area_per_node,
         incident_power_par,
         incident_power_nir,
         hits_per_node,
+        emitter_escaped_power=SpectralNodeValues(
+            _emitter_source_node_map(prepared, emitter_escaped_power_par),
+            _emitter_source_node_map(prepared, emitter_escaped_power_nir),
+        ),
     )
 end
 
@@ -8530,27 +9193,40 @@ function compute_first_order(
     data::RasterGPUSceneData,
     turtle::TurtleGrid,
     fluxes::DirectionalFluxes,
-    options::LightOptions,
+    options::LightOptions;
+    emitter_band_par::Union{Nothing,AbstractString}="PAR",
+    emitter_band_nir::Union{Nothing,AbstractString}="NIR",
 )
-    return _compute_first_order_rastergpu(data, turtle, fluxes, options)
+    return _compute_first_order_rastergpu(
+        data,
+        turtle,
+        fluxes,
+        options;
+        emitter_band_par=emitter_band_par,
+        emitter_band_nir=emitter_band_nir,
+    )
 end
 
-function _interception_output_keys(scene::PlantGeom.SceneGeometry, models::LightModels, options::LightOptions)
-    geometry = _scene_geometry_for_interception(scene, models, options)
+function _interception_output_keys_for_node_ids(scene::PlantGeom.SceneGeometry, node_ids)
     keys_by_node = Dict{Int,Tuple{Int,Int}}()
 
-    pavement_ids = sort(Int[nid for nid in geometry.node_ids if get(geometry.node_group, nid, "") == "pavement"])
+    pavement_ids = sort(Int[nid for nid in node_ids if _scene_group(scene, nid, "") == "pavement"])
     for (i, nid) in enumerate(pavement_ids)
         keys_by_node[nid] = (-1, i + 1)
     end
 
-    for nid in geometry.node_ids
+    for nid in node_ids
         haskey(keys_by_node, nid) && continue
         object_id = _scene_object_id(scene, nid, 1)
         source_topology_id = _scene_source_topology_id(scene, nid, nid + 1)
         keys_by_node[nid] = (object_id, source_topology_id)
     end
     keys_by_node
+end
+
+function _interception_output_keys(scene::PlantGeom.SceneGeometry, models::LightModels, options::LightOptions)
+    geometry = _scene_geometry_for_interception(scene, models, options)
+    _interception_output_keys_for_node_ids(scene, geometry.node_ids)
 end
 
 """
@@ -8566,9 +9242,18 @@ function compute_first_order(
     data::RaycoreSceneData,
     turtle::TurtleGrid,
     fluxes::DirectionalFluxes,
-    options::LightOptions,
+    options::LightOptions;
+    emitter_band_par::Union{Nothing,AbstractString}="PAR",
+    emitter_band_nir::Union{Nothing,AbstractString}="NIR",
 )
-    return _compute_first_order_raycore_top_hit(data, turtle, fluxes, options)
+    return _compute_first_order_raycore_top_hit(
+        data,
+        turtle,
+        fluxes,
+        options;
+        emitter_band_par=emitter_band_par,
+        emitter_band_nir=emitter_band_nir,
+    )
 end
 
 function compute_first_order(
@@ -8578,8 +9263,25 @@ function compute_first_order(
     fluxes::DirectionalFluxes,
     options::LightOptions;
     backend=:raster_cpu,
+    emitter_band_par::Union{Nothing,AbstractString}="PAR",
+    emitter_band_nir::Union{Nothing,AbstractString}="NIR",
 )
-    return compute_first_order(scene, models, turtle, fluxes, options, _resolve_interception_backend(backend))
+    resolved = _resolve_interception_backend(backend)
+    if emitter_band_par == "PAR" && emitter_band_nir == "NIR"
+        # Preserve the positional extension contract for external interception
+        # backends which predate band-remapping support.
+        return compute_first_order(scene, models, turtle, fluxes, options, resolved)
+    end
+    return compute_first_order(
+        scene,
+        models,
+        turtle,
+        fluxes,
+        options,
+        resolved;
+        emitter_band_par=emitter_band_par,
+        emitter_band_nir=emitter_band_nir,
+    )
 end
 
 function _resolve_interception_backend(backend::InterceptionBackend)
@@ -8607,9 +9309,19 @@ function compute_first_order(
     fluxes::DirectionalFluxes,
     options::LightOptions,
     ::RasterCPUBackend,
+    ;
+    emitter_band_par::Union{Nothing,AbstractString}="PAR",
+    emitter_band_nir::Union{Nothing,AbstractString}="NIR",
 )
-    prepared = _prepare_interception_data(scene, models, options; include_raycore_instancing=true)
-    return _compute_first_order(prepared, turtle, fluxes, options)
+    prepared = _prepare_interception_data(scene, models, options)
+    return _compute_first_order(
+        prepared,
+        turtle,
+        fluxes,
+        options;
+        emitter_band_par=emitter_band_par,
+        emitter_band_nir=emitter_band_nir,
+    )
 end
 
 function compute_first_order(
@@ -8619,10 +9331,20 @@ function compute_first_order(
     fluxes::DirectionalFluxes,
     options::LightOptions,
     backend::RasterGPUBackend,
+    ;
+    emitter_band_par::Union{Nothing,AbstractString}="PAR",
+    emitter_band_nir::Union{Nothing,AbstractString}="NIR",
 )
     prepared = _prepare_interception_data(scene, models, options; include_raycore_instancing=false)
     data = _rastergpu_scene_data(prepared, backend.config)
-    return _compute_first_order_rastergpu(data, turtle, fluxes, options)
+    return _compute_first_order_rastergpu(
+        data,
+        turtle,
+        fluxes,
+        options;
+        emitter_band_par=emitter_band_par,
+        emitter_band_nir=emitter_band_nir,
+    )
 end
 
 function _compute_first_order(
@@ -8630,12 +9352,17 @@ function _compute_first_order(
     turtle::TurtleGrid,
     fluxes::DirectionalFluxes,
     options::LightOptions,
+    ;
+    emitter_band_par::Union{Nothing,AbstractString}="PAR",
+    emitter_band_nir::Union{Nothing,AbstractString}="NIR",
 )
     geometry = prepared.geometry
 
     projected_area_per_node = zeros(Float64, length(geometry.node_ids))
     incident_power_par = zeros(Float64, length(geometry.node_ids))
     incident_power_nir = zeros(Float64, length(geometry.node_ids))
+    emitter_escaped_power_par = zeros(Float64, length(geometry.node_ids))
+    emitter_escaped_power_nir = zeros(Float64, length(geometry.node_ids))
     hits_per_node = zeros(Int, length(geometry.node_ids))
 
     for (k, sector) in enumerate(turtle.sectors)
@@ -8652,7 +9379,7 @@ function _compute_first_order(
         _accumulate_projection_hits!(hits_per_node, projection, geometry)
 
         par_flux = fluxes.par[k]
-        nir_flux = fluxes.nir[k]
+        nir_flux = options.nir_interception ? fluxes.nir[k] : 0.0
         if par_flux == 0.0 && nir_flux == 0.0
             continue
         end
@@ -8667,7 +9394,7 @@ function _compute_first_order(
     end
 
     if !isempty(prepared.emitter_nodes)
-        w = _emitter_transfer_weights(
+        transfer = _emitter_transfer_weights(
             geometry.vertices,
             geometry.faces,
             geometry.face2node,
@@ -8675,14 +9402,29 @@ function _compute_first_order(
             options,
             geometry.plotbox,
             prepared.emitter_nodes,
+            prepared.emitter_node_mask,
+            prepared.virtual_nodes,
+            prepared.virtual_node_mask,
+            geometry.node_ids,
             prepared.cache_ctx,
         )
-        for ((to, src), ww) in w
-            idx = geometry.node_index[to]
-            src_idx = geometry.node_index[src]
-            incident_power_par[idx] += ww * prepared.emitter_par_power_by_index[src_idx]
-            incident_power_nir[idx] += ww * prepared.emitter_nir_power_by_index[src_idx]
-        end
+        _accumulate_emitter_band_power!(
+            incident_power_par,
+            emitter_escaped_power_par,
+            transfer,
+            _emitter_band_power_by_index(prepared, emitter_band_par),
+            geometry,
+        )
+        _accumulate_emitter_band_power!(
+            incident_power_nir,
+            emitter_escaped_power_nir,
+            transfer,
+            _emitter_band_power_by_index(
+                prepared,
+                options.nir_interception ? emitter_band_nir : nothing,
+            ),
+            geometry,
+        )
     end
 
     return _first_order_result_from_dense(
@@ -8691,6 +9433,10 @@ function _compute_first_order(
         incident_power_par,
         incident_power_nir,
         hits_per_node,
+        emitter_escaped_power=SpectralNodeValues(
+            _emitter_source_node_map(prepared, emitter_escaped_power_par),
+            _emitter_source_node_map(prepared, emitter_escaped_power_nir),
+        ),
     )
 end
 
@@ -8701,6 +9447,9 @@ function compute_first_order(
     fluxes::DirectionalFluxes,
     options::LightOptions,
     backend::RaycoreInterceptionBackend,
+    ;
+    emitter_band_par::Union{Nothing,AbstractString}="PAR",
+    emitter_band_nir::Union{Nothing,AbstractString}="NIR",
 )
     prepared = _prepare_interception_data(scene, models, options; include_raycore_instancing=true)
     prechunk_status =
@@ -8725,12 +9474,26 @@ function compute_first_order(
             skip_face_chunk_limit=data_was_chunked ? _raycore_face_chunk_limit() : nothing,
         )
         if chunked_data !== nothing
-            return _compute_first_order_raycore_top_hit(chunked_data, turtle, fluxes, options)
+            return _compute_first_order_raycore_top_hit(
+                chunked_data,
+                turtle,
+                fluxes,
+                options;
+                emitter_band_par=emitter_band_par,
+                emitter_band_nir=emitter_band_nir,
+            )
         end
         validation = chunked_validation
         _raycore_throw_validation_error(backend.config, :raycore_trace_validation, :first_order, validation)
     end
-    return _compute_first_order_raycore_top_hit(data, turtle, fluxes, options)
+    return _compute_first_order_raycore_top_hit(
+        data,
+        turtle,
+        fluxes,
+        options;
+        emitter_band_par=emitter_band_par,
+        emitter_band_nir=emitter_band_nir,
+    )
 end
 
 function compute_first_order(
@@ -8740,6 +9503,9 @@ function compute_first_order(
     fluxes::DirectionalFluxes,
     options::LightOptions,
     backend::InterceptionBackend,
+    ;
+    emitter_band_par::Union{Nothing,AbstractString}="PAR",
+    emitter_band_nir::Union{Nothing,AbstractString}="NIR",
 )
     error("Unsupported interception backend type: $(typeof(backend))")
 end

@@ -1086,6 +1086,7 @@ function _print_header(scene_root, cases)
     println("samples: ", BENCH_SAMPLES)
     println("dry run: ", BENCH_DRY_RUN)
     println("max pixel cells: ", BENCH_MAX_PIXEL_CELLS == 0 ? "disabled" : string(BENCH_MAX_PIXEL_CELLS))
+    println("skip huge cases: ", BENCH_SKIP_HUGE_CASES)
     println("output: ", BENCH_OUTPUT)
     println()
     @printf("%-20s %-16s %-10s %-7s %-8s %-5s %-5s %5s %12s %-24s %10s %10s %10s\n",

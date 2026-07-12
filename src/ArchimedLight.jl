@@ -19,6 +19,7 @@ import CSV
 
 include("types.jl")
 include("io.jl")
+include("meteo.jl")
 include("sky.jl")
 include("turtle.jl")
 include("interception.jl")
@@ -27,9 +28,10 @@ include("pipeline.jl")
 include("attach.jl")
 include("outputs.jl")
 include("visualization.jl")
+include("query.jl")
 
-export MeteoTable
 export LightRenderGeometry
+export LightNodeMetadata
 export LightModels
 export GroupModel
 export TypeModel
@@ -37,14 +39,10 @@ export InterceptionModel
 export EmitterModel
 export OpticalProperties
 export LightOptions
-export InterceptionBackend, RasterCPUBackend, RasterGPUBackendConfig, RasterGPUBackend, RaycoreBackendConfig, RaycoreInterceptionBackend, RaycoreValidationError
-export ScatteringBackend, RaycastScatteringBackend, LinksScatteringBackend, RasterGPUScatteringBackend, RaycoreScatteringBackend
+export RasterCPUBackend, RasterGPUBackendConfig, RasterGPUBackend
+export RaycoreBackendConfig, RaycoreInterceptionBackend, RaycoreValidationError
+export RaycastScatteringBackend, RasterGPUScatteringBackend, RaycoreScatteringBackend
 export SkyState
-export TurtleSector, TurtleGrid
-export DirectionalFluxes
-export FirstOrderResult
-export ScatteringResult
-export ScatteringTransferGraph
 export LightBudget
 export LightStepResult
 export ValidationReport
@@ -81,6 +79,7 @@ export attach_light_series!
 export write_component_values
 export light_render_geometry
 export tile_light_geometry
+export light_node_ids
 export light_metric_values
 export light_face_values
 export light_vertex_values

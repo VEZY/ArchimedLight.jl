@@ -8,6 +8,9 @@ using Documenter
 
 DocMeta.setdocmeta!(ArchimedLight, :DocTestSetup, :(using ArchimedLight); recursive=true)
 
+# Update the videos:
+# include(joinpath(@__DIR__, "make_video", "make_video.jl"))
+
 makedocs(;
     modules=[ArchimedLight],
     authors="Rémi Vezy <VEZY@users.noreply.github.com> and contributors",
@@ -15,7 +18,7 @@ makedocs(;
     sitename="ArchimedLight.jl",
     format=Documenter.HTML(
         prettyurls=get(ENV, "CI", "false") == "true",
-        canonical="https://archimed-platform.github.io/ArchimedLight.jl",
+        canonical="https://VEZY.github.io/ArchimedLight.jl",
         edit_link="main",
         assets=String[],
         size_threshold=700000,
@@ -36,20 +39,24 @@ makedocs(;
             "Meteo Inputs" => "reference_meteo.md",
         ],
         "Outputs" => "outputs.md",
+        "Performance Benchmarks" => "performance_benchmarks.md",
         "Under The Hood" => [
             "Pipeline Overview" => "theory_pipeline.md",
             "First-Order Interception" => "theory_interception.md",
             "Scattering And Assumptions" => "theory_scattering.md",
         ],
         "Advanced Usage" => [
-            "Full Example" => "full_example.md",
+            "File-Based Example" => "full_example.md",
             "Composable Stages" => "stages.md",
             "GPU Backends And Benchmarks" => "gpu_backends.md",
             "Historical ARCHIMED Reference" => "archimed_reference.md",
         ],
-        "API Reference" => "api.md",
+        "API Reference" => [
+            "Public API" => "api.md",
+            "Advanced API" => "advanced_api.md",
+        ],
     ],
 )
 
 deploydocs(; repo="github.com/VEZY/ArchimedLight.jl.git", devbranch="main", push_preview=true)
-# Visit https://archimed-platform.github.io/ArchimedLight.jl/previews/PR26 to visualize the preview of the PR #26
+# Visit https://VEZY.github.io/ArchimedLight.jl/previews/PR26 to visualize the preview of the PR #26
