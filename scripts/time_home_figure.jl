@@ -1,19 +1,23 @@
 #!/usr/bin/env julia
 
-using BenchmarkTools
 const REPO_ROOT = dirname(@__DIR__)
 import Pkg
-Pkg.activate(joinpath(REPO_ROOT, "test"))
+const BACKEND = Symbol(get(ENV, "ARCHIMEDLIGHT_HOME_BENCH_BACKEND", "normal_cpu"))
+const GPU_BACKENDS = (:rasterizer_gpu, :raycore_gpu_toric_periodic, :raycore_gpu_toric_tlas)
 
+Pkg.activate(joinpath(REPO_ROOT, "benchmark"))
+using BenchmarkTools
 using ArchimedLight
-using KernelAbstractions
-using Metal
-metal_backend = KernelAbstractions.get_backend(MtlArray(zeros(Float32, 1)))
 
-backend = :normal_cpu
-# backend = :rasterizer_gpu
-# backend=:raycore_gpu_toric_periodic
-# backend = :raycore_gpu_toric_tlas
+metal_backend = if BACKEND in GPU_BACKENDS
+    ka = Base.require(Main, :KernelAbstractions)
+    metal = Base.require(Main, :Metal)
+    ka.get_backend(metal.MtlArray(zeros(Float32, 1)))
+else
+    nothing
+end
+
+backend = BACKEND
 if backend == :normal_cpu
     interception = ArchimedLight.RasterCPUBackend()
     scattering = ArchimedLight.RaycastScatteringBackend()
@@ -26,6 +30,12 @@ elseif backend == :raycore_gpu_toric_tlas
 elseif backend == :raycore_gpu_toric_periodic
     interception = RaycoreInterceptionBackend(backend=metal_backend, toric_traversal=:periodic)
     scattering = ArchimedLight.RaycoreScatteringBackend(interception)
+else
+    error(
+        "Unsupported ARCHIMEDLIGHT_HOME_BENCH_BACKEND=$(repr(backend)). " *
+        "Use one of: normal_cpu, rasterizer_gpu, raycore_gpu_toric_periodic, " *
+        "raycore_gpu_toric_tlas.",
+    )
 end
 
 config_path = joinpath(REPO_ROOT, "example_2", "config.yml")

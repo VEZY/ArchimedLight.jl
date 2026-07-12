@@ -286,7 +286,10 @@ SUITE["Raycore"]["series cached cpu"] =
     @benchmarkable ArchimedLight.run_light_series(scene, models, meteo, options; interception_backend=backend) setup = (
         scene = SYNTHETIC.scene;
         models = SYNTHETIC.models;
-        meteo = ArchimedLight.MeteoTable([SYNTHETIC.meteo, SYNTHETIC.meteo], (; source="benchmark_raycore_synthetic"));
+        meteo = ArchimedLight.PlantMeteo.TimeStepTable(
+            [SYNTHETIC.meteo, SYNTHETIC.meteo],
+            (; source="benchmark_raycore_synthetic"),
+        );
         options = ArchimedLight.LightOptions(turtle_sectors=46, all_in_turtle=false, scattering=false, pixel_size=0.01, cache_radiation=true);
         backend = ArchimedLight.RaycoreInterceptionBackend()
     ) evals = 1

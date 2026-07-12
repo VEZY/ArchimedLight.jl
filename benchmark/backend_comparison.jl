@@ -397,7 +397,7 @@ function _benchmark_fixture(; sectors::Int=BENCH_SECTORS, pixel_size::Float64=BE
                 pixel_size=BENCH_HAS_PIXEL_SIZE_OVERRIDE ? pixel_size : options.pixel_size,
             )
         end
-        meteo_row = first(ArchimedLight.prepare_meteo(meteo, options).rows)
+        meteo_row = first(ArchimedLight.prepare_meteo(meteo, options))
         return (
             name="coffee_home_figure",
             scene=scene,

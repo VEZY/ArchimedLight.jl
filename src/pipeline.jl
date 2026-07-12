@@ -3980,6 +3980,30 @@ function _evict_cache_entries!(cache::LightSimulationCache, required_bytes::Int;
     return nothing
 end
 
+function _drop_raycore_direction_caches!(
+    data::RaycoreSceneData,
+    directions,
+    options::LightOptions,
+)
+    for direction in directions
+        key = _raycore_direction_key(direction)
+        delete!(data.projection_far_cache, (key..., options.toricity))
+        delete!(data.projected_mesh_area_cache, key)
+        delete!(data.raster_compat_projection_cache, (key..., data.prepared.upper_hit))
+        delete!(data.area_ratio_cache, (:top_hit, key...))
+        delete!(data.area_ratio_cache, (:full_stack, key...))
+    end
+    return nothing
+end
+
+function _clear_raycore_direction_caches!(data::RaycoreSceneData)
+    empty!(data.projection_far_cache)
+    empty!(data.projected_mesh_area_cache)
+    empty!(data.raster_compat_projection_cache)
+    empty!(data.area_ratio_cache)
+    return nothing
+end
+
 function _build_turtle_cache_entry!(
     cache::LightSimulationCache,
     key::UInt64,
@@ -3993,7 +4017,16 @@ function _build_turtle_cache_entry!(
             data = cache.raycore_data === nothing ?
                    _raycore_scene_data(prepared, ib.config; toricity=cache.options.toricity) :
                    cache.raycore_data
-            _build_sector_responses(data, cache.scene, cache.models, turtle, cache.options)
+            responses =
+                _build_sector_responses(data, cache.scene, cache.models, turtle, cache.options)
+            if cache.mode == :partial
+                _drop_raycore_direction_caches!(
+                    data,
+                    (sector.direction for sector in turtle.sectors if sector.source == :sun),
+                    cache.options,
+                )
+            end
+            responses
         else
             _build_sector_responses(prepared, cache.scene, cache.models, turtle, cache.options)
         end
@@ -4024,6 +4057,7 @@ function _build_turtle_cache_entry!(
         # storage. Finish this step with the transient response, then use the
         # uncached topology path later.
         cache.mode = :topology_fallback
+        ib isa RaycoreInterceptionBackend && _clear_raycore_direction_caches!(data)
         return _touch_cache_entry!(cache, entry)
     end
     cache.entries[key] = entry
@@ -4628,6 +4662,7 @@ function _run_light_step_cached(
             prepared=prepared,
             responses_cache=responses_cache,
         ) : nothing
+    raycore_data === nothing || _clear_raycore_direction_caches!(raycore_data)
     return LightStepResult(
         sky,
         turtle,
@@ -4662,6 +4697,7 @@ function _run_light_sky_cached(
     responses_cache = nothing
     scattering_topology = nothing
     rastergpu_data = nothing
+    raycore_data = nothing
     first = nothing
     scat = nothing
     extra_irr = Dict{String,Float64}()
@@ -4723,7 +4759,7 @@ function _run_light_sky_cached(
             responses_cache=responses_cache,
             scattering_topology=scattering_topology,
             rastergpu_data=rastergpu_data,
-            raycore_data=cache.raycore_data,
+            raycore_data=raycore_data,
         )
     end
     extra_0_q, extra_q, extra_irr, extra_emitter_escaped_power =
@@ -4742,6 +4778,7 @@ function _run_light_sky_cached(
             responses_cache=responses_cache,
             prepared=prepared,
         )
+    raycore_data === nothing || _clear_raycore_direction_caches!(raycore_data)
     nir_interception || (first = _disable_nir_first_order_local(first))
     budget = integrate_light(
         scene,

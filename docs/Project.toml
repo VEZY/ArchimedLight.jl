@@ -15,3 +15,4 @@ PlantMeteo = "4630fe09-e0fb-4da5-a846-781cb73437b6"
 
 [sources]
 ArchimedLight = {path = ".."}
+Raycore = {url = "https://github.com/VEZY/Raycore.jl.git", rev = "4dd18ddfb60305e839f518ac408b5ed35761b91f"}

@@ -26,6 +26,7 @@ using KernelAbstractions
 using MultiScaleTreeGraph
 using PlantGeom
 using Printf
+using Raycore
 using Statistics
 
 const BENCH_BUILD_SAMPLES = parse(Int, get(ENV, "ARCHIMEDLIGHT_LOCAL_BENCH_BUILD_SAMPLES", "2"))
@@ -203,7 +204,7 @@ function _coffee_workload()
         input=meteo,
         options=options,
         runner=(sim, input) -> ArchimedLight.run_light(sim, input),
-        steps=length(ArchimedLight.prepare_meteo(meteo, options).rows),
+        steps=length(ArchimedLight.prepare_meteo(meteo, options)),
     )
 end
 
@@ -674,7 +675,7 @@ function _workload_turtles(workload)
     if input isa AbstractVector{<:ArchimedLight.SkyState}
         return [ArchimedLight.build_turtle(workload.options, sky) for sky in input]
     end
-    rows = ArchimedLight.prepare_meteo(input, workload.options).rows
+    rows = collect(ArchimedLight.prepare_meteo(input, workload.options))
     return [
         ArchimedLight.build_turtle(workload.options, ArchimedLight.compute_sky(row, workload.options))
         for row in rows

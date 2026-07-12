@@ -66,7 +66,7 @@ end
 function _workload_from_config(name, config; kwargs...)
     options, scene, meteo, models = ArchimedLight.read_config(config; kwargs...)
     options = _options_for(options)
-    row = first(ArchimedLight.prepare_meteo(meteo, options).rows)
+    row = first(ArchimedLight.prepare_meteo(meteo, options))
     sky = ArchimedLight.compute_sky(row, options)
     turtle = ArchimedLight.build_turtle(options, sky)
     fluxes = ArchimedLight.compute_directional_fluxes(row, sky, turtle, options)

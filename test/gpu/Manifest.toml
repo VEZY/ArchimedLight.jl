@@ -2,7 +2,7 @@
 
 julia_version = "1.12.1"
 manifest_format = "2.0"
-project_hash = "85be502fb823658b6d40a990c1ba90328fba7075"
+project_hash = "5664597d19f65acd2c497cb4c5086d10041b4534"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -47,10 +47,10 @@ weakdeps = ["SparseArrays", "StaticArrays"]
     AdaptStaticArraysExt = "StaticArrays"
 
 [[deps.ArchimedLight]]
-deps = ["Adapt", "CSV", "Dates", "GeometryBasics", "KernelAbstractions", "LinearAlgebra", "MultiScaleTreeGraph", "OrderedCollections", "PlantGeom", "PlantMeteo", "Raycore", "Rotations", "Serialization", "StaticArrays", "Statistics", "Tables", "YAML"]
+deps = ["Adapt", "CSV", "Dates", "GeometryBasics", "KernelAbstractions", "LinearAlgebra", "MultiScaleTreeGraph", "OrderedCollections", "PlantGeom", "PlantMeteo", "Raycore", "Serialization", "StaticArrays", "Tables", "YAML"]
 path = "../.."
 uuid = "ca362a0f-208d-4994-8e0e-d922fd0d438a"
-version = "0.0.1-DEV"
+version = "0.1.3"
 
     [deps.ArchimedLight.extensions]
     ArchimedLightMakieExt = "Makie"
@@ -80,7 +80,7 @@ version = "1.11.0"
 [[deps.Atomix]]
 deps = ["UnsafeAtomics"]
 git-tree-sha1 = "52fd22ac685df5b8e1988a7a5c5b4a72fe767593"
-repo-rev = "codex/metal-atomic-ordering"
+repo-rev = "5be56dc4e1dc54d7ff3967abb055330a1178ecd5"
 repo-url = "https://github.com/VEZY/Atomix.jl"
 uuid = "a9b6321e-bd34-4604-b9c9-b65b8de01458"
 version = "1.1.3"
@@ -325,11 +325,12 @@ version = "0.2.0"
 
 [[deps.GPUCompiler]]
 deps = ["ExprTools", "InteractiveUtils", "LLVM", "Libdl", "Logging", "PrecompileTools", "Preferences", "REPL", "Scratch", "Serialization", "TOML", "Tracy", "UUIDs"]
-git-tree-sha1 = "a39f85e004573d4951fa4a094b0be2944ab0b47d"
+git-tree-sha1 = "5e54ec63c34bcc878558b173c411b8efe6b08344"
 uuid = "61eb1bfa-7361-4325-ad38-22787b887f55"
-version = "1.22.7"
+version = "1.23.0"
 
     [deps.GPUCompiler.weakdeps]
+    AMDGPU_LLVM_Backend_jll = "cc5c0156-bd05-5a77-8a68-bb0aafb29019"
     LLVMDowngrader_jll = "f52de702-fb25-5922-94ba-81dd59b07444"
     NVPTX_LLVM_Backend_jll = "ef6e0fe3-e6ef-59c0-bde6-4989574699e0"
 
@@ -582,7 +583,7 @@ version = "0.8.0"
 [[deps.Metal]]
 deps = ["AbstractFFTs", "Adapt", "BFloat16s", "CEnum", "CodecBzip2", "Crayons", "ExprTools", "GPUArrays", "GPUCompiler", "GPUToolbox", "KernelAbstractions", "LLVM", "LLVMDowngrader_jll", "LinearAlgebra", "ObjectiveC", "PrecompileTools", "Preferences", "PrettyTables", "Printf", "Random", "Random123", "RandomNumbers", "Reexport", "SHA", "ScopedValues", "StaticArrays", "Statistics", "UUIDs"]
 git-tree-sha1 = "3753227fc7f471693346ecf2054ed43107f76822"
-repo-rev = "codex/atomic-order-refit"
+repo-rev = "b44d169f0a9151a93ef8a9b1cadf6da292341d42"
 repo-url = "https://github.com/VEZY/Metal.jl"
 uuid = "dde4c033-4e86-420c-a63e-0dd931031962"
 version = "1.10.0"
@@ -603,9 +604,9 @@ version = "2025.5.20"
 
 [[deps.MultiScaleTreeGraph]]
 deps = ["AbstractTrees", "Dates", "DelimitedFiles", "Graphs", "MetaGraphsNext", "MutableNamedTuples", "OrderedCollections", "PrettyTables", "Printf", "SHA", "Tables", "XLSX"]
-git-tree-sha1 = "9c2140647ae4d49fcc4f032c87a5dcfb2fbd70ed"
+git-tree-sha1 = "8ab7811ec8ae2f5677b0900edbf42451cecae878"
 uuid = "dd4a991b-8a45-4075-bede-262ee62d5583"
-version = "0.15.4"
+version = "0.15.5"
 
 [[deps.MutableNamedTuples]]
 git-tree-sha1 = "0faaabea6ebbfde9a5a01455f851009fb2603aac"
@@ -764,7 +765,9 @@ version = "1.6.0"
 
 [[deps.Raycore]]
 deps = ["AcceleratedKernels", "Adapt", "Atomix", "GPUArraysCore", "GeometryBasics", "KernelAbstractions", "LinearAlgebra", "Random", "StaticArrays", "Statistics"]
-path = "/Users/rvezy/Documents/dev/Raycore"
+git-tree-sha1 = "58fe088943513406566e18c68ea51194f3006622"
+repo-rev = "4dd18ddfb60305e839f518ac408b5ed35761b91f"
+repo-url = "https://github.com/VEZY/Raycore.jl.git"
 uuid = "afc56b53-c9a9-482a-a956-d1d800e05559"
 version = "0.2.0"
 

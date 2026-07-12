@@ -48,6 +48,72 @@
     @test raw_scene.mtg[:geometry] === nothing
 end
 
+@testitem "First-order dense materialization preserves emitter escape" tags=[:core, :fast] begin
+    node_ids = [2, 7]
+    dense = ArchimedLight.DenseFirstOrderResult(
+        node_ids,
+        [0.5, 0.0],
+        ArchimedLight.DenseSpectralNodeValues([10.0, 0.0], [20.0, 0.0]),
+        [5, 0],
+    )
+    escaped = ArchimedLight.SpectralNodeValues(
+        Dict{Int,Float64}(2 => 1.25),
+        Dict{Int,Float64}(2 => 2.5),
+    )
+    compact = ArchimedLight.FirstOrderResult(
+        Dict{Int,Float64}(),
+        ArchimedLight.SpectralNodeValues(Dict{Int,Float64}(), Dict{Int,Float64}()),
+        Dict{Int,Int}(),
+        escaped,
+        dense,
+    )
+
+    materialized = ArchimedLight._materialize_first_order_result(compact)
+    @test materialized.projected_area_per_node == Dict(2 => 0.5, 7 => 0.0)
+    @test materialized.incident_power.par == Dict(2 => 10.0, 7 => 0.0)
+    @test materialized.incident_power.nir == Dict(2 => 20.0, 7 => 0.0)
+    @test materialized.hits_per_node == Dict(2 => 5, 7 => 0)
+    @test materialized.emitter_escaped_power.par == escaped.par
+    @test materialized.emitter_escaped_power.nir == escaped.nir
+    @test materialized.dense !== nothing
+    @test materialized.dense.node_ids == dense.node_ids
+    @test materialized.dense.projected_area_per_node == dense.projected_area_per_node
+    @test materialized.dense.incident_power.par == dense.incident_power.par
+    @test materialized.dense.incident_power.nir == dense.incident_power.nir
+    @test materialized.dense.hits_per_node == dense.hits_per_node
+
+    public_only = ArchimedLight.FirstOrderResult(
+        materialized.projected_area_per_node,
+        materialized.incident_power,
+        materialized.hits_per_node,
+    )
+    @test isempty(public_only.emitter_escaped_power.par)
+    @test isempty(public_only.emitter_escaped_power.nir)
+    @test public_only.dense === nothing
+
+    escaped_only = ArchimedLight.FirstOrderResult(
+        materialized.projected_area_per_node,
+        materialized.incident_power,
+        materialized.hits_per_node,
+        escaped,
+    )
+    @test escaped_only.emitter_escaped_power.par == escaped.par
+    @test escaped_only.emitter_escaped_power.nir == escaped.nir
+    @test escaped_only.dense === nothing
+
+    dense_compat = ArchimedLight.FirstOrderResult(
+        materialized.projected_area_per_node,
+        materialized.incident_power,
+        materialized.hits_per_node,
+        dense,
+    )
+    @test isempty(dense_compat.emitter_escaped_power.par)
+    @test isempty(dense_compat.emitter_escaped_power.nir)
+    @test dense_compat.dense !== nothing
+    @test dense_compat.dense.node_ids == dense.node_ids
+    @test dense_compat.dense.projected_area_per_node == dense.projected_area_per_node
+end
+
 @testitem "RasterGPU backend matches CPU raster fixtures" tags=[:core, :fast, :raster_gpu] begin
     import KernelAbstractions
 
@@ -61,7 +127,7 @@ end
             cache_pixel_table=false,
             toricity=toricity,
         )
-        row = first(fixture.meteo.rows)
+        row = first(fixture.meteo)
         sky = ArchimedLight.compute_sky(row, options)
         turtle = ArchimedLight.build_turtle(options, sky)
         fluxes = ArchimedLight.compute_directional_fluxes(row, sky, turtle, options)
@@ -380,7 +446,7 @@ end
         toricity=false,
         scattering_max_iter=3,
     )
-    row = first(fixture.meteo.rows)
+    row = first(fixture.meteo)
     sky = ArchimedLight.compute_sky(row, options)
     turtle = ArchimedLight.build_turtle(options, sky)
     fluxes = ArchimedLight.compute_directional_fluxes(row, sky, turtle, options)

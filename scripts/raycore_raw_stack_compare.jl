@@ -121,7 +121,7 @@ function _load_coffee_workload()
     config = joinpath(@__DIR__, "..", "example_2", "config.yml")
     options, scene, meteo, models = ArchimedLight.read_config(config; plot_paving_override=RAW_COFFEE_PAVING)
     options = _with_common_options(options)
-    rows = ArchimedLight.prepare_meteo(meteo, options).rows
+    rows = collect(ArchimedLight.prepare_meteo(meteo, options))
     1 <= RAW_STEP <= length(rows) ||
         error("ARCHIMEDLIGHT_RAW_STACK_STEP=$RAW_STEP is outside 1:$(length(rows)).")
     sky = ArchimedLight.compute_sky(rows[RAW_STEP], options)

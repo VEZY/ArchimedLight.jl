@@ -3,6 +3,8 @@ ArchimedLight = "ca362a0f-208d-4994-8e0e-d922fd0d438a"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
 PlantMeteo = "4630fe09-e0fb-4da5-a846-781cb73437b6"
+Raycore = "afc56b53-c9a9-482a-a956-d1d800e05559"
 
 [sources]
 ArchimedLight = {path = "../.."}
+Raycore = {url = "https://github.com/VEZY/Raycore.jl.git", rev = "4dd18ddfb60305e839f518ac408b5ed35761b91f"}

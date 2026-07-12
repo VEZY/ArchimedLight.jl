@@ -46,7 +46,7 @@ function _cache_workload()
         pixel_size=parse(Float64, get(ENV, "ARCHIMEDLIGHT_CACHE_BENCH_PIXEL_SIZE", "0.40")),
         turtle_sectors=parse(Int, get(ENV, "ARCHIMEDLIGHT_CACHE_BENCH_SECTORS", "6")),
     )
-    rows = ArchimedLight.prepare_meteo(meteo, options).rows
+    rows = collect(ArchimedLight.prepare_meteo(meteo, options))
     if isempty(rows)
         sky = ArchimedLight.SkyState(180.0, 55.0, 420.0, 220.0, 0.70, 0.30)
         meteo_rows = NamedTuple[]

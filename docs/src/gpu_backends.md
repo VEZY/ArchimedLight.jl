@@ -74,7 +74,10 @@ step = run_light(sim, first(meteo))
     Raycore stack tracing targets the current `Raycore.all_hits!` contract:
     `all_hits!(metadata_out, distances_out, instance_indices_out, tlas, ray,
     out_base, max_hits, duplicate_epsilon)`. ArchimedLight does not keep a
-    compatibility path for the earlier unreleased draft signature.
+    compatibility path for the earlier unreleased draft signature. Until that
+    API is available in a registered Raycore release, install the Raycore
+    commit pinned in the GPU-branch installation section of the README before
+    adding ArchimedLight.
 
 When `workgroupsize` is not provided, ArchimedLight currently uses `256`.
 Treat this as a conservative default, not a universal optimum. The best value

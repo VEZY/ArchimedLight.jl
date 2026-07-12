@@ -637,6 +637,116 @@ end
 
             scene = _smoke_scene()
             models = _smoke_models()
+
+            emitter_models = ArchimedLight.prepare_models([
+                ArchimedLight.GroupModel(
+                    "*";
+                    types=ArchimedLight.OrderedDict(
+                        "*" => ArchimedLight.TypeModel(
+                            interception=ArchimedLight.InterceptionModel(
+                                model="Translucent",
+                                transparency=0.0,
+                                optical_properties=ArchimedLight.OpticalProperties(0.0, 0.0),
+                            ),
+                        ),
+                    ),
+                ),
+                ArchimedLight.GroupModel(
+                    "upper";
+                    types=ArchimedLight.OrderedDict(
+                        "plate" => ArchimedLight.TypeModel(
+                            interception=ArchimedLight.InterceptionModel(
+                                model="Translucent",
+                                transparency=0.0,
+                                optical_properties=ArchimedLight.OpticalProperties(0.0, 0.0),
+                            ),
+                            light_emitter=ArchimedLight.EmitterModel(
+                                radiance=10.0,
+                                gamma=ArchimedLight.OpticalProperties(0.2, 0.5),
+                            ),
+                        ),
+                    ),
+                ),
+            ])
+            emitter_options = ArchimedLight.LightOptions(
+                turtle_sectors=6,
+                all_in_turtle=true,
+                scattering=false,
+                pixel_size=0.01,
+                toricity=false,
+            )
+            emitter_sky = ArchimedLight.SkyState(180.0, 90.0, 0.0, 0.0, 1.0, 0.0)
+            emitter_turtle = ArchimedLight.build_turtle(emitter_options, emitter_sky)
+            emitter_fluxes = ArchimedLight.DirectionalFluxes(
+                [sector.id for sector in emitter_turtle.sectors],
+                zeros(length(emitter_turtle.sectors)),
+                zeros(length(emitter_turtle.sectors)),
+            )
+            emitter_reference = ArchimedLight.compute_first_order(
+                scene,
+                emitter_models,
+                emitter_turtle,
+                emitter_fluxes,
+                emitter_options;
+                backend=ArchimedLight.RasterCPUBackend(),
+            )
+            emitter_prepared = ArchimedLight._prepare_interception_data(
+                scene,
+                emitter_models,
+                emitter_options;
+                include_budget_maps=true,
+            )
+            @test !isempty(emitter_prepared.emitter_nodes)
+            @test sum(values(emitter_reference.incident_power.par)) > 0.0
+            @test sum(values(emitter_reference.incident_power.nir)) > 0.0
+            @test sum(values(emitter_reference.emitter_escaped_power.par)) > 0.0
+            @test sum(values(emitter_reference.emitter_escaped_power.nir)) > 0.0
+            emitter_backend = ArchimedLight.RasterGPUBackend(
+                backend=backend,
+                max_hits_per_pixel=64,
+                tile_size=1,
+                tile_face_capacity=64,
+                edge_accumulation=:auto,
+            )
+            emitter_data = ArchimedLight._rastergpu_scene_data(
+                emitter_prepared,
+                emitter_backend.config,
+            )
+            emitter_pixels =
+                emitter_prepared.geometry.plotbox.nx * emitter_prepared.geometry.plotbox.ny
+            @test length(emitter_data.nodes_dev) ==
+                  emitter_pixels * emitter_backend.config.max_hits_per_pixel
+            emitter_metal = ArchimedLight.compute_first_order(
+                emitter_data,
+                emitter_turtle,
+                emitter_fluxes,
+                emitter_options,
+            )
+            @test _dict_close(
+                emitter_metal.incident_power.par,
+                emitter_reference.incident_power.par;
+                atol=1e-4,
+                rtol=1e-5,
+            )
+            @test _dict_close(
+                emitter_metal.incident_power.nir,
+                emitter_reference.incident_power.nir;
+                atol=1e-4,
+                rtol=1e-5,
+            )
+            @test _dict_close(
+                emitter_metal.emitter_escaped_power.par,
+                emitter_reference.emitter_escaped_power.par;
+                atol=1e-4,
+                rtol=1e-5,
+            )
+            @test _dict_close(
+                emitter_metal.emitter_escaped_power.nir,
+                emitter_reference.emitter_escaped_power.nir;
+                atol=1e-4,
+                rtol=1e-5,
+            )
+
             raw_options = ArchimedLight.LightOptions(
                 turtle_sectors=6,
                 all_in_turtle=false,
@@ -755,7 +865,7 @@ end
                 pixel_size=parse(Float64, get(ENV, "ARCHIMEDLIGHT_TEST_GPU_COFFEE_RAW_PIXEL_SIZE", "0.04")),
                 turtle_sectors=6,
             )
-            coffee_rows = ArchimedLight.prepare_meteo(coffee_meteo, coffee_options).rows
+            coffee_rows = collect(ArchimedLight.prepare_meteo(coffee_meteo, coffee_options))
             coffee_step = min(parse(Int, get(ENV, "ARCHIMEDLIGHT_TEST_GPU_COFFEE_RAW_STEP", "1")), length(coffee_rows))
             coffee_sky = ArchimedLight.compute_sky(coffee_rows[coffee_step], coffee_options)
             coffee_raw_rows = _raw_stack_sweep(

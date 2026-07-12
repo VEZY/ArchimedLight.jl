@@ -133,7 +133,7 @@ function main()
     prepared = ArchimedLight._prepare_interception_data(scene, models, options; include_budget_maps=true)
     geometry = prepared.geometry
 
-    rows = ArchimedLight.prepare_meteo(meteo, options).rows
+    rows = collect(ArchimedLight.prepare_meteo(meteo, options))
     1 <= STACK_DIAG_STEP <= length(rows) ||
         error("ARCHIMEDLIGHT_STACK_DIAG_STEP=$(STACK_DIAG_STEP) is outside 1:$(length(rows)).")
     row = rows[STACK_DIAG_STEP]
