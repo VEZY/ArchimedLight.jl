@@ -74,35 +74,35 @@ Base.@constprop :aggressive function _output_schema(schema::Symbol)
 end
 
 const _COUPLING_OUTPUTS = (
-    Ri_PAR_f=PlantSimEngine.Default(0.0),
-    Ri_NIR_f=PlantSimEngine.Default(0.0),
-    Ra_PAR_f=PlantSimEngine.Default(0.0),
-    Ra_NIR_f=PlantSimEngine.Default(0.0),
-    Ra_SW_f=PlantSimEngine.Default(0.0),
-    aPPFD=PlantSimEngine.Default(0.0),
-    radiative_mesh_area=PlantSimEngine.Default(0.0),
+    Ri_PAR_f=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    Ri_NIR_f=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    Ra_PAR_f=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    Ra_NIR_f=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    Ra_SW_f=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    aPPFD=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    radiative_mesh_area=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
 )
 
 const _FULL_OUTPUTS = (
-    Ri_PAR_0_f=PlantSimEngine.Default(0.0),
-    Ri_NIR_0_f=PlantSimEngine.Default(0.0),
-    Ri_PAR_f=PlantSimEngine.Default(0.0),
-    Ri_NIR_f=PlantSimEngine.Default(0.0),
-    Ri_PAR_0_q=PlantSimEngine.Default(0.0),
-    Ri_NIR_0_q=PlantSimEngine.Default(0.0),
-    Ri_PAR_q=PlantSimEngine.Default(0.0),
-    Ri_NIR_q=PlantSimEngine.Default(0.0),
-    Ra_PAR_0_f=PlantSimEngine.Default(0.0),
-    Ra_NIR_0_f=PlantSimEngine.Default(0.0),
-    Ra_PAR_f=PlantSimEngine.Default(0.0),
-    Ra_NIR_f=PlantSimEngine.Default(0.0),
-    Ra_PAR_0_q=PlantSimEngine.Default(0.0),
-    Ra_NIR_0_q=PlantSimEngine.Default(0.0),
-    Ra_PAR_q=PlantSimEngine.Default(0.0),
-    Ra_NIR_q=PlantSimEngine.Default(0.0),
-    Ra_SW_f=PlantSimEngine.Default(0.0),
-    aPPFD=PlantSimEngine.Default(0.0),
-    radiative_mesh_area=PlantSimEngine.Default(0.0),
+    Ri_PAR_0_f=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    Ri_NIR_0_f=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    Ri_PAR_f=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    Ri_NIR_f=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    Ri_PAR_0_q=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    Ri_NIR_0_q=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    Ri_PAR_q=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    Ri_NIR_q=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    Ra_PAR_0_f=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    Ra_NIR_0_f=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    Ra_PAR_f=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    Ra_NIR_f=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    Ra_PAR_0_q=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    Ra_NIR_0_q=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    Ra_PAR_q=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    Ra_NIR_q=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    Ra_SW_f=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    aPPFD=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    radiative_mesh_area=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
 )
 
 @inline _output_declarations(::Val{:coupling}) = _COUPLING_OUTPUTS
@@ -142,7 +142,7 @@ struct _PreparedDistributedLight
     columns::_LightOutputColumns
 end
 
-mutable struct _ArchimedLightModel{S,SP,SR,OR,Schema,Group} <:
+mutable struct _ArchimedLightModel{S,SP,SR,OR,Schema} <:
                AbstractLight_InterceptionModel
     simulation::S
     scene_provider::SP
@@ -155,7 +155,6 @@ end
 function ArchimedLight.ArchimedLightModel(
     simulation::ArchimedLight.LightSimulation;
     output_schema::Symbol=:coupling,
-    output_group::Symbol=:organs,
     scene_provider=nothing,
     source_roots=nothing,
     object_resolver=nothing,
@@ -173,7 +172,6 @@ function ArchimedLight.ArchimedLightModel(
         object_resolver,
         factor,
         schema,
-        Val(output_group),
     )
 end
 
@@ -184,15 +182,13 @@ function _archimed_light_model(
     object_resolver::OR,
     factor::Float64,
     ::Val{Schema},
-    ::Val{Group},
-) where {S,SP,SR,OR,Schema,Group}
+) where {S,SP,SR,OR,Schema}
     return _ArchimedLightModel{
         S,
         SP,
         SR,
         OR,
         Schema,
-        Group,
     }(
         simulation,
         scene_provider,
@@ -204,7 +200,8 @@ function _archimed_light_model(
 end
 
 PlantSimEngine.inputs_(::_ArchimedLightModel) = NamedTuple()
-PlantSimEngine.outputs_(::_ArchimedLightModel) = NamedTuple()
+PlantSimEngine.outputs_(::_ArchimedLightModel{S,SP,SR,OR,Schema}) where {S,SP,SR,OR,Schema} =
+    _output_declarations(Val(Schema))
 PlantSimEngine.environment_inputs_(::_ArchimedLightModel) = (
     sun_azimuth_deg=0.0,
     sun_elevation_deg=0.0,
@@ -309,7 +306,7 @@ function _validate_target_schema(targets, ::Val{Schema}) where {Schema}
     actual = propertynames(targets.columns)
     actual == expected || throw(ArgumentError(
         "ArchimedLightModel(output_schema=$(repr(Schema))) requires the matching " *
-        "`archimed_light_outputs($(repr(Schema)))` declaration. Expected variables " *
+        "distributed outputs declared by its model. Expected variables " *
         "$expected, got $actual.",
     ))
     return nothing
@@ -496,12 +493,12 @@ function _prepare_distributed_light(
 end
 
 function _run_distributed_light!(
-    model::_ArchimedLightModel{S,SP,SR,OR,Schema,Group},
+    model::_ArchimedLightModel{S,SP,SR,OR,Schema},
     ::Nothing,
     environment,
     context,
-) where {S,SP,SR,OR,Schema,Group}
-    targets = PlantSimEngine.output_targets(context, Val(Group))
+) where {S,SP,SR,OR,Schema}
+    targets = PlantSimEngine.output_targets(context, _output_names(Val(Schema)))
     _validate_target_schema(targets, Val(Schema))
     sky, duration = _validated_forcing(environment)
     runtime = PlantSimEngine.runtime_model(context)
@@ -647,12 +644,12 @@ end
 end
 
 function _run_distributed_light!(
-    model::_ArchimedLightModel{S,SP,SR,OR,Schema,Group},
+    model::_ArchimedLightModel{S,SP,SR,OR,Schema},
     cache::_PreparedDistributedLight,
     environment,
     context,
-) where {S,SP,SR,OR,Schema,Group}
-    targets = PlantSimEngine.output_targets(context, Val(Group))
+) where {S,SP,SR,OR,Schema}
+    targets = PlantSimEngine.output_targets(context, _output_names(Val(Schema)))
     _validate_target_schema(targets, Val(Schema))
     sky, duration = _validated_forcing(environment)
     runtime = PlantSimEngine.runtime_model(context)
@@ -775,12 +772,12 @@ function _run_light_and_publish!(
 end
 
 function PlantSimEngine.run!(
-    model::_ArchimedLightModel{S,SP,SR,OR,Schema,Group},
+    model::_ArchimedLightModel{S,SP,SR,OR,Schema},
     status,
     environment,
     constants,
     context,
-) where {S,SP,SR,OR,Schema,Group}
+) where {S,SP,SR,OR,Schema}
     return _run_distributed_light!(
         model,
         model.runtime_cache,

@@ -13,10 +13,14 @@ function ArchimedLightModel end
 """
     archimed_light_outputs([schema=:coupling])
 
-Return the PlantSimEngine distributed-output variable declaration matching an
-[`ArchimedLightModel`](@ref) output schema. `:coupling` contains the variables
+Return the `Distributed(Default(value))` declarations used by
+`PlantSimEngine.outputs_` for an [`ArchimedLightModel`](@ref) output schema. `:coupling` contains the variables
 normally consumed by organ-scale physiology. `:full` additionally publishes
 all initial/total PAR/NIR flux and energy metrics.
+
+The model owns these declarations. Bind its destination objects with
+`outputs_to=(OutputTo(selector),)`, or use a tuple of variable names in
+`OutputTo(...; vars=...)` when declaring several destinations.
 
 This method is provided when PlantSimEngine is loaded.
 """

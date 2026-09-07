@@ -33,7 +33,6 @@ PlantSimEngine kernel, then declare its destination objects with
 light_kernel = ArchimedLightModel(
     light_sim;
     output_schema=:coupling,
-    output_group=:organs,
     par_energy_to_photon=4.57,
 )
 
@@ -42,12 +41,11 @@ light_application = ModelSpec(
     name=:archimed_light,
     on=One(scale=:Scene),
     outputs_to=(
-        organs=OutputTo(
+        OutputTo(
             Many(
                 scale=:Leaf,
                 within=SceneScope(),
             );
-            vars=archimed_light_outputs(:coupling),
             coverage=:exact,
         ),
     ),
@@ -56,8 +54,8 @@ light_application = ModelSpec(
 
 `ArchimedLightModel` returns a model kernel, not a `ModelSpec`. The scenario
 therefore keeps ownership of the application name, the `Scene` target, the
-organ selector, and the cadence. The `output_group` keyword must match the name
-of the corresponding `outputs_to` entry; both are `:organs` above.
+organ selector, and the cadence. The model declares its distributed variables
+through `outputs_`; this single `OutputTo` binds all of them to the selected organs.
 
 When the physiological model is built from the exact MTG stored by the light
 scene, include explicit radiative-to-botanical area adapters before leaf
@@ -136,8 +134,10 @@ applies to both scales.
 
 ## Choose the output schema
 
-`archimed_light_outputs` returns the declaration that must be passed to
-`OutputTo(...; vars=...)`. Two schemas are available.
+`archimed_light_outputs` returns the `Distributed(Default(value))` declarations
+used by `PlantSimEngine.outputs_` for the chosen model schema. The application
+only selects destinations; defaults and types belong to the model. Two schemas
+are available.
 
 The default `:coupling` schema keeps the hot publication path compact:
 
@@ -181,7 +181,7 @@ incident and absorbed variables:
 - the three derived/coupling columns `Ra_SW_f`, `aPPFD`, and
   `radiative_mesh_area`.
 
-Use the same schema in both places:
+Choose the schema on the model; a single destination declaration infers its variables:
 
 ```julia
 full_light = ArchimedLightModel(light_sim; output_schema=:full)
@@ -191,16 +191,16 @@ full_application = ModelSpec(
     name=:archimed_light,
     on=One(scale=:Scene),
     outputs_to=(
-        organs=OutputTo(
+        OutputTo(
             Many(scale=:Leaf, within=SceneScope());
-            vars=archimed_light_outputs(:full),
             coverage=:exact,
         ),
     ),
 )
 ```
 
-Passing mismatched schemas is rejected before the light calculation.
+When using explicit `vars`, provide a tuple of declared variable names. Missing
+or unknown distributed variables are rejected before the light calculation.
 
 !!! warning "No `sky_fraction` output"
     Neither schema publishes `sky_fraction`. Models that scientifically require

@@ -147,12 +147,11 @@ function _pse_benchmark_model_case(
         name=Symbol(:archimed_light_, schema),
         on=PlantSimEngine.One(scale=:Scene),
         outputs_to=(
-            organs=PlantSimEngine.OutputTo(
+            PlantSimEngine.OutputTo(
                 PlantSimEngine.Many(
                     scale=:Leaf,
                     within=PlantSimEngine.SceneScope(),
-                );
-                vars=ArchimedLight.archimed_light_outputs(schema),
+                ),
             ),
         ),
     )
@@ -235,7 +234,7 @@ end
 @noinline function _pse_benchmark_publish!(case, step)
     cache = case.kernel.runtime_cache
     cache === nothing && error("The benchmark kernel has no prepared cache.")
-    targets = PlantSimEngine.output_targets(case.context, Val(:organs))
+    targets = PlantSimEngine.output_targets(case.context, PlantSimEngine.outputs(case.kernel))
     _PSE_BENCHMARK_EXTENSION._publish_light_step!(
         case.kernel,
         cache,

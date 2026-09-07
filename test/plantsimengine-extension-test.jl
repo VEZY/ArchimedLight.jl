@@ -154,18 +154,18 @@
         )
     end
 
-    function light_application(kernel; schema::Symbol=:coupling)
+    function light_application(kernel; schema::Union{Nothing,Symbol}=nothing)
         return PlantSimEngine.ModelSpec(
             kernel;
             name=:archimed_light,
             on=PlantSimEngine.One(scale=:Scene),
             outputs_to=(
-                organs=PlantSimEngine.OutputTo(
+                PlantSimEngine.OutputTo(
                     PlantSimEngine.Many(
                         scale=:Leaf,
                         within=PlantSimEngine.SceneScope(),
                     );
-                    vars=ArchimedLight.archimed_light_outputs(schema),
+                    vars=isnothing(schema) ? nothing : keys(ArchimedLight.archimed_light_outputs(schema)),
                 ),
             ),
         )
@@ -174,7 +174,7 @@
     function object_runtime(
         kernel,
         leaf_ids;
-        schema::Symbol=:coupling,
+        schema::Union{Nothing,Symbol}=nothing,
         environment=forcing(),
         consumer::Bool=false,
         extra_objects=PlantSimEngine.Object[],
@@ -281,7 +281,9 @@ end
     @test :duration ∉ propertynames(PlantSimEngine.environment_inputs_(trait_kernel))
     @test propertynames(archimed_light_outputs()) == H.COUPLING_NAMES
     @test propertynames(archimed_light_outputs(:full)) == H.FULL_NAMES
-    @test all(value -> value isa Default, values(archimed_light_outputs()))
+    @test all(value -> value isa Distributed, values(archimed_light_outputs()))
+    @test PlantSimEngine.outputs_(trait_kernel) == archimed_light_outputs()
+    @test PlantSimEngine.outputs(trait_kernel) == H.COUPLING_NAMES
     @test_throws ArgumentError archimed_light_outputs(:unknown)
     @test_throws ArgumentError ArchimedLightModel(
         LightSimulation(scene, models; options=options);
@@ -298,7 +300,6 @@ end
         runtime = H.object_runtime(
             kernel,
             (:leaf,);
-            schema=:full,
             environment=H.forcing(; duration=duration),
         )
         return run!(runtime; outputs=:none)
@@ -382,16 +383,17 @@ end
         output_schema=:full,
         object_resolver=_ -> :leaf,
     )
-    mismatch_runtime = H.object_runtime(
-        mismatch_kernel,
-        (:leaf,);
-        schema=:coupling,
-    )
     mismatch_error = H.captured_error() do
-        run!(mismatch_runtime; outputs=:none)
+        mismatch_runtime = H.object_runtime(
+            mismatch_kernel,
+            (:leaf,);
+            schema=:coupling,
+        )
+        Advanced.refresh_bindings!(mismatch_runtime)
     end
     @test mismatch_error isa ArgumentError
-    @test occursin("matching", lowercase(sprint(showerror, mismatch_error)))
+    @test occursin("distributed output", lowercase(sprint(showerror, mismatch_error)))
+    @test mismatch_kernel.runtime_cache === nothing
 end
 
 @testitem "Exact scene MTG identity resolves PlantGeom source owners" tags = [:plantsimengine, :fast] setup = [ArchimedLightPlantSimEngineTestSupport] begin
