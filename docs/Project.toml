@@ -12,3 +12,4 @@ PlantMeteo = "4630fe09-e0fb-4da5-a846-781cb73437b6"
 
 [sources]
 ArchimedLight = {path = ".."}
+PlantGeom = {rev = "dc8df0e30b80d68dec876c752575386ffa324b8d", url = "https://github.com/VEZY/PlantGeom.jl"}

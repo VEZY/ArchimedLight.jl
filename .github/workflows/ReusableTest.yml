@@ -36,6 +36,14 @@ jobs:
           version: ${{ inputs.version }}
       - name: Use Julia cache
         uses: julia-actions/cache@v3
+      - name: Resolve pinned PlantGeom and PlantSimEngine revisions
+        run: |
+          julia --project=. -e '
+            using Pkg
+            Pkg.add([
+              PackageSpec(url="https://github.com/VEZY/PlantGeom.jl", rev="dc8df0e30b80d68dec876c752575386ffa324b8d"),
+              PackageSpec(url="https://github.com/VirtualPlantLab/PlantSimEngine.jl", rev="bb3ceea306fb0bc0fb3a569f36c0d96aa929327c"),
+            ])'
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
       - uses: julia-actions/julia-processcoverage@v1

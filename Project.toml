@@ -25,6 +25,9 @@ PlantSimEngine = "9a576370-710b-4269-adf9-4f603a9c6423"
 ArchimedLightMakieExt = "Makie"
 ArchimedLightPlantSimEngineExt = "PlantSimEngine"
 
+[sources]
+PlantGeom = {rev = "dc8df0e30b80d68dec876c752575386ffa324b8d", url = "https://github.com/VEZY/PlantGeom.jl"}
+
 [compat]
 CSV = "0.10.15"
 Dates = "1"
