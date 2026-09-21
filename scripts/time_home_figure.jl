@@ -3,7 +3,7 @@
 const REPO_ROOT = dirname(@__DIR__)
 import Pkg
 const BACKEND = Symbol(get(ENV, "ARCHIMEDLIGHT_HOME_BENCH_BACKEND", "normal_cpu"))
-const GPU_BACKENDS = (:rasterizer_gpu, :raycore_gpu_toric_periodic, :raycore_gpu_toric_tlas)
+const GPU_BACKENDS = (:rasterizer_gpu,)
 
 Pkg.activate(joinpath(REPO_ROOT, "benchmark"))
 using BenchmarkTools
@@ -11,8 +11,13 @@ using ArchimedLight
 
 metal_backend = if BACKEND in GPU_BACKENDS
     ka = Base.require(Main, :KernelAbstractions)
+    Base.find_package("Metal") === nothing && error(
+        "Metal is not available. Run this script from an environment that provides Metal 1.10.3 or newer.",
+    )
     metal = Base.require(Main, :Metal)
-    ka.get_backend(metal.MtlArray(zeros(Float32, 1)))
+    array_type = getproperty(metal, :MtlArray)
+    device_array = Base.invokelatest(array_type, zeros(Float32, 1))
+    Base.invokelatest(ka.get_backend, device_array)
 else
     nothing
 end
@@ -24,17 +29,10 @@ if backend == :normal_cpu
 elseif backend == :rasterizer_gpu
     interception = ArchimedLight.RasterGPUBackend(backend=metal_backend, tile_size=1, tile_face_capacity=64, max_hits_per_pixel=64, edge_accumulation=:auto)
     scattering = ArchimedLight.RasterGPUScatteringBackend(interception)
-elseif backend == :raycore_gpu_toric_tlas
-    interception = RaycoreInterceptionBackend(backend=metal_backend, toric_traversal=:replicated)
-    scattering = ArchimedLight.RaycoreScatteringBackend(interception)
-elseif backend == :raycore_gpu_toric_periodic
-    interception = RaycoreInterceptionBackend(backend=metal_backend, toric_traversal=:periodic)
-    scattering = ArchimedLight.RaycoreScatteringBackend(interception)
 else
     error(
         "Unsupported ARCHIMEDLIGHT_HOME_BENCH_BACKEND=$(repr(backend)). " *
-        "Use one of: normal_cpu, rasterizer_gpu, raycore_gpu_toric_periodic, " *
-        "raycore_gpu_toric_tlas.",
+        "Use one of: normal_cpu or rasterizer_gpu.",
     )
 end
 
@@ -56,10 +54,7 @@ display(trial)
 # With Julia: 
 # Single result which took 1.6243 s (12.79%) to evaluate,
 #  with a memory estimate of 1.70 GiB, allocs estimate: 12139919.
-# 2.38s using Raycore + Metal backend with replicated tlas.
-# 2.087s using Raycore + Metal backend with periodic tlas.
 # 4.626s using Rasterizer + Metal backend.
-# 5.25s with 46 directions on CPU, 6.4 on Raycore + Metal on Raycore + Metal (replicated tlas), 3.974s on Raycore + Metal (periodic tlas), 5.787s on Rasterizer + Metal
-# 396.882s with 0.1cm pixel size + 46 directions on CPU, 438.106s on Raycore + Metal (replicated tlas), 8.927s on Raycore + Metal (periodic tlas) don't run on Rasterizer + Metal
+# 5.25s with 46 directions on CPU, 5.787s on Rasterizer + Metal.
 # Without scattering, 46 directions, 0.3cm pixel size:
-# 2.0s on CPU, 3.509s on Raycore + Metal (replicated tlas), 4.104s on Raycore + Metal (periodic tlas), 2.144s on Rasterizer + Metal
+# 2.0s on CPU, 2.144s on Rasterizer + Metal.

@@ -12,7 +12,6 @@ import PlantMeteo
 import Adapt
 import KernelAbstractions
 using KernelAbstractions: @atomic, @index
-import Raycore
 import Tables
 import YAML
 import CSV
@@ -40,8 +39,7 @@ export EmitterModel
 export OpticalProperties
 export LightOptions
 export RasterCPUBackend, RasterGPUBackendConfig, RasterGPUBackend
-export RaycoreBackendConfig, RaycoreInterceptionBackend, RaycoreValidationError
-export RaycastScatteringBackend, RasterGPUScatteringBackend, RaycoreScatteringBackend
+export RaycastScatteringBackend, RasterGPUScatteringBackend
 export SkyState
 export LightBudget
 export LightStepResult

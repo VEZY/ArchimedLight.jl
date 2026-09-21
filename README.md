@@ -54,27 +54,19 @@ Install this branch:
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/VEZY/Raycore.jl.git", rev="4dd18ddfb60305e839f518ac408b5ed35761b91f")
 Pkg.add(url="https://github.com/VEZY/ArchimedLight.jl", rev="gpu")
 ```
 
-The Raycore pin is currently required because the registered Raycore 0.2.0
-release does not yet include the full-stack traversal API used by this branch.
-
-If you are on MacOS and want to use the Metal backend, you also need to install `Atomix` and `Metal` branches that contain bug fixes (atomic-ordering changes):
+Metal remains an optional dependency. On Apple Silicon, install Metal 1.10.3 or
+newer in the environment that runs the GPU backend. The active Metal toolchain
+must also expose atomic support through KernelAbstractions (MSL 4.1 or newer):
 
 ```julia
 using Pkg
 
-Pkg.add(url="https://github.com/VEZY/Atomix.jl", rev="5be56dc4e1dc54d7ff3967abb055330a1178ecd5")
-Pkg.add(url="https://github.com/VEZY/Metal.jl", rev="b44d169f0a9151a93ef8a9b1cadf6da292341d42")
-Pkg.add(url="https://github.com/VEZY/Raycore.jl.git", rev="4dd18ddfb60305e839f518ac408b5ed35761b91f")
+Pkg.add("Metal")
 Pkg.add(url="https://github.com/VEZY/ArchimedLight.jl", rev="gpu")
 ```
-
-If ArchimedLight is already installed in the active environment, run the `Atomix`,
-`Metal`, and `Raycore` commands above and then `Pkg.resolve()` so Julia records the
-compatible sources in the manifest.
 
 ## Core API
 
