@@ -1,6 +1,9 @@
 /Manifest*.toml
 /docs/Manifest*.toml
 /test/Manifest*.toml
+/benchmark/Manifest*.toml
+/benchmark/plantsimengine/Manifest*.toml
+/docs/make_video/Manifest*.toml
 /docs/build/
 *.DS_Store
 java_implementation/*

@@ -6,6 +6,11 @@ on:
       - main
     tags: [ "*" ]
   workflow_dispatch:
+    inputs:
+      release_validation:
+        description: Run fixture, regression, and PlantSimEngine release gates
+        type: boolean
+        default: false
 
 jobs:
   test:
@@ -28,3 +33,60 @@ jobs:
           - macOS-latest
           - windows-latest
         allow_failure: [ false ]
+
+  release-validation:
+    if: github.event_name == 'workflow_dispatch' && inputs.release_validation
+    name: Release validation / ${{ matrix.profile }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      actions: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [fixtures, regression, regression-release, pse-benchmarks]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: "1"
+      - uses: julia-actions/cache@v3
+      - name: Configure test environment
+        if: matrix.profile != 'pse-benchmarks'
+        shell: julia --project=test --color=yes {0}
+        run: |
+          using Pkg
+          Pkg.develop(PackageSpec(path=pwd()))
+          Pkg.instantiate()
+          Pkg.status()
+      - name: Run release fixtures
+        if: matrix.profile == 'fixtures'
+        shell: julia --project=test --color=yes {0}
+        run: |
+          using TestItemRunner
+          TestItemRunner.run_tests("test"; filter=ti -> :release in ti.tags, verbose=true)
+      - name: Run regression matrix
+        if: startsWith(matrix.profile, 'regression')
+        env:
+          ARCHIMEDLIGHT_REGRESSION_PROFILE: ${{ matrix.profile == 'regression-release' && 'release' || 'fast' }}
+        shell: julia --project=test --color=yes {0}
+        run: include("test/regression_matrix/runtests.jl")
+      - name: Run PlantSimEngine benchmarks
+        if: matrix.profile == 'pse-benchmarks'
+        shell: julia --project=benchmark/plantsimengine --color=yes {0}
+        run: |
+          using Pkg
+          Pkg.develop(PackageSpec(path=pwd()))
+          Pkg.instantiate()
+          Pkg.status()
+          include("benchmark/plantsimengine/benchmarks.jl")
+          results = run(SUITE; verbose=true, seconds=1)
+          show(stdout, MIME"text/plain"(), results)
+      - name: Upload regression report
+        if: always() && startsWith(matrix.profile, 'regression')
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.profile }}
+          path: test/regression_matrix/reports/latest
+          if-no-files-found: ignore

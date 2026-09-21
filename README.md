@@ -18,7 +18,7 @@ It is a reimplementation of the Java-based ARCHIMED model from Jean Dauzat (AMAP
 <details>
 <summary>Reproducing the figures</summary>
 
-The figures above are generated from two example scenes available from an Artifact. You can generate them using the script in `docs/make_video.jl`.
+The figures above are generated from two example scenes available from an Artifact. You can generate them using the script in `docs/make_video/make_video.jl`.
 </details>
 
 ## Installation

@@ -461,4 +461,4 @@ options = LightOptions(
 )
 ```
 
-The parameters are the same, you can see the full list in the documentation for [LightOptions](@ref).
+The parameters are the same; see the full list in [`LightOptions`](@ref).

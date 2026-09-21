@@ -1,6 +1,3 @@
-using Pkg
-Pkg.activate(@__DIR__)
-
 using GLMakie
 using ArchimedLight
 using PlantMeteo

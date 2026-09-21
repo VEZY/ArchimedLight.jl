@@ -7,6 +7,23 @@ Use a clean branch and keep a short release log with the version, date, commit
 SHA, Julia version, platform, fixture artifact SHA256, and the result of each
 gate below.
 
+The `Test` workflow can run the fixture, both regression profiles, and optional
+PlantSimEngine benchmark gates as independent jobs. Dispatch it on the candidate
+branch with `release_validation=true`. This does not replace the local media
+review or the comparison benchmark against the previous revision.
+
+## v0.2.0 dependency migration
+
+Use registered PlantGeom 0.20, PlantMeteo 0.9, MultiScaleTreeGraph 0.16, and
+PlantSimEngine 0.15. PlantSimEngine remains optional: test it through the test
+project and the dedicated `benchmark/plantsimengine` project, without adding it
+to the package's direct dependencies.
+
+Retain the v0.1.3 release fixture artifact already recorded in `Artifacts.toml`.
+Its URL and checksum identify the scientific reference data, not the version of
+the package being tested. Run both regression profiles and the `:release` tests
+against that artifact. The v0.1.3 baseline notes below remain historical.
+
 ## v0.1.3 Registry Baseline
 
 `0.1.3` is the compatibility baseline for ArchimedLight's first release in
@@ -93,7 +110,8 @@ Generate the README and documentation videos on a local machine with enough
 memory:
 
 ```bash
-julia docs/make_video.jl
+julia --project=docs/make_video -e 'using Pkg; Pkg.develop(path=pwd()); Pkg.instantiate()'
+julia --project=docs/make_video docs/make_video/make_video.jl
 ```
 
 This creates `archimedlight_day_cycle_1.mp4`,
@@ -242,6 +260,10 @@ Record the first baseline for the release, especially one-step, cached series,
 and scattering-heavy cases. The GitHub workflow uses
 `MilesCranmer/AirspeedVelocity.jl@action-v1` and can be run manually.
 
+Run the optional PlantSimEngine extension separately following
+[`benchmark/README.md`](benchmark/README.md). Its cases cannot be compared
+against ArchimedLight 0.1.x, which has no extension.
+
 ## 7. Review Automation And Secrets
 
 Before registering, verify:
@@ -264,6 +286,12 @@ Repository automation relevant to release:
 - `.github/workflows/Benchmarks.yml`: runs AirspeedVelocity benchmarks.
 
 ## 8. Register The Release
+
+When reusing the existing fixture artifact, register the exact tested `main`
+commit through `Register Package`, let TagBot create its version tag and release,
+then verify the registered install and tagged docs. Do not duplicate or rename
+the historical fixture asset. The pre-registration asset sequence below applies
+only when publishing a newly reviewed fixture dataset.
 
 1. Commit the final release changes and record the exact commit SHA.
 2. Push the release commit to `main` and wait for `Test` and `Docs` to pass.

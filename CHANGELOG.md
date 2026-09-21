@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.2.0
+
+### Added
+
+- Couple a scene-scale light calculation to PlantSimEngine 0.15 objects through
+  an optional extension. Select organ destinations with `OutputTo` and publish
+  light outputs by stable object identity.
+- Resolve registered PlantGeom 0.20, MultiScaleTreeGraph 0.16, and PlantMeteo 0.9
+  without development branches or Git revision overrides.
+
 ### Breaking changes
 
 - The PlantSimEngine extension now declares `aPPFD` and `Ra_SW_f` as rates per
