@@ -76,7 +76,7 @@ jobs:
         env:
           ARCHIMEDLIGHT_REGRESSION_PROFILE: ${{ matrix.profile == 'regression-release' && 'release' || 'fast' }}
         shell: julia --project=test --color=yes {0}
-        run: include("test/regression_matrix/runtests.jl")
+        run: include(joinpath(pwd(), "test/regression_matrix/runtests.jl"))
       - name: Run PlantSimEngine benchmarks
         if: matrix.profile == 'pse-benchmarks'
         shell: julia --project=benchmark/plantsimengine --color=yes {0}
@@ -85,7 +85,7 @@ jobs:
           Pkg.develop(PackageSpec(path=pwd()))
           Pkg.instantiate()
           Pkg.status()
-          include("benchmark/plantsimengine/benchmarks.jl")
+          include(joinpath(pwd(), "benchmark/plantsimengine/benchmarks.jl"))
           results = run(SUITE; verbose=true, seconds=1)
           show(stdout, MIME"text/plain"(), results)
       - name: Upload regression report
