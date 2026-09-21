@@ -9,8 +9,9 @@ gate below.
 
 The `Test` workflow can run the fixture, both regression profiles, and optional
 PlantSimEngine benchmark gates as independent jobs. Dispatch it on the candidate
-branch with `release_validation=true`. This does not replace the local media
-review or the comparison benchmark against the previous revision.
+branch with `release_validation=true`. A separate `media_validation=true`
+dispatch generates documentation media for visual review. Neither dispatch
+replaces that review or the comparison benchmark against the previous revision.
 
 ## v0.2.0 dependency migration
 
@@ -106,20 +107,44 @@ julia --project=test -e 'using TestItemRunner; TestItemRunner.run_tests("test"; 
 
 ## 3. Run The Documentation Gate
 
-Generate the README and documentation videos on a local machine with enough
-memory:
+Generate the README and documentation videos by manually dispatching the
+`Test` workflow on the candidate branch with `media_validation=true`:
+
+```bash
+gh workflow run Test.yml --repo VEZY/ArchimedLight.jl --ref CANDIDATE_BRANCH -f media_validation=true
+```
+
+The optional job uses Ubuntu, Xvfb, and Mesa software OpenGL. It runs both
+original scenes with their existing camera, meteorology, materials, and render
+settings. It removes old media before rendering and accepts only four fresh,
+nonempty outputs. The `documentation-media` artifact includes the two MP4s,
+their poster PNGs, commit and dependency records, checksums, and measured
+resource use. The normal `Docs` workflow does not repeat this expensive render.
+
+The complete two-scene [validation run for the 0.2 migration](https://github.com/VEZY/ArchimedLight.jl/actions/runs/35581953297)
+completed on a standard 16 GB Ubuntu runner, with a peak resident memory of
+about **13.33 GiB** and a render time of **10 min 27 s**. This is a measurement
+of these scenes and this environment, not a guarantee that other scenes or
+future versions fit. Keep a local machine or a runner with more memory as a
+fallback if the job runs out of memory; do not reduce the scientific scenario
+to make the release gate pass. For local generation:
 
 ```bash
 julia --project=docs/make_video -e 'using Pkg; Pkg.develop(path=pwd()); Pkg.instantiate()'
 julia --project=docs/make_video docs/make_video/make_video.jl
 ```
 
-This creates `archimedlight_day_cycle_1.mp4`,
-`archimedlight_day_cycle_2.mp4`, and their poster PNGs in
-`docs/src/assets/`. Review the four generated files and commit them with the
-release changes. Video rendering is intentionally a manual release step rather
-than part of the `Docs` workflow because the agrivoltaic scene requires more
-memory than the CI runner provides.
+**Visual review is required after either generation route.** Download and
+inspect both complete videos and both poster PNGs before promoting them to
+`docs/src/assets/archimedlight_day_cycle_{1,2}.{mp4,png}`. Check the scene,
+camera, shadows through time, colour scale, units, and labels against the
+selected output field. Record the generating commit, checksums, and review
+result, then commit all four accepted files with the release changes. A green
+render job alone does not satisfy this review gate.
+
+Record platform pixel-density differences rather than resampling generated
+assets to conceal them. The measured CI output is 900×700 pixels for the
+unchanged `Figure(size=(900,700))`; the previous HiDPI assets were 1800×1400.
 
 Build the manual:
 
