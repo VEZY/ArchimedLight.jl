@@ -1,5 +1,6 @@
 using GLMakie
 using ArchimedLight
+using PlantGeom: add_ground!
 using PlantMeteo
 using Dates
 using Artifacts: artifact_hash, artifact_path
