@@ -25,3 +25,4 @@ jobs:
           julia-version: ${{ matrix.version }}
           rev: ${{ format('{0},{1}', github.event.repository.default_branch, github.event.pull_request.head.sha || github.sha) }}
           bench-on: ${{ github.event.pull_request.head.sha || github.sha }}
+          job-summary: ${{ github.event_name != 'pull_request_target' }}
