@@ -622,17 +622,17 @@ function _compare_case_against_baseline(case::RegressionCase, data, observed, ob
     max_abs_error = 0.0
     max_rel_error = 0.0
     details = String[]
-    ok = true
+    baseline_matches = true
 
     for (name, obs_path) in sort(collect(observed.files); by=first)
         exp_path = joinpath(baseline_dir, name)
         if !isfile(exp_path)
-            ok &= !case.strict
+            baseline_matches = false
             push!(details, "missing baseline file $(name)")
             continue
         end
         cmp = compare_stable_csv_paths(exp_path, obs_path; label="$(case.id):$(name)")
-        ok &= cmp.ok || !case.strict
+        baseline_matches &= cmp.ok
         total_missing += cmp.missing
         total_extra += cmp.extra
         total_mismatch += cmp.mismatch
@@ -647,16 +647,16 @@ function _compare_case_against_baseline(case::RegressionCase, data, observed, ob
         if exp_img !== nothing && isfile(exp_img)
             img_cmp = _compare_png_reference(exp_img, data.figure)
             psnr = img_cmp.psnr
-            ok &= img_cmp.ok || !case.strict
+            baseline_matches &= img_cmp.ok
             img_cmp.ok || push!(details, "image PSNR $(img_cmp.psnr) < $(img_cmp.threshold)")
         elseif case.strict
-            ok = false
+            baseline_matches = false
             push!(details, "missing baseline image")
         end
     end
 
     if pair_cmp !== nothing
-        ok &= pair_cmp.ok || !case.strict
+        baseline_matches &= pair_cmp.ok
         total_missing += pair_cmp.missing
         total_extra += pair_cmp.extra
         total_mismatch += pair_cmp.mismatch
@@ -669,12 +669,12 @@ function _compare_case_against_baseline(case::RegressionCase, data, observed, ob
         if update
             "updated"
         elseif case.strict
-            ok ? "strict_pass" : "strict_fail"
+            baseline_matches ? "strict_pass" : "strict_fail"
         else
-            ok ? "report_ok" : "report_drift"
+            baseline_matches ? "report_ok" : "report_drift"
         end
     return (
-        ok=ok,
+        ok=baseline_matches || !case.strict,
         status=status,
         detail=join(details, " | "),
         total_missing=total_missing,

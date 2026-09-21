@@ -1,8 +1,6 @@
-using Pkg
-Pkg.activate(@__DIR__)
-
 using GLMakie
 using ArchimedLight
+using PlantGeom: add_ground!
 using PlantMeteo
 using Dates
 using Artifacts: artifact_hash, artifact_path
@@ -71,7 +69,7 @@ function generate_video(scene, output_video_path::AbstractString; toricity=true,
     ax = Axis3(
         fig[1, 1],
         aspect=:data,
-        title="Absorbed PAR (W m⁻²) $(meteo_gen[1].date)",
+        title="Incident PAR (W m⁻²) $(meteo_gen[1].date)",
         xlabel="x (m)",
         ylabel="y (m)",
         zlabel="z (m)",
@@ -80,15 +78,15 @@ function generate_video(scene, output_video_path::AbstractString; toricity=true,
     tiled_scene = tile_light_geometry(scene, series; nx=nx, ny=ny, centered=true, xperiod=nothing, yperiod=nothing)
 
     p = ArchimedLight.lightplot!(ax, tiled_scene, series; color=:incident_par_flux, colormap=:thermal, timestep=1)
-    Colorbar(fig[1, 2], p, label="aPAR (W m⁻²)")
+    Colorbar(fig[1, 2], p, label="Incident PAR (W m⁻²)")
 
     record(fig, output_video_path, 2:length(series), framerate=1) do frame
         Makie.update!(p, timestep=frame)
-        ax.title = "Absorbed PAR (W m⁻²) $(meteo_gen[frame].date)"
+        ax.title = "Incident PAR (W m⁻²) $(meteo_gen[frame].date)"
     end
 
     Makie.update!(p, timestep=12)
-    ax.title = "Absorbed PAR (W m⁻²) $(meteo_gen[12].date)"
+    ax.title = "Incident PAR (W m⁻²) $(meteo_gen[12].date)"
     save(joinpath(dirname(output_video_path), string(first(split(basename(output_video_path), ".")), ".png")), fig)
 end
 
