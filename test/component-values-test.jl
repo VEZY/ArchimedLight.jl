@@ -297,7 +297,10 @@ end
     import PlantGeom
 
     @noinline function refill_component_values!(table, step, aggregation)
-        return component_values!(table, step, aggregation)
+        component_values!(table, step, aggregation)
+        # Returning the table here can box its NamedTuple at the test boundary
+        # on Julia 1.10; return identity is checked separately below.
+        return nothing
     end
 
     step = ComponentValuesHelper.controlled_step()

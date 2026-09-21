@@ -398,10 +398,10 @@ LightOptions(pixel_hit_stack_mode=SmallPixelHitStack)  # compact inline stacks
 LightOptions(pixel_hit_stack_mode=VectorPixelHitStack) # historical vectors
 ```
 
-Passing `"auto"`, `"small"`, or `"vector"` directly to `LightOptions` remains
-available through the `0.1.x` line and is scheduled for removal in `0.2`.
-Configuration files will continue to use these strings as their stable
-serialized representation.
+Passing `"auto"`, `"small"`, or `"vector"` (or the corresponding symbols) directly
+to `LightOptions` remains supported with a deprecation warning. Use the typed
+values shown above in Julia code. Configuration files continue to use strings
+as their stable serialized representation.
 
 ### `debug`, `log_debug`, `debug_drop_leading_hit`
 
