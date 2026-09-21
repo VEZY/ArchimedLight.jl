@@ -6,8 +6,11 @@ on:
       - main
     paths:
       - "src/**"
+      - "ext/**"
       - "test/**"
       - "*.toml"
+      - ".github/workflows/TestOnPRs.yml"
+      - ".github/workflows/ReusableTest.yml"
     types: [ opened, synchronize, reopened ]
 
 concurrency:

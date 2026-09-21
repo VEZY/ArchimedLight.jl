@@ -7,6 +7,53 @@ Use a clean branch and keep a short release log with the version, date, commit
 SHA, Julia version, platform, fixture artifact SHA256, and the result of each
 gate below.
 
+The `Test` workflow can run the fixture, both regression profiles, and optional
+PlantSimEngine benchmark gates as independent jobs. Dispatch it on the candidate
+branch with `release_validation=true`. A separate `media_validation=true`
+dispatch generates documentation media for visual review. Neither dispatch
+replaces that review or the comparison benchmark against the previous revision.
+
+## v0.2.0 dependency migration
+
+Use registered PlantGeom 0.20, PlantMeteo 0.9, MultiScaleTreeGraph 0.16, and
+PlantSimEngine 0.15. PlantSimEngine remains optional: test it through the test
+project and the dedicated `benchmark/plantsimengine` project, without adding it
+to the package's direct dependencies.
+
+The v0.1.3 release has no uploaded fixture asset, so the URL recorded in
+`Artifacts.toml` returns 404. Preserve that original record: its checksum
+identifies the missing historical reference, not the package being tested.
+
+For PR #51, an independent local reference was reconstructed on 2026-09-21
+with the released v0.1.3 source (`72402a91250443412465b27653a96fca68f7e3ae`).
+The inputs came from the published v0.1.2 fixture archive (SHA-256
+`761cc512e91bc90e6e0a74644e077da49358839ccfdedb6e7748c11ba8a6a92e`).
+All 66 fixtures were regenerated with the unchanged v0.1.3 numeric and image
+generators in an isolated environment. The candidate did not generate its own
+reference. Julia 1.12.1 resolved registered PlantGeom 0.19.2, PlantMeteo 0.8.5,
+and MultiScaleTreeGraph 0.15.5 for the historical source; the exact environments
+and input/reference hashes are retained with the validation evidence.
+
+The separately identified local archive is
+`archimedlight-v0.1.3-reconstructed-2026-09-21.tar.gz`:
+
+- artifact tree: `e2c6d9f98bf5f58e231a226a400665fa91fbdaf1`
+- SHA-256: `5f6e2450a2d13ea4d04e05a35352461d566ad3e3c12efabfb40acbbed069883f`
+- 66 fixtures, 367 CSV references, and 66 reference images
+
+These hashes differ from the missing original archive. Treat this as a
+reconstruction from released code, not an exact recovery of that archive.
+Use `ARCHIMEDLIGHT_RELEASE_FIXTURES_DIR` to point both regression profiles and
+the `:release` tests at the extracted reconstruction. Keep the existing
+tolerances and verify that the frozen reference hashes are unchanged after
+testing. Reconstruction alone does not establish that a candidate passes.
+
+Before a future release uses this reconstruction in CI, publish it under a
+distinct asset name and explicitly update `Artifacts.toml` with its verified
+URL and hashes. No release asset is published by the PR #51 validation, and
+the original artifact record remains unchanged. The v0.1.3 baseline notes
+below remain historical.
+
 ## v0.1.3 Registry Baseline
 
 `0.1.3` is the compatibility baseline for ArchimedLight's first release in
@@ -89,19 +136,44 @@ julia --project=test -e 'using TestItemRunner; TestItemRunner.run_tests("test"; 
 
 ## 3. Run The Documentation Gate
 
-Generate the README and documentation videos on a local machine with enough
-memory:
+Generate the README and documentation videos by manually dispatching the
+`Test` workflow on the candidate branch with `media_validation=true`:
 
 ```bash
-julia docs/make_video.jl
+gh workflow run Test.yml --repo VEZY/ArchimedLight.jl --ref CANDIDATE_BRANCH -f media_validation=true
 ```
 
-This creates `archimedlight_day_cycle_1.mp4`,
-`archimedlight_day_cycle_2.mp4`, and their poster PNGs in
-`docs/src/assets/`. Review the four generated files and commit them with the
-release changes. Video rendering is intentionally a manual release step rather
-than part of the `Docs` workflow because the agrivoltaic scene requires more
-memory than the CI runner provides.
+The optional job uses Ubuntu, Xvfb, and Mesa software OpenGL. It runs both
+original scenes with their existing camera, meteorology, materials, and render
+settings. It removes old media before rendering and accepts only four fresh,
+nonempty outputs. The `documentation-media` artifact includes the two MP4s,
+their poster PNGs, commit and dependency records, checksums, and measured
+resource use. The normal `Docs` workflow does not repeat this expensive render.
+
+The complete two-scene [validation run for the 0.2 migration](https://github.com/VEZY/ArchimedLight.jl/actions/runs/35581953297)
+completed on a standard 16 GB Ubuntu runner, with a peak resident memory of
+about **13.33 GiB** and a render time of **10 min 27 s**. This is a measurement
+of these scenes and this environment, not a guarantee that other scenes or
+future versions fit. Keep a local machine or a runner with more memory as a
+fallback if the job runs out of memory; do not reduce the scientific scenario
+to make the release gate pass. For local generation:
+
+```bash
+julia --project=docs/make_video -e 'using Pkg; Pkg.develop(path=pwd()); Pkg.instantiate()'
+julia --project=docs/make_video docs/make_video/make_video.jl
+```
+
+**Visual review is required after either generation route.** Download and
+inspect both complete videos and both poster PNGs before promoting them to
+`docs/src/assets/archimedlight_day_cycle_{1,2}.{mp4,png}`. Check the scene,
+camera, shadows through time, colour scale, units, and labels against the
+selected output field. Record the generating commit, checksums, and review
+result, then commit all four accepted files with the release changes. A green
+render job alone does not satisfy this review gate.
+
+Record platform pixel-density differences rather than resampling generated
+assets to conceal them. The measured CI output is 900×700 pixels for the
+unchanged `Figure(size=(900,700))`; the previous HiDPI assets were 1800×1400.
 
 Build the manual:
 
@@ -242,6 +314,10 @@ Record the first baseline for the release, especially one-step, cached series,
 and scattering-heavy cases. The GitHub workflow uses
 `MilesCranmer/AirspeedVelocity.jl@action-v1` and can be run manually.
 
+Run the optional PlantSimEngine extension separately following
+[`benchmark/README.md`](benchmark/README.md). Its cases cannot be compared
+against ArchimedLight 0.1.x, which has no extension.
+
 ## 7. Review Automation And Secrets
 
 Before registering, verify:
@@ -264,6 +340,12 @@ Repository automation relevant to release:
 - `.github/workflows/Benchmarks.yml`: runs AirspeedVelocity benchmarks.
 
 ## 8. Register The Release
+
+When reusing the existing fixture artifact, register the exact tested `main`
+commit through `Register Package`, let TagBot create its version tag and release,
+then verify the registered install and tagged docs. Do not duplicate or rename
+the historical fixture asset. The pre-registration asset sequence below applies
+only when publishing a newly reviewed fixture dataset.
 
 1. Commit the final release changes and record the exact commit SHA.
 2. Push the release commit to `main` and wait for `Test` and `Docs` to pass.

@@ -1812,6 +1812,7 @@ mutable struct LightSimulationCache
     prepared::Union{Nothing,PreparedInterceptionData}
     rastergpu_data::Union{Nothing,RasterGPUSceneData}
     render_geometry::LightRenderGeometry
+    component_metadata::Union{Nothing,LightComponentMetadata}
     node_metadata::Union{Nothing,LightNodeMetadata}
     mode::Symbol
     estimated_entry_bytes::Int
@@ -1819,6 +1820,52 @@ mutable struct LightSimulationCache
     resident_bytes::Int
     tick::Int
     entries::Dict{UInt64,TurtleLightCacheEntry}
+end
+
+function _build_light_component_metadata(
+    scene::PlantGeom.SceneGeometry,
+    models::LightModels,
+    options::LightOptions,
+    geometry::InterceptionSceneData;
+    component_area_per_node=nothing,
+)
+    scene.mtg === nothing && return nothing
+
+    candidate_ids = sort!(copy(geometry.node_ids))
+    area_by_node = component_area_per_node === nothing ?
+                   _interception_area_per_node_local(scene, models, options) :
+                   component_area_per_node
+    node_ids = Int[]
+    owners = PlantGeom.SourceOwnerKey[]
+    areas = Float64[]
+    sizehint!(node_ids, length(candidate_ids))
+    sizehint!(owners, length(candidate_ids))
+    sizehint!(areas, length(candidate_ids))
+
+    for node_id in candidate_ids
+        haskey(area_by_node, node_id) || throw(ArgumentError(
+            "Scene component node $node_id has no radiative area in the filtered interception scene.",
+        ))
+        area = Float64(area_by_node[node_id])
+        isfinite(area) && area >= 0.0 || throw(ArgumentError(
+            "Scene component node $node_id has invalid radiative area $area.",
+        ))
+        # Degenerate faces have no radiative support. They remain part of the
+        # source scene, but are not light-coupling components and therefore
+        # must not create zero denominators in owner-level flux aggregation.
+        iszero(area) && continue
+
+        owner = PlantGeom.source_owner(scene, node_id)
+        # Source ownership was added after the original SceneGeometry API.
+        # Keep those historical scenes simulatable; only identity-keyed output
+        # publication requires a complete attribution snapshot.
+        owner === nothing && return nothing
+        push!(node_ids, node_id)
+        push!(owners, owner)
+        push!(areas, area)
+    end
+
+    return LightComponentMetadata(node_ids, owners, areas)
 end
 
 function _node_metadata_narrow(values::Vector{Any})
@@ -2172,6 +2219,13 @@ function prepare_light_cache(
     scattering_backend::Union{Nothing,ScatteringBackend}=nothing,
     memory_limit_bytes=nothing,
 )
+    scene_unit = PlantGeom.scene_length_unit(scene)
+    metre = PlantGeom.scene_length_unit(PlantGeom.SceneUnits())
+    scene_unit == metre || throw(ArgumentError(
+        "ArchimedLight expects scene coordinates in metres, but this scene declares " *
+        "length unit $scene_unit. Convert geometry when assembling the PlantGeom scene " *
+        "with `geometry_length_unit=...` and keep the target SceneUnits in metres.",
+    ))
     ib = _resolve_interception_backend(interception_backend)
     prepared =
         if ib isa RasterCPUBackend || ib isa RasterGPUBackend
@@ -2187,6 +2241,13 @@ function prepare_light_cache(
     interception_geometry =
         prepared === nothing ? _scene_geometry_for_interception(scene, models, options) : prepared.geometry
     render_geometry = _light_render_geometry(interception_geometry)
+    component_metadata = _build_light_component_metadata(
+        scene,
+        models,
+        options,
+        interception_geometry;
+        component_area_per_node=prepared === nothing ? nothing : prepared.component_area_per_node,
+    )
     node_metadata =
         options.store_node_metadata && scene.mtg !== nothing ?
         _build_light_node_metadata(scene, models, options, interception_geometry) : nothing
@@ -2209,6 +2270,7 @@ function prepare_light_cache(
         prepared,
         rastergpu_data,
         render_geometry,
+        component_metadata,
         node_metadata,
         mode,
         estimated,
@@ -2229,12 +2291,15 @@ function cache_summary(cache::LightSimulationCache)
             for entry in values(cache.entries);
             init=0,
         )
+    component_metadata = cache.component_metadata
     return (
         mode=cache.mode,
         estimated_entry_bytes=cache.estimated_entry_bytes,
         resident_bytes=cache.resident_bytes,
         node_metadata_bytes=cache.node_metadata === nothing ? 0 : Base.summarysize(cache.node_metadata),
         node_metadata_count=cache.node_metadata === nothing ? 0 : length(cache.node_metadata.node_id),
+        component_metadata_bytes=component_metadata === nothing ? 0 : Base.summarysize(component_metadata),
+        component_metadata_count=component_metadata === nothing ? 0 : length(component_metadata.node_id),
         cached_turtle_count=length(cache.entries),
         cached_sector_count=cached_sector_count,
         cached_full_response_sector_count=cached_full_response_sector_count,
@@ -2409,6 +2474,8 @@ function cache_summary(sim::LightSimulation)
         resident_bytes=0,
         node_metadata_bytes=0,
         node_metadata_count=0,
+        component_metadata_bytes=0,
+        component_metadata_count=0,
         cached_turtle_count=0,
         cached_sector_count=0,
         cached_full_response_sector_count=0,
@@ -3523,6 +3590,7 @@ function _run_light_step_cached(
         sky_fraction,
         cache.render_geometry,
         cache.node_metadata,
+        cache.component_metadata,
     )
 end
 
@@ -3633,6 +3701,7 @@ function _run_light_sky_cached(
         nothing,
         cache.render_geometry,
         cache.node_metadata,
+        cache.component_metadata,
     )
 end
 

@@ -14,3 +14,7 @@ PlantMeteo = "4630fe09-e0fb-4da5-a846-781cb73437b6"
 
 [sources]
 ArchimedLight = {path = ".."}
+
+[compat]
+PlantGeom = "0.20"
+PlantMeteo = "0.9"

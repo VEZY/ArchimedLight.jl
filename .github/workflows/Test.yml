@@ -6,9 +6,19 @@ on:
       - main
     tags: [ "*" ]
   workflow_dispatch:
+    inputs:
+      release_validation:
+        description: Run fixture, regression, and PlantSimEngine release gates
+        type: boolean
+        default: false
+      media_validation:
+        description: Regenerate documentation videos under Xvfb for manual review
+        type: boolean
+        default: false
 
 jobs:
   test:
+    if: github.event_name != 'workflow_dispatch' || !inputs.media_validation
     uses: ./.github/workflows/ReusableTest.yml
     with:
       os: ${{ matrix.os }}
@@ -27,3 +37,149 @@ jobs:
           - macOS-latest
           - windows-latest
         allow_failure: [ false ]
+
+  release-validation:
+    if: github.event_name == 'workflow_dispatch' && inputs.release_validation
+    name: Release validation / ${{ matrix.profile }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      actions: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [fixtures, regression, regression-release, pse-benchmarks]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: "1"
+      - uses: julia-actions/cache@v3
+      - name: Configure test environment
+        if: matrix.profile != 'pse-benchmarks'
+        shell: julia --project=test --color=yes {0}
+        run: |
+          using Pkg
+          Pkg.develop(PackageSpec(path=pwd()))
+          Pkg.instantiate()
+          Pkg.status()
+      - name: Run release fixtures
+        if: matrix.profile == 'fixtures'
+        shell: julia --project=test --color=yes {0}
+        run: |
+          using TestItemRunner
+          TestItemRunner.run_tests("test"; filter=ti -> :release in ti.tags, verbose=true)
+      - name: Run regression matrix
+        if: startsWith(matrix.profile, 'regression')
+        env:
+          ARCHIMEDLIGHT_REGRESSION_PROFILE: ${{ matrix.profile == 'regression-release' && 'release' || 'fast' }}
+        shell: julia --project=test --color=yes {0}
+        run: include(joinpath(pwd(), "test/regression_matrix/runtests.jl"))
+      - name: Run PlantSimEngine benchmarks
+        if: matrix.profile == 'pse-benchmarks'
+        shell: julia --project=benchmark/plantsimengine --color=yes {0}
+        run: |
+          using Pkg
+          Pkg.develop(PackageSpec(path=pwd()))
+          Pkg.instantiate()
+          Pkg.status()
+          include(joinpath(pwd(), "benchmark/plantsimengine/benchmarks.jl"))
+          results = run(SUITE; verbose=true, seconds=1)
+          show(stdout, MIME"text/plain"(), results)
+      - name: Upload regression report
+        if: always() && startsWith(matrix.profile, 'regression')
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.profile }}
+          path: test/regression_matrix/reports/latest
+          if-no-files-found: ignore
+
+  media-validation:
+    if: github.event_name == 'workflow_dispatch' && inputs.media_validation
+    name: Documentation media / GLMakie
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      actions: write
+      contents: read
+    env:
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      JULIA_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: "1"
+      - uses: julia-actions/cache@v3
+      - name: Install virtual display and Mesa
+        timeout-minutes: 10
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth mesa-utils libgl1 libgl1-mesa-dri xorg-dev freeglut3-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev ffmpeg
+      - name: Record environment and original media
+        timeout-minutes: 3
+        run: |
+          mkdir -p media-validation-evidence
+          git rev-parse HEAD > media-validation-evidence/commit.txt
+          julia --version > media-validation-evidence/julia-version.txt
+          uname -a > media-validation-evidence/platform.txt
+          free -h > media-validation-evidence/memory-before.txt
+          df -h > media-validation-evidence/disk-before.txt
+          sha256sum docs/make_video/make_video.jl Artifacts.toml > media-validation-evidence/inputs-sha256.txt
+          sha256sum docs/src/assets/archimedlight_day_cycle_{1,2}.{mp4,png} > media-validation-evidence/original-media-sha256.txt
+          xvfb-run -a -s '-screen 0 1280x1024x24' glxinfo -B > media-validation-evidence/opengl.txt
+      - name: Configure media environment
+        timeout-minutes: 30
+        run: |
+          xvfb-run -a -s '-screen 0 1280x1024x24' julia --project=docs/make_video --color=yes -e '
+            using Pkg
+            Pkg.develop(PackageSpec(path=pwd()))
+            Pkg.instantiate()
+            using ArchimedLight
+            @assert realpath(dirname(dirname(pathof(ArchimedLight)))) == realpath(pwd())
+            registry_dependencies = filter(info -> info.name in ("PlantGeom", "PlantSimEngine"), collect(values(Pkg.dependencies())))
+            @assert any(info -> info.name == "PlantGeom", registry_dependencies)
+            for info in registry_dependencies
+                @assert info.version == (info.name == "PlantGeom" ? v"0.20.0" : v"0.15.0")
+                @assert !info.is_tracking_path && !info.is_tracking_repo
+                @info "Registered media dependency" name=info.name version=info.version source=info.source
+            end
+            Pkg.status(; mode=Pkg.PKGMODE_MANIFEST)
+          '
+          cp docs/make_video/Project.toml docs/make_video/Manifest.toml media-validation-evidence/
+      - name: Regenerate original media scenarios
+        timeout-minutes: 60
+        run: |
+          rm docs/src/assets/archimedlight_day_cycle_{1,2}.{mp4,png}
+          touch media-validation-evidence/render-start
+          /usr/bin/time -v -o media-validation-evidence/render-resources.txt \
+            xvfb-run -a -s '-screen 0 1280x1024x24' \
+            julia --project=docs/make_video --color=yes docs/make_video/make_video.jl
+          for media in docs/src/assets/archimedlight_day_cycle_{1,2}.{mp4,png}; do
+            test -s "$media"
+            test "$media" -nt media-validation-evidence/render-start
+          done
+          sha256sum docs/src/assets/archimedlight_day_cycle_{1,2}.{mp4,png} > media-validation-evidence/generated-media-sha256.txt
+          mkdir -p media-validation-evidence/generated
+          cp docs/src/assets/archimedlight_day_cycle_{1,2}.{mp4,png} media-validation-evidence/generated/
+          for video in docs/src/assets/archimedlight_day_cycle_{1,2}.mp4; do
+            ffprobe -v error -show_format -show_streams -of json "$video" > "media-validation-evidence/$(basename "$video").json"
+          done
+      - name: Record final resource state
+        if: always()
+        timeout-minutes: 2
+        run: |
+          mkdir -p media-validation-evidence
+          free -h > media-validation-evidence/memory-after.txt
+          df -h > media-validation-evidence/disk-after.txt
+      - name: Upload media for visual review
+        if: always()
+        timeout-minutes: 3
+        uses: actions/upload-artifact@v7
+        with:
+          name: documentation-media
+          path: media-validation-evidence/
+          if-no-files-found: error

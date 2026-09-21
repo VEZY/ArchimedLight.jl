@@ -9,6 +9,7 @@ on:
       - ".github/workflows/Docs.yml"
       - "docs/**"
       - "src/**"
+      - "ext/**"
       - "*.toml"
     tags: ["*"]
   pull_request:
@@ -18,6 +19,7 @@ on:
       - ".github/workflows/Docs.yml"
       - "docs/**"
       - "src/**"
+      - "ext/**"
       - "*.toml"
     types: [opened, synchronize, reopened]
 
