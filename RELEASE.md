@@ -20,10 +20,39 @@ PlantSimEngine 0.15. PlantSimEngine remains optional: test it through the test
 project and the dedicated `benchmark/plantsimengine` project, without adding it
 to the package's direct dependencies.
 
-Retain the v0.1.3 release fixture artifact already recorded in `Artifacts.toml`.
-Its URL and checksum identify the scientific reference data, not the version of
-the package being tested. Run both regression profiles and the `:release` tests
-against that artifact. The v0.1.3 baseline notes below remain historical.
+The v0.1.3 release has no uploaded fixture asset, so the URL recorded in
+`Artifacts.toml` returns 404. Preserve that original record: its checksum
+identifies the missing historical reference, not the package being tested.
+
+For PR #51, an independent local reference was reconstructed on 2026-09-21
+with the released v0.1.3 source (`72402a91250443412465b27653a96fca68f7e3ae`).
+The inputs came from the published v0.1.2 fixture archive (SHA-256
+`761cc512e91bc90e6e0a74644e077da49358839ccfdedb6e7748c11ba8a6a92e`).
+All 66 fixtures were regenerated with the unchanged v0.1.3 numeric and image
+generators in an isolated environment. The candidate did not generate its own
+reference. Julia 1.12.1 resolved registered PlantGeom 0.19.2, PlantMeteo 0.8.5,
+and MultiScaleTreeGraph 0.15.5 for the historical source; the exact environments
+and input/reference hashes are retained with the validation evidence.
+
+The separately identified local archive is
+`archimedlight-v0.1.3-reconstructed-2026-09-21.tar.gz`:
+
+- artifact tree: `e2c6d9f98bf5f58e231a226a400665fa91fbdaf1`
+- SHA-256: `5f6e2450a2d13ea4d04e05a35352461d566ad3e3c12efabfb40acbbed069883f`
+- 66 fixtures, 367 CSV references, and 66 reference images
+
+These hashes differ from the missing original archive. Treat this as a
+reconstruction from released code, not an exact recovery of that archive.
+Use `ARCHIMEDLIGHT_RELEASE_FIXTURES_DIR` to point both regression profiles and
+the `:release` tests at the extracted reconstruction. Keep the existing
+tolerances and verify that the frozen reference hashes are unchanged after
+testing. Reconstruction alone does not establish that a candidate passes.
+
+Before a future release uses this reconstruction in CI, publish it under a
+distinct asset name and explicitly update `Artifacts.toml` with its verified
+URL and hashes. No release asset is published by the PR #51 validation, and
+the original artifact record remains unchanged. The v0.1.3 baseline notes
+below remain historical.
 
 ## v0.1.3 Registry Baseline
 
