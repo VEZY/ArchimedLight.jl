@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Breaking changes
+
+- Rename the PlantSimEngine output `radiative_mesh_area` to `area` in both
+  schemas. Update status access, output requests, and source selectors to use
+  `area`. Its value remains the geometric mesh surface area; pixel projection
+  corrections do not change it. The separate `component_values` table retains
+  its `radiative_mesh_area` column.
+- Use the common `:surface_area` contract for `aPPFD` and `Ra_SW_f`, and
+  `unit=:square_metre`, `basis=:organ` for `area`. With the matching
+  PlantBiophysics update, leaf meshes provide the shared reference area and
+  both fluxes connect directly to FvCB and Monteith. Remove the previous
+  mesh-to-leaf conversion applications. Radiation calculations and
+  normalization are unchanged; ground-area canopy fluxes still require LAI
+  conversion before leaf physiology.
+
 ## 0.2.0
 
 ### Added
@@ -14,13 +29,16 @@
 
 ### Breaking changes
 
-- The PlantSimEngine extension now declares `aPPFD` and `Ra_SW_f` as rates per
+The area-contract changes below describe 0.2.0 and are superseded by the
+Unreleased changes above.
+
+- The PlantSimEngine extension declared `aPPFD` and `Ra_SW_f` as rates per
   radiative mesh area and `radiative_mesh_area` as an organ area. Direct
   coupling of those raw flux densities to contracted leaf-area physiology
-  inputs is rejected.
-- PlantBiophysics workflows must provide a finite positive
-  `botanical_leaf_area` and use `RadiativeMeshToLeafPPFD` or
-  `RadiativeMeshToLeafShortwave`. The boundary preserves absorbed quantity:
+  inputs was rejected.
+- PlantBiophysics workflows required a finite positive
+  `botanical_leaf_area` and used `RadiativeMeshToLeafPPFD` or
+  `RadiativeMeshToLeafShortwave`. The boundary preserved absorbed quantity:
   `raw_flux * radiative_mesh_area == leaf_flux * botanical_leaf_area`.
 - Raw output field names and the `:coupling` and `:full` schemas are unchanged.
   No contract was added to the `Ri_*` or component PAR/NIR diagnostic fields.

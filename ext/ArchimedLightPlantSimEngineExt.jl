@@ -6,24 +6,26 @@ import PlantSimEngine
 
 PlantSimEngine.@process "light_interception" verbose = false
 
-const _RADIATIVE_MESH_PAR_PHOTON_FLUX_CONTRACT = PlantSimEngine.VariableContract(
+# Radiation is normalized by the represented organ surface, shared with
+# leaf physiology when the mesh defines the reference leaf area.
+const _SURFACE_PAR_PHOTON_FLUX_CONTRACT = PlantSimEngine.VariableContract(
     unit=:micromol_photon,
-    basis=:radiative_mesh_area,
+    basis=:surface_area,
     temporal=:second,
     aggregation=:rate,
     extent=:intensive,
 )
 
-const _RADIATIVE_MESH_IRRADIANCE_CONTRACT = PlantSimEngine.VariableContract(
+const _SURFACE_IRRADIANCE_CONTRACT = PlantSimEngine.VariableContract(
     unit=:joule,
-    basis=:radiative_mesh_area,
+    basis=:surface_area,
     temporal=:second,
     aggregation=:rate,
     extent=:intensive,
 )
 
-const _RADIATIVE_MESH_AREA_CONTRACT = PlantSimEngine.VariableContract(
-    unit=:square_metre_radiative,
+const _AREA_CONTRACT = PlantSimEngine.VariableContract(
+    unit=:square_metre,
     basis=:organ,
     temporal=nothing,
     aggregation=:total,
@@ -37,7 +39,7 @@ const _COUPLING_OUTPUT_NAMES = (
     :Ra_NIR_f,
     :Ra_SW_f,
     :aPPFD,
-    :radiative_mesh_area,
+    :area,
 )
 
 const _FULL_OUTPUT_NAMES = (
@@ -59,7 +61,7 @@ const _FULL_OUTPUT_NAMES = (
     :Ra_NIR_q,
     :Ra_SW_f,
     :aPPFD,
-    :radiative_mesh_area,
+    :area,
 )
 
 @inline _output_names(::Val{:coupling}) = _COUPLING_OUTPUT_NAMES
@@ -80,7 +82,7 @@ const _COUPLING_OUTPUTS = (
     Ra_NIR_f=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
     Ra_SW_f=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
     aPPFD=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
-    radiative_mesh_area=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    area=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
 )
 
 const _FULL_OUTPUTS = (
@@ -102,7 +104,7 @@ const _FULL_OUTPUTS = (
     Ra_NIR_q=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
     Ra_SW_f=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
     aPPFD=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
-    radiative_mesh_area=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    area=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
 )
 
 @inline _output_declarations(::Val{:coupling}) = _COUPLING_OUTPUTS
@@ -214,9 +216,9 @@ PlantSimEngine.environment_inputs_(::_ArchimedLightModel) = (
 # The remaining diagnostic fields stay available in both output schemas but do
 # not acquire a scientific contract by analogy.
 PlantSimEngine.variable_contracts_(::_ArchimedLightModel) = (
-    aPPFD=_RADIATIVE_MESH_PAR_PHOTON_FLUX_CONTRACT,
-    Ra_SW_f=_RADIATIVE_MESH_IRRADIANCE_CONTRACT,
-    radiative_mesh_area=_RADIATIVE_MESH_AREA_CONTRACT,
+    aPPFD=_SURFACE_PAR_PHOTON_FLUX_CONTRACT,
+    Ra_SW_f=_SURFACE_IRRADIANCE_CONTRACT,
+    area=_AREA_CONTRACT,
 )
 
 @inline function _require_finite(name::Symbol, value)
@@ -442,7 +444,7 @@ end
 function _new_output_columns(target_area)
     return merge(
         ArchimedLight._new_light_metric_columns(length(target_area)),
-        (radiative_mesh_area=target_area,),
+        (area=target_area,),
     )
 end
 

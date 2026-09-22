@@ -12,7 +12,7 @@
         :Ra_NIR_f,
         :Ra_SW_f,
         :aPPFD,
-        :radiative_mesh_area,
+        :area,
     )
 
     const FULL_NAMES = (
@@ -34,7 +34,7 @@
         :Ra_NIR_q,
         :Ra_SW_f,
         :aPPFD,
-        :radiative_mesh_area,
+        :area,
     )
 
     PlantSimEngine.@process "archimed_extension_test_consumer" verbose = false
@@ -42,9 +42,23 @@
     struct ArchimedExtensionTestConsumerModel <:
            AbstractArchimed_Extension_Test_ConsumerModel end
 
-    PlantSimEngine.inputs_(::ArchimedExtensionTestConsumerModel) =
-        (Ra_PAR_f=PlantSimEngine.Required(Float64),)
-    PlantSimEngine.outputs_(::ArchimedExtensionTestConsumerModel) = (seen=0.0,)
+    PlantSimEngine.inputs_(::ArchimedExtensionTestConsumerModel) = (
+        Ra_PAR_f=PlantSimEngine.Required(Float64),
+        aPPFD=PlantSimEngine.Required(Float64),
+        Ra_SW_f=PlantSimEngine.Required(Float64),
+    )
+    PlantSimEngine.outputs_(::ArchimedExtensionTestConsumerModel) =
+        (seen=0.0, seen_ppfd=0.0, seen_shortwave=0.0)
+    PlantSimEngine.variable_contracts_(::ArchimedExtensionTestConsumerModel) = (
+        aPPFD=PlantSimEngine.VariableContract(
+            unit=:micromol_photon, basis=:surface_area, temporal=:second,
+            aggregation=:rate, extent=:intensive,
+        ),
+        Ra_SW_f=PlantSimEngine.VariableContract(
+            unit=:joule, basis=:surface_area, temporal=:second,
+            aggregation=:rate, extent=:intensive,
+        ),
+    )
 
     function PlantSimEngine.run!(
         ::ArchimedExtensionTestConsumerModel,
@@ -54,6 +68,8 @@
         context,
     )
         status.seen = status.Ra_PAR_f
+        status.seen_ppfd = status.aPPFD
+        status.seen_shortwave = status.Ra_SW_f
         return nothing
     end
 
@@ -245,23 +261,23 @@ end
         object_resolver=_ -> :leaf,
     )
     contracts = variable_contracts(trait_kernel)
-    @test keys(contracts) == (:aPPFD, :Ra_SW_f, :radiative_mesh_area)
+    @test keys(contracts) == (:aPPFD, :Ra_SW_f, :area)
     @test contracts.aPPFD == VariableContract(
         unit=:micromol_photon,
-        basis=:radiative_mesh_area,
+        basis=:surface_area,
         temporal=:second,
         aggregation=:rate,
         extent=:intensive,
     )
     @test contracts.Ra_SW_f == VariableContract(
         unit=:joule,
-        basis=:radiative_mesh_area,
+        basis=:surface_area,
         temporal=:second,
         aggregation=:rate,
         extent=:intensive,
     )
-    @test contracts.radiative_mesh_area == VariableContract(
-        unit=:square_metre_radiative,
+    @test contracts.area == VariableContract(
+        unit=:square_metre,
         basis=:organ,
         temporal=nothing,
         aggregation=:total,
@@ -311,6 +327,9 @@ end
     one_state = final_state(one_minute, :leaf)
     ninety_state = final_state(ninety_seconds, :leaf)
     two_state = final_state(two_minutes, :leaf)
+    @test one_state.area ≈ 0.5
+    @test ninety_state.area ≈ one_state.area
+    @test two_state.area ≈ one_state.area
     @test one_state.Ra_PAR_f > 0.0
     @test ninety_state.Ra_PAR_f ≈ one_state.Ra_PAR_f
     @test two_state.Ra_PAR_f ≈ one_state.Ra_PAR_f
@@ -398,6 +417,7 @@ end
 
 @testitem "Exact scene MTG identity resolves PlantGeom source owners" tags = [:plantsimengine, :fast] setup = [ArchimedLightPlantSimEngineTestSupport] begin
     using ArchimedLight
+    using PlantGeom
     using PlantSimEngine
 
     const H = ArchimedLightPlantSimEngineTestSupport
@@ -416,7 +436,8 @@ end
     leaf = final_state(simulation, leaf_id)
     @test leaf.Ri_PAR_f > 0.0
     @test leaf.Ra_PAR_f > 0.0
-    @test leaf.radiative_mesh_area > 0.0
+    @test leaf.area ≈ only(values(PlantGeom.node_areas(scene)))
+    @test leaf.area ≈ 0.5
 end
 
 @testitem "ArchimedLight is the distributed writer and assigns by identity" tags = [:plantsimengine, :fast] setup = [ArchimedLightPlantSimEngineTestSupport] begin
@@ -455,9 +476,9 @@ end
     @test schedule[:archimed_light] < schedule[:leaf_consumer]
     consumer_bindings = [
         row for row in Diagnostics.explain_bindings(compiled)
-        if row.application_id == :leaf_consumer && row.input == :Ra_PAR_f
+        if row.application_id == :leaf_consumer && row.input in (:Ra_PAR_f, :aPPFD, :Ra_SW_f)
     ]
-    @test length(consumer_bindings) == 2
+    @test length(consumer_bindings) == 6
     @test all(
         row.source_application_ids == [:archimed_light]
         for row in consumer_bindings
@@ -474,9 +495,12 @@ end
         object_id = destinations[owner]
         status = final_state(simulation, object_id)
         for name in H.COUPLING_NAMES
-            @test getproperty(status, name) ≈ getproperty(expected, name)[row]
+            column = name === :area ? expected.radiative_mesh_area : getproperty(expected, name)
+            @test getproperty(status, name) ≈ column[row]
         end
         @test status.seen ≈ status.Ra_PAR_f
+        @test status.seen_ppfd ≈ expected.aPPFD[row]
+        @test status.seen_shortwave ≈ expected.Ra_SW_f[row]
     end
 end
 
@@ -514,7 +538,8 @@ end
     simulation = run!(runtime; outputs=:none)
     leaf = final_state(simulation, :leaf)
     for name in H.COUPLING_NAMES
-        @test getproperty(leaf, name) ≈ getproperty(expected, name)[leaf_row]
+        column = name === :area ? expected.radiative_mesh_area : getproperty(expected, name)
+        @test getproperty(leaf, name) ≈ column[leaf_row]
     end
     ground_status = model_object(runtime, :ground).status
     @test ground_status === nothing || !hasproperty(ground_status, :Ra_PAR_f)
@@ -777,7 +802,7 @@ end
     simulation = run!(runtime; outputs=:none)
     status = final_state(simulation, :compound_leaf)
 
-    @test status.radiative_mesh_area ≈ total_area
+    @test status.area ≈ total_area
     for name in (
         :Ri_PAR_f,
         :Ri_NIR_f,
