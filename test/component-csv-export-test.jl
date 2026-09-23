@@ -67,9 +67,11 @@ end
     sim = LightSimulation(scene, models; options=options)
     sky = SkyState(180.0, 90.0, 100.0, 50.0, 0.5, 0.5)
     step = run_light(sim, sky; step_duration_seconds=60.0)
+    @test step.sky_fraction !== nothing
     disabled_sim = LightSimulation(scene, models; options=LightOptions(options; store_node_metadata=false))
     disabled_step = run_light(disabled_sim, sky; step_duration_seconds=60.0)
     @test disabled_step.node_metadata === nothing
+    @test disabled_step.sky_fraction !== nothing
     metadata = something(step.node_metadata)
     snapshot = deepcopy(metadata)
     @test ArchimedLight._component_output_metadata(sim, step) === metadata
@@ -110,6 +112,7 @@ end
 
         # Unstored sky fraction still uses the same sector-response computation.
         recomputed = ComponentCSVHelper.without_metadata(step; sky_fraction=nothing)
+        @test recomputed.sky_fraction === nothing
         recomputed_path = joinpath(directory, "sky-recomputed.csv")
         write_component_values(recomputed_path, sim, [recomputed, recomputed]; step_index_base=0)
         @test read(recomputed_path) == read(original)
