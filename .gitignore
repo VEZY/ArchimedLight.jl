@@ -6,6 +6,7 @@
 /docs/make_video/Manifest*.toml
 /docs/build/
 *.DS_Store
+*.mp4
 java_implementation/*
 .juliaup
 .julia_depot
@@ -15,6 +16,10 @@ java_implementation/*
 !/benchmark/results/artifact_scene_matrix_cpu.tsv
 !/benchmark/results/artifact_scene_matrix_summary.md
 /benchmark/.asv/
+/benchmark/benchmark_scenes/
+/benchmark/benchmark_scenes.zip
+/benchmark/benchmark-scenes*.tar.gz
+/benchmark-scenes*.tar.gz
 /example_1/output/
 *.jl.*.cov
 *.jl.cov

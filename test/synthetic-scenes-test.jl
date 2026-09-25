@@ -151,7 +151,123 @@ end
     @test isapprox(get(HelperModule._incident_par_initial_energy(stack_run.budget), 2, 0.0), 75.0; atol=1e-8, rtol=1e-8)
 end
 
+@testitem "Synthetic case GPU upper-hit transparency parity" tags = [:synthetic, :fast, :raster_gpu, :translucent_stack] setup = [HelperModule] begin
+    import KernelAbstractions
+
+    transparency = 0.25
+    scene = HelperModule._synthetic_horizontal_scene([
+        (x0=0.0, x1=1.0, y0=0.0, y1=1.0, z=1.0, group="leaf", type="plate", object_id=1),
+        (x0=0.0, x1=1.0, y0=0.0, y1=1.0, z=0.1, group="leaf", type="plate", object_id=2),
+    ])
+    models = ArchimedLight.prepare_models([
+        ArchimedLight.GroupModel(
+            "leaf";
+            types=HelperModule.OrderedDict(
+                "plate" => ArchimedLight.TypeModel(
+                    interception=ArchimedLight.InterceptionModel(
+                        model="Translucent",
+                        transparency=transparency,
+                        optical_properties=ArchimedLight.OpticalProperties(0.15, 0.30),
+                    ),
+                ),
+            ),
+        ),
+    ])
+    options = HelperModule._synthetic_options(
+        sectors=1,
+        all_in_turtle=false,
+        scattering=false,
+        pixel_size=0.1,
+        toricity=true,
+    )
+    prepared = ArchimedLight._prepare_interception_data(
+        scene,
+        models,
+        options;
+        include_budget_maps=true,
+    )
+    @test prepared.upper_hit
+    # A non-dividing toric tile exercises the upper-hit stack sort/reduce path.
+    sort_reduce_tile_size = first(
+        tile_size for tile_size in 2:11 if
+        prepared.geometry.plotbox.nx % tile_size != 0 ||
+        prepared.geometry.plotbox.ny % tile_size != 0
+    )
+
+    sky = ArchimedLight.SkyState(180.0, 90.0, 100.0, 0.0, 1.0, 0.0)
+    turtle = ArchimedLight.build_turtle(options, sky)
+    fluxes = ArchimedLight.compute_directional_fluxes(sky, turtle, options)
+    reference = ArchimedLight.compute_first_order(
+        scene,
+        models,
+        turtle,
+        fluxes,
+        options;
+        backend=ArchimedLight.RasterCPUBackend(),
+    )
+
+    expected_visible_fraction = 1.0 - transparency
+    @test isapprox(
+        get(reference.projected_area_per_node, 1, 0.0),
+        expected_visible_fraction;
+        atol=1e-10,
+        rtol=1e-10,
+    )
+    @test isapprox(
+        get(reference.incident_power.par, 1, 0.0),
+        100.0 * expected_visible_fraction;
+        atol=1e-8,
+        rtol=1e-8,
+    )
+    @test iszero(get(reference.projected_area_per_node, 2, 0.0))
+
+    candidates = (
+        ArchimedLight.RasterGPUBackend(
+            backend=KernelAbstractions.CPU(),
+            tile_size=2,
+            tile_face_capacity=64,
+            top_hit_tile_size=1,
+            top_hit_tile_face_capacity=64,
+        ),
+        ArchimedLight.RasterGPUBackend(
+            backend=KernelAbstractions.CPU(),
+            tile_size=2,
+            tile_face_capacity=64,
+            top_hit_tile_size=sort_reduce_tile_size,
+            top_hit_tile_face_capacity=64,
+        ),
+    )
+
+    for backend in candidates
+        candidate = ArchimedLight.compute_first_order(
+            scene,
+            models,
+            turtle,
+            fluxes,
+            options;
+            backend=backend,
+        )
+        @test candidate.dense !== nothing
+        node_ids = candidate.dense.node_ids
+        @test candidate.dense.projected_area_per_node ≈
+              [get(reference.projected_area_per_node, node_id, 0.0) for node_id in node_ids] atol = 1e-5 rtol = 1e-5
+        @test candidate.dense.incident_power.par ≈
+              [get(reference.incident_power.par, node_id, 0.0) for node_id in node_ids] atol = 1e-5 rtol = 1e-5
+        @test candidate.dense.incident_power.nir ≈
+              [get(reference.incident_power.nir, node_id, 0.0) for node_id in node_ids] atol = 1e-5 rtol = 1e-5
+        @test isapprox(
+            get(candidate.projected_area_per_node, 1, 0.0),
+            expected_visible_fraction;
+            atol=1e-5,
+            rtol=1e-5,
+        )
+        @test iszero(get(candidate.projected_area_per_node, 2, 0.0))
+    end
+end
+
 @testitem "Synthetic case Lambertian emitter energy accounting" tags = [:synthetic, :fast, :lambertian_emitter] setup = [HelperModule] begin
+    import KernelAbstractions
+
     models = ArchimedLight.prepare_models([
         ArchimedLight.GroupModel(
             "*";
@@ -225,11 +341,25 @@ end
     ])
     emitted_par, emitted_nir = ArchimedLight._emitter_power_per_node(closed_scene, models)
     first = ArchimedLight.compute_first_order(closed_scene, models, turtle, zero_fluxes, options)
+    gpu_first = ArchimedLight.compute_first_order(
+        closed_scene,
+        models,
+        turtle,
+        zero_fluxes,
+        options;
+        backend=ArchimedLight.RasterGPUBackend(
+            backend=KernelAbstractions.CPU(),
+            max_hits_per_pixel=64,
+            tile_size=2,
+            tile_face_capacity=256,
+        ),
+    )
     prepared = ArchimedLight._prepare_interception_data(closed_scene, models, options; include_budget_maps=true)
     n_nodes = length(prepared.geometry.node_ids)
     n_sectors = options.turtle_sectors + (options.all_in_turtle ? 0 : 1)
     expected_cache_estimate =
-        n_sectors * n_nodes * (sizeof(Float64) + sizeof(Int)) +
+        n_sectors * n_nodes * sizeof(Float64) +
+        n_nodes * sizeof(Int) +
         2 * length(prepared.emitter_nodes) * n_nodes * 64 +
         4 * n_nodes * sizeof(Float64)
     @test ArchimedLight._estimate_light_cache_entry_bytes(prepared, options) ==
@@ -248,6 +378,10 @@ end
     @test 0.0 < first.emitter_escaped_power.par[1] < emitted_par[1]
     @test isapprox(first.incident_power.par[2] + first.emitter_escaped_power.par[1], emitted_par[1]; atol=1e-10, rtol=1e-10)
     @test isapprox(first.incident_power.nir[2] + first.emitter_escaped_power.nir[1], emitted_nir[1]; atol=1e-10, rtol=1e-10)
+    @test HelperModule._dicts_close(gpu_first.incident_power.par, first.incident_power.par; atol=1e-5, rtol=1e-5)
+    @test HelperModule._dicts_close(gpu_first.incident_power.nir, first.incident_power.nir; atol=1e-5, rtol=1e-5)
+    @test HelperModule._dicts_close(gpu_first.emitter_escaped_power.par, first.emitter_escaped_power.par; atol=1e-5, rtol=1e-5)
+    @test HelperModule._dicts_close(gpu_first.emitter_escaped_power.nir, first.emitter_escaped_power.nir; atol=1e-5, rtol=1e-5)
     @test HelperModule._dicts_close(cached_first.incident_power.par, first.incident_power.par; atol=1e-10, rtol=1e-10)
     @test HelperModule._dicts_close(cached_first.incident_power.nir, first.incident_power.nir; atol=1e-10, rtol=1e-10)
     @test HelperModule._dicts_close(cached_first.emitter_escaped_power.par, first.emitter_escaped_power.par; atol=1e-10, rtol=1e-10)
@@ -347,6 +481,8 @@ end
 end
 
 @testitem "Emitter custom bands and virtual sensors preserve physical transfer" tags = [:synthetic, :fast, :lambertian_emitter] setup = [HelperModule] begin
+    import KernelAbstractions
+
     custom_gamma = ArchimedLight.OpticalProperties(
         0.2,
         0.5,
@@ -443,6 +579,21 @@ end
         emitter_band_par="CUSTOM",
         emitter_band_nir=nothing,
     )
+    custom_gpu_first = ArchimedLight.compute_first_order(
+        scene,
+        models,
+        turtle,
+        zero_fluxes,
+        options;
+        backend=ArchimedLight.RasterGPUBackend(
+            backend=KernelAbstractions.CPU(),
+            max_hits_per_pixel=64,
+            tile_size=2,
+            tile_face_capacity=256,
+        ),
+        emitter_band_par="CUSTOM",
+        emitter_band_nir=nothing,
+    )
     @test custom_first.incident_power.par[2] > 0.0
     @test custom_first.incident_power.par[3] > 0.0
     @test isapprox(
@@ -450,6 +601,18 @@ end
         custom_emitted;
         atol=1e-10,
         rtol=1e-10,
+    )
+    @test HelperModule._dicts_close(
+        custom_gpu_first.incident_power.par,
+        custom_first.incident_power.par;
+        atol=1e-5,
+        rtol=1e-5,
+    )
+    @test HelperModule._dicts_close(
+        custom_gpu_first.emitter_escaped_power.par,
+        custom_first.emitter_escaped_power.par;
+        atol=1e-5,
+        rtol=1e-5,
     )
 
     # An absent gamma must not inherit PAR emission in a custom-band pass.
@@ -1132,6 +1295,57 @@ end
             iszero,
             values(emitter_step.budget.emitter_escaped_energy_per_band["NIR"]),
         )
+    end
+end
+
+@testitem "Synthetic case GPU backends ignore disabled explicit NIR flux" tags = [:synthetic, :fast, :nir_interception, :raster_gpu] setup = [HelperModule] begin
+    import KernelAbstractions
+
+    scene = HelperModule._synthetic_horizontal_scene([
+        (x0=0.0, x1=1.0, y0=0.0, y1=1.0, z=1.0, group="plate", type="plate", object_id=1),
+    ])
+    models = HelperModule._default_synthetic_models()
+    options = ArchimedLight.LightOptions(
+        HelperModule._synthetic_options(
+            sectors=1,
+            all_in_turtle=false,
+            scattering=false,
+            pixel_size=0.1,
+            toricity=false,
+        );
+        nir_interception=false,
+    )
+    sky = ArchimedLight.SkyState(180.0, 90.0, 80.0, 0.0, 1.0, 0.0)
+    turtle = ArchimedLight.build_turtle(options, sky)
+    fluxes = ArchimedLight.DirectionalFluxes(
+        [sector.id for sector in turtle.sectors],
+        fill(80.0, length(turtle.sectors)),
+        fill(37.0, length(turtle.sectors)),
+    )
+    @test any(x -> !iszero(x), fluxes.nir)
+
+    backends = (
+        ArchimedLight.RasterGPUBackend(
+            backend=KernelAbstractions.CPU(),
+            top_hit_tile_size=4,
+            top_hit_tile_face_capacity=32,
+        ),
+    )
+    for backend in backends
+        first = ArchimedLight.compute_first_order(
+            scene,
+            models,
+            turtle,
+            fluxes,
+            options;
+            backend=backend,
+        )
+
+        @test sum(values(first.incident_power.par)) > 0.0
+        @test all(iszero, values(first.incident_power.nir))
+        @test first.dense !== nothing
+        @test sum(first.dense.incident_power.par) > 0.0
+        @test all(iszero, first.dense.incident_power.nir)
     end
 end
 

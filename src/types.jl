@@ -13,6 +13,135 @@ Reference interception backend based on CPU raster projection.
 struct RasterCPUBackend <: InterceptionBackend end
 
 """
+    RasterGPUBackendConfig(; backend=KernelAbstractions.CPU(), workgroupsize=nothing,
+        max_hits_per_pixel=32, tile_size=1, tile_face_capacity=32,
+        top_hit_tile_size=1, top_hit_tile_face_capacity=nothing,
+        edge_accumulation=:auto, dense_edge_limit_bytes=512 * 1024^2,
+        validate=false)
+
+Configuration for the native KernelAbstractions raster backend. The `backend`
+field is a KernelAbstractions backend; GPU packages are loaded by callers. The
+same device kernels are used for CPU-backed validation and GPU execution.
+"""
+struct RasterGPUBackendConfig{B}
+    backend::B
+    workgroupsize::Int
+    max_hits_per_pixel::Int
+    tile_size::Int
+    tile_face_capacity::Int
+    top_hit_tile_size::Int
+    top_hit_tile_face_capacity::Int
+    edge_accumulation::Symbol
+    dense_edge_limit_bytes::Int
+    validate::Bool
+
+    function RasterGPUBackendConfig(
+        backend::B,
+        workgroupsize::Integer,
+        max_hits_per_pixel::Integer,
+        tile_size::Integer,
+        tile_face_capacity::Integer,
+        top_hit_tile_size::Integer,
+        top_hit_tile_face_capacity::Integer,
+        edge_accumulation::Symbol,
+        dense_edge_limit_bytes::Integer,
+        validate::Bool,
+    ) where {B}
+        workgroupsize > 0 || error("RasterGPUBackendConfig workgroupsize must be positive.")
+        max_hits_per_pixel > 0 || error("RasterGPUBackendConfig max_hits_per_pixel must be positive.")
+        tile_size > 0 || error("RasterGPUBackendConfig tile_size must be positive.")
+        tile_face_capacity > 0 || error("RasterGPUBackendConfig tile_face_capacity must be positive.")
+        top_hit_tile_size > 0 || error("RasterGPUBackendConfig top_hit_tile_size must be positive.")
+        top_hit_tile_face_capacity > 0 ||
+            error("RasterGPUBackendConfig top_hit_tile_face_capacity must be positive.")
+        dense_edge_limit_bytes > 0 || error("RasterGPUBackendConfig dense_edge_limit_bytes must be positive.")
+        edge_accumulation in (:auto, :sparse_host_reduce, :dense_atomic) ||
+            error("Unsupported RasterGPU edge_accumulation: $edge_accumulation (supported: :auto, :sparse_host_reduce, :dense_atomic)")
+        return new{B}(
+            backend,
+            Int(workgroupsize),
+            Int(max_hits_per_pixel),
+            Int(tile_size),
+            Int(tile_face_capacity),
+            Int(top_hit_tile_size),
+            Int(top_hit_tile_face_capacity),
+            edge_accumulation,
+            Int(dense_edge_limit_bytes),
+            validate,
+        )
+    end
+end
+
+function RasterGPUBackendConfig(;
+    backend=KernelAbstractions.CPU(),
+    workgroupsize::Union{Nothing,Integer}=nothing,
+    max_hits_per_pixel::Integer=32,
+    tile_size::Integer=1,
+    tile_face_capacity::Integer=32,
+    top_hit_tile_size::Integer=1,
+    top_hit_tile_face_capacity::Union{Nothing,Integer}=nothing,
+    edge_accumulation::Symbol=:auto,
+    dense_edge_limit_bytes::Integer=512 * 1024^2,
+    validate::Bool=false,
+)
+    effective_top_hit_tile_face_capacity =
+        top_hit_tile_face_capacity === nothing ? tile_face_capacity : top_hit_tile_face_capacity
+    return RasterGPUBackendConfig(
+        backend,
+        workgroupsize === nothing ? 256 : workgroupsize,
+        max_hits_per_pixel,
+        tile_size,
+        tile_face_capacity,
+        top_hit_tile_size,
+        effective_top_hit_tile_face_capacity,
+        edge_accumulation,
+        dense_edge_limit_bytes,
+        validate,
+    )
+end
+
+"""
+    RasterGPUBackend(; kwargs...)
+    RasterGPUBackend(config::RasterGPUBackendConfig)
+
+Native GPU-oriented raster interception backend. It keeps projection,
+visibility stacks, visible-area reductions, and scattering-topology stack
+generation in KernelAbstractions kernels.
+"""
+struct RasterGPUBackend{C<:RasterGPUBackendConfig} <: InterceptionBackend
+    config::C
+end
+
+RasterGPUBackend(; kwargs...) = RasterGPUBackend(RasterGPUBackendConfig(; kwargs...))
+
+function _rastergpu_config_with(
+    config::RasterGPUBackendConfig;
+    backend=config.backend,
+    workgroupsize=config.workgroupsize,
+    max_hits_per_pixel=config.max_hits_per_pixel,
+    tile_size=config.tile_size,
+    tile_face_capacity=config.tile_face_capacity,
+    top_hit_tile_size=config.top_hit_tile_size,
+    top_hit_tile_face_capacity=config.top_hit_tile_face_capacity,
+    edge_accumulation=config.edge_accumulation,
+    dense_edge_limit_bytes=config.dense_edge_limit_bytes,
+    validate=config.validate,
+)
+    return RasterGPUBackendConfig(
+        backend,
+        workgroupsize,
+        max_hits_per_pixel,
+        tile_size,
+        tile_face_capacity,
+        top_hit_tile_size,
+        top_hit_tile_face_capacity,
+        edge_accumulation,
+        dense_edge_limit_bytes,
+        validate,
+    )
+end
+
+"""
     ScatteringBackend
 
 Abstract supertype for multiple-scattering backends.
@@ -26,6 +155,38 @@ Scattering backend that reconstructs transfer topology from directional
 ray-visibility stacks.
 """
 struct RaycastScatteringBackend <: ScatteringBackend end
+
+"""
+    RasterGPUScatteringBackend(interception_backend::RasterGPUBackend; kwargs...)
+    RasterGPUScatteringBackend(; kwargs...)
+
+Scattering backend that builds transfer topology from native raster GPU stacks.
+"""
+struct RasterGPUScatteringBackend{C<:RasterGPUBackendConfig} <: ScatteringBackend
+    config::C
+end
+
+RasterGPUScatteringBackend(; kwargs...) = RasterGPUScatteringBackend(RasterGPUBackendConfig(; kwargs...))
+
+function RasterGPUScatteringBackend(
+    interception_backend::RasterGPUBackend;
+    edge_accumulation::Symbol=interception_backend.config.edge_accumulation,
+    dense_edge_limit_bytes::Integer=interception_backend.config.dense_edge_limit_bytes,
+    tile_size::Integer=interception_backend.config.tile_size,
+    tile_face_capacity::Integer=interception_backend.config.tile_face_capacity,
+    validate::Bool=interception_backend.config.validate,
+)
+    return RasterGPUScatteringBackend(
+        _rastergpu_config_with(
+            interception_backend.config;
+            edge_accumulation=edge_accumulation,
+            dense_edge_limit_bytes=dense_edge_limit_bytes,
+            tile_size=tile_size,
+            tile_face_capacity=tile_face_capacity,
+            validate=validate,
+        ),
+    )
+end
 
 """
     OpticalProperties(par=0.0, nir=0.0)
@@ -607,14 +768,8 @@ Fields:
   interception.
 - `nir_scattering`: include NIR in the multiple-scattering stage. This has no
   effect if `nir_interception=false`.
-- `java_logged_turtle_dirs`: use the Java-compatibility turtle direction path
-  used in parity/debug workflows.
 - `meteo_range`: optional historical range selector applied during meteo
   preparation, for example `"2, 5"` or a datetime range.
-- `debug`: enable debug-only compatibility hooks.
-- `log_debug`: emit additional debug logging where implemented.
-- `debug_drop_leading_hit`: optional `(node_id, x, y)` hook used to remove a
-  leading raster hit at one pixel for parity debugging.
 
 Typical starting point for simple runs:
 
@@ -1217,6 +1372,23 @@ struct SpectralNodeValues
     nir::Dict{Int,Float64}
 end
 
+struct DenseSpectralNodeValues
+    par::Vector{Float64}
+    nir::Vector{Float64}
+end
+
+struct DenseFirstOrderResult
+    node_ids::Vector{Int}
+    projected_area_per_node::Vector{Float64}
+    incident_power::DenseSpectralNodeValues
+    hits_per_node::Vector{Int}
+end
+
+struct DenseScatteringResult
+    node_ids::Vector{Int}
+    added_power::DenseSpectralNodeValues
+end
+
 struct InitialTotalSpectralNodeValues
     initial::SpectralNodeValues
     total::SpectralNodeValues
@@ -1234,6 +1406,7 @@ struct FirstOrderResult
     incident_power::SpectralNodeValues
     hits_per_node::Dict{Int,Int}
     emitter_escaped_power::SpectralNodeValues
+    dense::Union{Nothing,DenseFirstOrderResult}
 end
 
 FirstOrderResult(
@@ -1245,6 +1418,33 @@ FirstOrderResult(
     incident_power,
     hits_per_node,
     SpectralNodeValues(Dict{Int,Float64}(), Dict{Int,Float64}()),
+    nothing,
+)
+
+FirstOrderResult(
+    projected_area_per_node::Dict{Int,Float64},
+    incident_power::SpectralNodeValues,
+    hits_per_node::Dict{Int,Int},
+    emitter_escaped_power::SpectralNodeValues,
+) = FirstOrderResult(
+    projected_area_per_node,
+    incident_power,
+    hits_per_node,
+    emitter_escaped_power,
+    nothing,
+)
+
+FirstOrderResult(
+    projected_area_per_node::Dict{Int,Float64},
+    incident_power::SpectralNodeValues,
+    hits_per_node::Dict{Int,Int},
+    dense::Union{Nothing,DenseFirstOrderResult},
+) = FirstOrderResult(
+    projected_area_per_node,
+    incident_power,
+    hits_per_node,
+    SpectralNodeValues(Dict{Int,Float64}(), Dict{Int,Float64}()),
+    dense,
 )
 
 """
@@ -1257,7 +1457,14 @@ struct ScatteringResult
     added_power::SpectralNodeValues
     iterations::Int
     converged::Bool
+    dense::Union{Nothing,DenseScatteringResult}
 end
+
+ScatteringResult(
+    added_power::SpectralNodeValues,
+    iterations::Int,
+    converged::Bool,
+) = ScatteringResult(added_power, iterations, converged, nothing)
 
 """
     ScatteringPairCounts
@@ -1299,6 +1506,90 @@ function ScatteringPairCounts(pair_counts::Dict{Tuple{Int,Int},Int})
     return ScatteringPairCounts(to_nodes, from_nodes, counts)
 end
 
+struct DenseScatteringStaticGraph
+    to_idx::Vector{Int}
+    from_idx::Vector{Int}
+    counts::Vector{Int}
+    coeff_par::Vector{Float64}
+    coeff_nir::Vector{Float64}
+    device_cache::IdDict{Any,Any}
+end
+
+function DenseScatteringStaticGraph(
+    pair_counts::ScatteringPairCounts,
+    node_ids::Vector{Int},
+    coeff_par_by_node::Dict{Int,Float64},
+    coeff_nir_by_node::Dict{Int,Float64},
+)
+    node_index = Dict{Int,Int}(nid => i for (i, nid) in pairs(node_ids))
+    coeff_par = zeros(Float64, length(node_ids))
+    coeff_nir = zeros(Float64, length(node_ids))
+    @inbounds for (i, nid) in pairs(node_ids)
+        coeff_par[i] = get(coeff_par_by_node, nid, 0.0)
+        coeff_nir[i] = get(coeff_nir_by_node, nid, 0.0)
+    end
+
+    n_edges = length(pair_counts)
+    to_idx = Vector{Int}(undef, n_edges)
+    from_idx = Vector{Int}(undef, n_edges)
+    counts = copy(pair_counts.counts)
+    @inbounds for edge_idx in 1:n_edges
+        to_idx[edge_idx] = node_index[pair_counts.to_nodes[edge_idx]]
+        from_idx[edge_idx] = node_index[pair_counts.from_nodes[edge_idx]]
+    end
+    return DenseScatteringStaticGraph(to_idx, from_idx, counts, coeff_par, coeff_nir, IdDict{Any,Any}())
+end
+
+function DenseScatteringStaticGraph(
+    to_idx::Vector{Int},
+    from_idx::Vector{Int},
+    counts::Vector{Int},
+    node_ids::Vector{Int},
+    coeff_par_by_node::Dict{Int,Float64},
+    coeff_nir_by_node::Dict{Int,Float64},
+)
+    coeff_par = zeros(Float64, length(node_ids))
+    coeff_nir = zeros(Float64, length(node_ids))
+    @inbounds for (i, nid) in pairs(node_ids)
+        coeff_par[i] = get(coeff_par_by_node, nid, 0.0)
+        coeff_nir[i] = get(coeff_nir_by_node, nid, 0.0)
+    end
+    return DenseScatteringStaticGraph(to_idx, from_idx, counts, coeff_par, coeff_nir, IdDict{Any,Any}())
+end
+
+struct DenseScatteringGraph
+    all_hits::Vector{Int}
+    static::DenseScatteringStaticGraph
+    device_cache::IdDict{Any,Any}
+end
+
+function DenseScatteringGraph(all_hits::Vector{Int}, static::DenseScatteringStaticGraph)
+    return DenseScatteringGraph(all_hits, static, IdDict{Any,Any}())
+end
+
+function DenseScatteringGraph(
+    all_hits::Dict{Int,Int},
+    node_ids::Vector{Int},
+    static::DenseScatteringStaticGraph,
+)
+    hit_counts = zeros(Int, length(node_ids))
+    @inbounds for (i, nid) in pairs(node_ids)
+        hit_counts[i] = get(all_hits, nid, 0)
+    end
+    return DenseScatteringGraph(hit_counts, static, IdDict{Any,Any}())
+end
+
+function DenseScatteringGraph(
+    pair_counts::ScatteringPairCounts,
+    all_hits::Dict{Int,Int},
+    node_ids::Vector{Int},
+    coeff_par_by_node::Dict{Int,Float64},
+    coeff_nir_by_node::Dict{Int,Float64},
+)
+    static = DenseScatteringStaticGraph(pair_counts, node_ids, coeff_par_by_node, coeff_nir_by_node)
+    return DenseScatteringGraph(all_hits, node_ids, static)
+end
+
 """
     ScatteringTransferGraph
 
@@ -1316,6 +1607,37 @@ struct ScatteringTransferGraph
     coeff_nir_by_node::Dict{Int,Float64}
     default_coeff_par::Float64
     default_coeff_nir::Float64
+    dense::Base.RefValue{Union{Nothing,DenseScatteringGraph}}
+    dense_static::Union{Nothing,DenseScatteringStaticGraph}
+end
+
+function ScatteringTransferGraph(
+    pair_counts::ScatteringPairCounts,
+    all_hits::Dict{Int,Int},
+    node_ids::Vector{Int},
+    node_group::Dict{Int,String},
+    node_type::Dict{Int,String},
+    group_type_coeffs::Dict{Tuple{String,String},Dict{String,Float64}},
+    coeff_par_by_node::Dict{Int,Float64},
+    coeff_nir_by_node::Dict{Int,Float64},
+    default_coeff_par::Float64,
+    default_coeff_nir::Float64,
+    dense_static::Union{Nothing,DenseScatteringStaticGraph}=nothing,
+)
+    return ScatteringTransferGraph(
+        pair_counts,
+        all_hits,
+        node_ids,
+        node_group,
+        node_type,
+        group_type_coeffs,
+        coeff_par_by_node,
+        coeff_nir_by_node,
+        default_coeff_par,
+        default_coeff_nir,
+        Ref{Union{Nothing,DenseScatteringGraph}}(nothing),
+        dense_static,
+    )
 end
 
 function ScatteringTransferGraph(

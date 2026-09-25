@@ -49,6 +49,7 @@ makedocs(;
             "PlantSimEngine Coupling" => "plantsimengine.md",
             "File-Based Example" => "full_example.md",
             "Composable Stages" => "stages.md",
+            "GPU Backends And Benchmarks" => "gpu_backends.md",
             "Historical ARCHIMED Reference" => "archimed_reference.md",
         ],
         "API Reference" => [
