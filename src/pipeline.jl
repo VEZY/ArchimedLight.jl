@@ -3010,6 +3010,16 @@ function _run_light_sky_cached(
         absorption_par_per_node=prepared === nothing ? nothing : prepared.absorption_par_per_node,
         absorption_nir_per_node=prepared === nothing ? nothing : prepared.absorption_nir_per_node,
     )
+    sky_fraction =
+        options.include_sky_fraction ?
+        _compute_sky_fraction(
+            scene,
+            models,
+            turtle,
+            options;
+            prepared=prepared,
+            responses_cache=responses_cache,
+        ) : nothing
     return LightStepResult(
         sky,
         turtle,
@@ -3018,7 +3028,7 @@ function _run_light_sky_cached(
         scat,
         budget,
         extra_irr,
-        nothing,
+        sky_fraction,
         cache.render_geometry,
         cache.node_metadata,
         cache.component_metadata,

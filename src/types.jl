@@ -1049,7 +1049,10 @@ function _scene_mtg_node(scene::PlantGeom.SceneGeometry, node_id::Integer)
 end
 
 function _inherited_attr(scene::PlantGeom.SceneGeometry, node_id::Integer, keys::Tuple, default)
-    node = _scene_mtg_node(scene, node_id)
+    _inherited_attr(_scene_mtg_node(scene, node_id), keys, default)
+end
+
+function _inherited_attr(node, keys::Tuple, default)
     while node !== nothing
         for key in keys
             v = _mtg_node_attr(node, key)
@@ -1066,8 +1069,10 @@ function _scene_group(scene::PlantGeom.SceneGeometry, node_id::Integer, default=
     v === nothing ? default : string(v)
 end
 
-function _scene_type(scene::PlantGeom.SceneGeometry, node_id::Integer, default="")
-    node = _scene_mtg_node(scene, node_id)
+_scene_type(scene::PlantGeom.SceneGeometry, node_id::Integer, default="") =
+    _mtg_node_type(_scene_mtg_node(scene, node_id), default)
+
+function _mtg_node_type(node, default="")
     for key in (:type, :Type, :functional_type, :functionalType, :organ_type, :organType)
         v = _mtg_node_attr(node, key)
         if v !== nothing

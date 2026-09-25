@@ -411,19 +411,72 @@ function component_values!(
     return table
 end
 
-function _component_output_node_ids(scene::PlantGeom.SceneGeometry, models::LightModels, options::LightOptions)
-    geometry = _scene_geometry_for_interception(scene, models, options)
-    keys_by_node = _interception_output_keys(scene, models, options)
-    ids = collect(geometry.node_ids)
-    sort!(
-        ids;
-        by=nid -> (
-            get(keys_by_node, nid, (_scene_object_id(scene, nid, 1), _scene_source_topology_id(scene, nid, nid)))[1],
-            get(keys_by_node, nid, (_scene_object_id(scene, nid, 1), _scene_source_topology_id(scene, nid, nid)))[2],
-            nid,
-        ),
+# Build only the CSV identity columns when a historical result has no snapshot.
+# The index is local to this export (or reused from prepared geometry); MTG nodes
+# are visited once, never looked up during sorting or row construction.
+function _component_output_metadata(scene, models, node_ids, geometry=nothing)
+    ids = collect(node_ids)
+    node_index = geometry === nothing ? Dict(nid => i for (i, nid) in pairs(ids)) : geometry.node_index
+    n = length(ids)
+    object_ids = fill(-1, n)
+    item_ids = ones(Int, n)
+    groups = geometry === nothing ? fill("", n) : copy(geometry.node_group_by_index)
+    types = geometry === nothing ? fill("", n) : copy(geometry.node_type_by_index)
+    object_cache = Dict{Int,Any}()
+    if scene.mtg !== nothing
+        MultiScaleTreeGraph.traverse!(scene.mtg) do node
+            i = get(node_index, Int(MultiScaleTreeGraph.node_id(node)), 0)
+            i == 0 && return
+            value = _node_metadata_object_value!(object_cache, node)
+            object_ids[i] = _as_int_or_default(value, -1)
+            item_ids[i] = _as_int_or_default(value, 1)
+            if geometry === nothing
+                groups[i] = string(_inherited_attr(node, (:group, :functional_group), ""))
+                types[i] = _mtg_node_type(node)
+            end
+        end
+    end
+    source_ids = [_scene_source_topology_id(scene, nid, nid) for nid in ids]
+    component_ids = [_scene_source_topology_id(scene, nid, nid + 1) for nid in ids]
+    # Older constructors may not retain filtered render geometry. Apply the same
+    # ignore rules without rebuilding all interception vertices and faces.
+    ignored = _ignored_group_types(models)
+    keep = filter(eachindex(ids)) do i
+        group = _normalize_group_name_local(groups[i])
+        !haskey(ignored, group) || !(strip(types[i]) in ignored[group])
+    end
+    pavement = sort!([i for i in keep if groups[i] == "pavement"]; by=i -> ids[i])
+    for (pavement_index, i) in enumerate(pavement)
+        item_ids[i] = -1
+        component_ids[i] = pavement_index + 1
+    end
+    display_types = [_node_metadata_display_type(models, groups[i], types[i]) for i in keep]
+    return (
+        node_id=ids[keep], source_topology_id=source_ids[keep],
+        object_id=object_ids[keep], item_id=item_ids[keep],
+        component_id=component_ids[keep], group=groups[keep], type=display_types,
     )
-    return ids
+end
+
+_component_output_order(metadata) = sortperm(eachindex(metadata.node_id); by=i -> (
+    metadata.item_id[i], metadata.component_id[i], metadata.node_id[i],
+))
+
+function _component_output_node_ids(scene::PlantGeom.SceneGeometry, models::LightModels, options::LightOptions)
+    metadata = _component_output_metadata(scene, models, unique(scene.face2node))
+    return metadata.node_id[_component_output_order(metadata)]
+end
+
+function _component_output_metadata(sim::LightSimulation, step::LightStepResult)
+    step.node_metadata !== nothing && return step.node_metadata
+    cache = sim.cache
+    if cache !== nothing && cache.scene === sim.scene &&
+       step.render_geometry === cache.render_geometry && cache.prepared !== nothing
+        geometry = cache.prepared.geometry
+        return _component_output_metadata(sim.scene, sim.models, geometry.node_ids, geometry)
+    end
+    face2node = step.render_geometry === nothing ? sim.scene.face2node : step.render_geometry.face2node
+    return _component_output_metadata(sim.scene, sim.models, unique(face2node))
 end
 
 function _component_sky_fraction_per_node(
@@ -466,29 +519,27 @@ function _component_rows_for_step(
     sim::LightSimulation,
     step::LightStepResult,
     step_number::Int,
-    node_ids,
-    keys_by_node;
+    metadata,
+    order;
     include_scattering_columns::Bool,
 )
     scene = sim.scene
     models = sim.models
     options = sim.options
-    sky_fraction = _component_sky_fraction_per_node(scene, models, step, options, node_ids)
+    sky_fraction = _component_sky_fraction_per_node(scene, models, step, options, metadata.node_id)
     rows = OrderedDict{String,Any}[]
-    for nid in node_ids
+    for i in order
+        nid = metadata.node_id[i]
         barycenter = _scene_barycenter(scene, nid, (NaN, NaN, NaN))
-        object_id = _scene_object_id(scene, nid, -1)
-        source_topology_id = _scene_source_topology_id(scene, nid, nid)
-        item_id, component_id = get(keys_by_node, nid, (object_id, source_topology_id))
         row = OrderedDict{String,Any}(
             "step_number" => step_number,
             "node_id" => nid,
-            "source_topology_id" => source_topology_id,
-            "object_id" => object_id,
-            "item_id" => item_id,
-            "component_id" => component_id,
-            "group" => _scene_group(scene, nid, ""),
-            "type" => _component_display_type(scene, models, nid),
+            "source_topology_id" => metadata.source_topology_id[i],
+            "object_id" => metadata.object_id[i],
+            "item_id" => metadata.item_id[i],
+            "component_id" => metadata.component_id[i],
+            "group" => metadata.group[i],
+            "type" => metadata.type[i],
             "area" => _scene_area(scene, nid, 0.0),
             "barycentre_z" => barycenter[3],
             "sky_fraction" => get(sky_fraction, nid, 0.0),
@@ -526,6 +577,12 @@ serializes the supplied results only; it does not run the simulation. Step
 numbers are 1-based by default. Use `step_index_base=0` only for historical
 harness compatibility.
 
+Identity columns reuse the result's retained node metadata when available.
+`sim` must supply the scene, models, and options used to compute these results:
+area and barycentre still come from that scene, and sky fraction is reconstructed
+from it when absent from the result. To export after `update_scene!`, keep the
+original scene context (for example, in another `LightSimulation`).
+
 Arguments:
 
 - `path`: destination CSV file path.
@@ -553,20 +610,26 @@ function write_component_values(
         mkpath(parent)
     end
 
-    node_ids = _component_output_node_ids(sim.scene, sim.models, sim.options)
-    keys_by_node = _interception_output_keys(sim.scene, sim.models, sim.options)
     include_scattering_columns = any(step -> step.scattering !== nothing, steps)
 
     rows = OrderedDict{String,Any}[]
+    contexts = IdDict{Any,Any}()
     for (i, step) in enumerate(steps)
+        # Results from one prepared scene share the snapshot (or render geometry
+        # when metadata storage is disabled). Prepare identity/order once per set.
+        key = something(step.node_metadata, step.render_geometry, sim.scene)
+        metadata, order = get!(contexts, key) do
+            metadata = _component_output_metadata(sim, step)
+            (metadata, _component_output_order(metadata))
+        end
         append!(
             rows,
             _component_rows_for_step(
                 sim,
                 step,
                 Int(step_index_base) + i - 1,
-                node_ids,
-                keys_by_node;
+                metadata,
+                order;
                 include_scattering_columns=include_scattering_columns,
             ),
         )

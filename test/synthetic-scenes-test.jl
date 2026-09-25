@@ -12,6 +12,48 @@
 end
 
 
+@testitem "SkyState runs retain optional sky fraction" tags = [:synthetic, :fast, :sky_fraction] setup = [HelperModule] begin
+    scene = HelperModule._synthetic_horizontal_scene([
+        (x0=0.0, x1=1.0, y0=0.0, y1=1.0, z=1.0, group="plate", type="plate", object_id=1),
+    ])
+    models = HelperModule._default_synthetic_models()
+    skies = [
+        ArchimedLight.SkyState(180.0, 90.0, 100.0, 50.0, 0.5, 0.5),
+        ArchimedLight.SkyState(135.0, 35.0, 200.0, 180.0, 0.5, 0.5),
+    ]
+    node_ids = unique(scene.face2node)
+
+    for cache_radiation in (false, true)
+        options = HelperModule._synthetic_options(
+            sectors=6, pixel_size=0.1, toricity=false, cache_radiation=cache_radiation,
+        )
+        sim = ArchimedLight.LightSimulation(scene, models; options=options)
+        unstored = ArchimedLight.run_light(sim, first(skies); step_duration_seconds=60.0)
+        unstored_series = ArchimedLight.run_light(sim, skies; step_duration_seconds=60.0)
+        @test unstored.sky_fraction === nothing
+        @test all(step -> step.sky_fraction === nothing, unstored_series)
+        # Reconstruct through the CSV fallback to check the stored values against
+        # the same sky-view calculation used by historical results.
+        expected = [
+            ArchimedLight._component_sky_fraction_per_node(scene, models, step, options, node_ids)
+            for step in unstored_series
+        ]
+        stored_options = ArchimedLight.LightOptions(options; include_sky_fraction=true)
+        stored_sim = ArchimedLight.LightSimulation(scene, models; options=stored_options)
+        stored = ArchimedLight.run_light(stored_sim, first(skies); step_duration_seconds=60.0)
+        stored_series = ArchimedLight.run_light(stored_sim, skies; step_duration_seconds=60.0)
+        @test stored.sky_fraction !== nothing
+        @test stored.sky_fraction == first(expected)
+        @test length(stored_series) == length(skies)
+        for (step, sky_fraction) in zip(stored_series, expected)
+            @test step.sky_fraction !== nothing
+            @test step.sky_fraction == sky_fraction
+            @test !isempty(sky_fraction)
+            @test any(>(0.0), values(sky_fraction))
+        end
+    end
+end
+
 
 @testitem "Synthetic case single_plate_direct" tags = [:synthetic, :fast, :single_plate_direct] setup = [HelperModule] begin
     scene = HelperModule._synthetic_horizontal_scene([(x0=0.0, x1=1.0, y0=0.0, y1=1.0, z=1.0, group="plate", type="plate", object_id=1)])
