@@ -59,11 +59,7 @@ through `outputs_`; this single `OutputTo` binds all of them to the selected org
 
 ## Connect leaf physiology
 
-Use the mesh surface as the reference area for both light interception and
-leaf physiology. ArchimedLight's `aPPFD` then connects directly to FvCB, and
-`Ra_SW_f` connects directly to Monteith. The simulated `sky_fraction` also
-supplies Monteith's sky-view input. Both packages declare these fluxes
-with the same `:surface_area` contract; no area conversion is needed.
+ArchimedLight is naturally compatible with models from [PlantBiophysics](https://vezy.github.io/PlantBiophysics.jl/stable/). ArchimedLight's `aPPFD` connects directly to FvCB, and `Ra_SW_f` and `sky_fraction` connect directly to Monteith. Both packages declare these fluxes with the same `:surface_area` contract; no area conversion is needed.
 
 The following example shows these bindings. It assumes your leaf objects
 already provide the other required physiology inputs, including `d`, and
@@ -269,9 +265,7 @@ organ status is modified.
 
 PlantGeom stores each simulated component's owner as a composite key:
 `(source_instance_id, source_node_id)`. The extension compiles those keys to
-PlantSimEngine `ObjectId`s once per stable scene generation. It never pairs a
-result row with an organ by vector position, MTG traversal order, or raw node
-number alone.
+PlantSimEngine `ObjectId`s once per stable scene generation.
 
 Three mapping modes are available:
 
@@ -325,12 +319,11 @@ The final identified assignment is also atomic with respect to validation:
 unknown, duplicate, extra, or missing destination identities and missing
 declared columns are rejected before status mutation.
 
-## Refresh the scene at lifecycle barriers
+## Refresh the scene whenever the topology changes
 
-Steady-state runs reuse the compiled owner mapping and typed result buffers.
-When PlantSimEngine reports a model or environment revision but the
-`LightSimulation` scene was not explicitly refreshed, the adapter needs a
-coordinated scene provider:
+Steady-state runs reuse by default the compiled models and variables mapping and the result buffers.
+When a model changes the topology / geometry in the scene, the
+`LightSimulation` scene needs to be explicitly refreshed:
 
 ```julia
 light_kernel = ArchimedLightModel(
