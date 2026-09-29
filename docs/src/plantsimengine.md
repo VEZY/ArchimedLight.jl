@@ -59,15 +59,11 @@ through `outputs_`; this single `OutputTo` binds all of them to the selected org
 
 ## Connect leaf physiology
 
-Use the mesh surface as the reference area for both light interception and
-leaf physiology. ArchimedLight's `aPPFD` then connects directly to FvCB, and
-`Ra_SW_f` connects directly to Monteith. Both packages declare these fluxes
-with the same `:surface_area` contract; no area conversion is needed.
+ArchimedLight is naturally compatible with models from [PlantBiophysics](https://vezy.github.io/PlantBiophysics.jl/stable/). ArchimedLight's `aPPFD` connects directly to FvCB, and `Ra_SW_f` and `sky_fraction` connect directly to Monteith. Both packages declare these fluxes with the same `:surface_area` contract; no area conversion is needed.
 
-The following example shows these two bindings. It assumes your leaf objects
-already provide the other required physiology inputs, including `d` and
-`sky_fraction`, and that `stomatal_conductance_application` is configured for
-the same leaves.
+The following example shows these bindings. It assumes your leaf objects
+already provide the other required physiology inputs, including `d`, and
+that `stomatal_conductance_application` is configured for the same leaves.
 
 ```julia
 using PlantBiophysics
@@ -91,6 +87,10 @@ leaf_energy_balance_application = ModelSpec(
     inputs=(
         :Ra_SW_f => One(
             within=Self(), application=:archimed_light, var=:Ra_SW_f,
+            policy=HoldLast(),
+        ),
+        :sky_fraction => One(
+            within=Self(), application=:archimed_light, var=:sky_fraction,
             policy=HoldLast(),
         ),
     ),
@@ -145,6 +145,7 @@ The default `:coupling` schema keeps the hot publication path compact:
 | `Ra_SW_f` | `Ra_PAR_f + Ra_NIR_f` | `W m⁻²` |
 | `aPPFD` | absorbed photosynthetic photon flux density | `μmol m⁻² s⁻¹` |
 | `area` | mesh surface area used by the light solver for normalization | `m²` |
+| `sky_fraction` | simulated visible-sky fraction, area-weighted over the organ components | dimensionless |
 
 `area` is the sum of the retained geometric triangle areas mapped to each
 target object. For a leaf represented by a single lamina surface, this is its
@@ -172,7 +173,7 @@ incident and absorbed variables:
 - `Ri_PAR_0_q`, `Ri_NIR_0_q`, `Ri_PAR_q`, and `Ri_NIR_q`;
 - `Ra_PAR_0_f`, `Ra_NIR_0_f`, `Ra_PAR_f`, and `Ra_NIR_f`;
 - `Ra_PAR_0_q`, `Ra_NIR_0_q`, `Ra_PAR_q`, and `Ra_NIR_q`; and
-- the three derived/coupling columns `Ra_SW_f`, `aPPFD`, and `area`.
+- the coupling columns `Ra_SW_f`, `aPPFD`, `area`, and `sky_fraction`.
 
 Choose the schema on the model; a single destination declaration infers its variables:
 
@@ -195,11 +196,26 @@ full_application = ModelSpec(
 When using explicit `vars`, provide a tuple of declared variable names. Missing
 or unknown distributed variables are rejected before the light calculation.
 
-!!! warning "No `sky_fraction` output"
-    Neither schema publishes `sky_fraction`. Models that scientifically require
-    a sky-view factor must declare and obtain it from an explicit producer; it
-    must not be inferred from irradiance or silently substituted by this
-    adapter.
+### Sky visibility
+
+Both schemas publish `sky_fraction` from `LightStepResult.sky_fraction`.
+The adapter enables `LightOptions.include_sky_fraction` on its simulation
+when preparing the coupling, including after `update_options!`. Standalone
+light simulations still opt in explicitly.
+
+ArchimedLight computes this value as the mean visible projected area across
+sky sectors divided by component mesh area. The direct-sun sector is excluded;
+visibility therefore remains available when incident radiation is zero.
+When several geometric components map to one organ, the adapter takes their
+mesh-area-weighted mean, using the same areas as the radiation outputs.
+
+The adapter preserves ArchimedLight's existing numerical convention: it
+neither rescales the value nor infers it from shortwave irradiance. Monteith
+uses `sky_fraction` for longwave exchange and documents a two-face range of
+0–2. The legacy ArchimedLight directional estimate is not a newly normalized
+hemispherical view-factor integral; using it retains that approximation.
+A change to the sky-view normalization must be made and validated explicitly
+in the light calculation, rather than hidden in this adapter.
 
 ## Supply the radiative forcing
 
@@ -249,9 +265,7 @@ organ status is modified.
 
 PlantGeom stores each simulated component's owner as a composite key:
 `(source_instance_id, source_node_id)`. The extension compiles those keys to
-PlantSimEngine `ObjectId`s once per stable scene generation. It never pairs a
-result row with an organ by vector position, MTG traversal order, or raw node
-number alone.
+PlantSimEngine `ObjectId`s once per stable scene generation.
 
 Three mapping modes are available:
 
@@ -305,12 +319,11 @@ The final identified assignment is also atomic with respect to validation:
 unknown, duplicate, extra, or missing destination identities and missing
 declared columns are rejected before status mutation.
 
-## Refresh the scene at lifecycle barriers
+## Refresh the scene whenever the topology changes
 
-Steady-state runs reuse the compiled owner mapping and typed result buffers.
-When PlantSimEngine reports a model or environment revision but the
-`LightSimulation` scene was not explicitly refreshed, the adapter needs a
-coordinated scene provider:
+Steady-state runs reuse by default the compiled models and variables mapping and the result buffers.
+When a model changes the topology / geometry in the scene, the
+`LightSimulation` scene needs to be explicitly refreshed:
 
 ```julia
 light_kernel = ArchimedLightModel(

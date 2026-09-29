@@ -7,6 +7,8 @@ scene scale and publishes identity-keyed results to declared organ targets.
 This method is provided when PlantSimEngine is loaded. The returned value is a
 model kernel: the application target, distributed-output selector, cadence,
 and ordering remain explicit in the caller's `PlantSimEngine.ModelSpec`.
+The adapter enables `include_sky_fraction` on the simulation when preparing
+the coupling so every destination receives the simulated sky visibility.
 """
 function ArchimedLightModel end
 
@@ -25,6 +27,11 @@ radiation fluxes; the raster projection correction does not change it.
 connect directly to physiology using this same reference area.
 The separate [`component_values`](@ref) table API names this quantity
 `radiative_mesh_area`.
+
+Both schemas also publish dimensionless `sky_fraction`, the mesh-area-weighted
+mean of `LightStepResult.sky_fraction` over each organ's components. This
+preserves the solver's existing mean-visible-projected-area convention without
+rescaling it. It remains available under zero incident radiation.
 
 The model owns these declarations. Bind its destination objects with
 `outputs_to=(OutputTo(selector),)`, or use a tuple of variable names in

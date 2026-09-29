@@ -13,6 +13,7 @@
         :Ra_SW_f,
         :aPPFD,
         :area,
+        :sky_fraction,
     )
 
     const FULL_NAMES = (
@@ -35,6 +36,7 @@
         :Ra_SW_f,
         :aPPFD,
         :area,
+        :sky_fraction,
     )
 
     PlantSimEngine.@process "archimed_extension_test_consumer" verbose = false
@@ -46,9 +48,10 @@
         Ra_PAR_f=PlantSimEngine.Required(Float64),
         aPPFD=PlantSimEngine.Required(Float64),
         Ra_SW_f=PlantSimEngine.Required(Float64),
+        sky_fraction=PlantSimEngine.Required(Float64),
     )
     PlantSimEngine.outputs_(::ArchimedExtensionTestConsumerModel) =
-        (seen=0.0, seen_ppfd=0.0, seen_shortwave=0.0)
+        (seen=0.0, seen_ppfd=0.0, seen_shortwave=0.0, seen_sky_fraction=0.0)
     PlantSimEngine.variable_contracts_(::ArchimedExtensionTestConsumerModel) = (
         aPPFD=PlantSimEngine.VariableContract(
             unit=:micromol_photon, basis=:surface_area, temporal=:second,
@@ -70,6 +73,7 @@
         status.seen = status.Ra_PAR_f
         status.seen_ppfd = status.aPPFD
         status.seen_shortwave = status.Ra_SW_f
+        status.seen_sky_fraction = status.sky_fraction
         return nothing
     end
 
@@ -476,9 +480,9 @@ end
     @test schedule[:archimed_light] < schedule[:leaf_consumer]
     consumer_bindings = [
         row for row in Diagnostics.explain_bindings(compiled)
-        if row.application_id == :leaf_consumer && row.input in (:Ra_PAR_f, :aPPFD, :Ra_SW_f)
+        if row.application_id == :leaf_consumer && row.input in (:Ra_PAR_f, :aPPFD, :Ra_SW_f, :sky_fraction)
     ]
-    @test length(consumer_bindings) == 6
+    @test length(consumer_bindings) == 8
     @test all(
         row.source_application_ids == [:archimed_light]
         for row in consumer_bindings
@@ -494,13 +498,14 @@ end
     for (row, owner) in pairs(expected.source_owner)
         object_id = destinations[owner]
         status = final_state(simulation, object_id)
-        for name in H.COUPLING_NAMES
+        for name in filter(!=(:sky_fraction), H.COUPLING_NAMES)
             column = name === :area ? expected.radiative_mesh_area : getproperty(expected, name)
             @test getproperty(status, name) ≈ column[row]
         end
         @test status.seen ≈ status.Ra_PAR_f
         @test status.seen_ppfd ≈ expected.aPPFD[row]
         @test status.seen_shortwave ≈ expected.Ra_SW_f[row]
+        @test status.seen_sky_fraction == status.sky_fraction > 0.0
     end
 end
 
@@ -537,7 +542,7 @@ end
     )
     simulation = run!(runtime; outputs=:none)
     leaf = final_state(simulation, :leaf)
-    for name in H.COUPLING_NAMES
+    for name in filter(!=(:sky_fraction), H.COUPLING_NAMES)
         column = name === :area ? expected.radiative_mesh_area : getproperty(expected, name)
         @test getproperty(leaf, name) ≈ column[leaf_row]
     end
@@ -817,4 +822,110 @@ end
         ) / total_area
         @test getproperty(status, name) ≈ expected
     end
+end
+
+@testitem "Sky visibility reaches organs in both schemas, including darkness and option refresh" tags = [:plantsimengine, :fast] setup = [ArchimedLightPlantSimEngineTestSupport] begin
+    using ArchimedLight
+    using PlantSimEngine
+
+    const H = ArchimedLightPlantSimEngineTestSupport
+    scene, models, options = H.light_fixture(2)
+    reference = LightSimulation(
+        scene, models;
+        options=LightOptions(options; include_sky_fraction=true),
+    )
+    step = run_light(reference, H.sky(); step_duration_seconds=60.0)
+    metadata = step.component_metadata
+    areas = metadata.radiative_area
+    fractions = [step.sky_fraction[id] for id in metadata.node_id]
+    # Different inclinations and areas distinguish area weighting from a sum
+    # or an unweighted average of the component values.
+    @test !isapprox(fractions[1], fractions[2])
+    @test !isapprox(areas[1], areas[2])
+    expected = sum(areas .* fractions) / sum(areas)
+
+    for schema in (:coupling, :full), dark in (false, true)
+        row = dark ? merge(H.forcing(), (
+            sun_elevation_deg=-10.0, Ri_PAR_f=0.0, Ri_NIR_f=0.0,
+        )) : H.forcing()
+        light = LightSimulation(scene, models; options=options)
+        @test !light.options.include_sky_fraction
+        kernel = ArchimedLightModel(
+            light; output_schema=schema, object_resolver=_ -> :leaf,
+        )
+        runtime = H.object_runtime(kernel, (:leaf,); environment=row, consumer=true)
+        simulation = run!(runtime; steps=2, outputs=:all)
+        status = final_state(simulation, :leaf)
+        @test light.options.include_sky_fraction
+        @test status.sky_fraction ≈ expected
+        @test status.seen_sky_fraction ≈ expected
+        @test all(value -> isapprox(value, expected), outputs(simulation)[
+            (:archimed_light, ObjectId(:leaf), :sky_fraction)
+        ])
+        dark && @test iszero(status.Ra_SW_f)
+
+        # A public options update must not disable a declared output or leave
+        # the owner mapping bound to the previous numerical cache.
+        update_options!(light, LightOptions(light.options; include_sky_fraction=false))
+        continue!(simulation)
+        @test light.options.include_sky_fraction
+        @test final_state(simulation, :leaf).sky_fraction ≈ expected
+        @test final_state(simulation, :leaf).seen_sky_fraction ≈ expected
+    end
+end
+
+@testitem "Sky visibility follows scene occlusion" tags = [:plantsimengine, :fast] setup = [ArchimedLightPlantSimEngineTestSupport] begin
+    using ArchimedLight
+    using PlantGeom
+    using PlantSimEngine
+
+    const H = ArchimedLightPlantSimEngineTestSupport
+    _, models, options = H.light_fixture()
+    scene = PlantGeom.make_scene(domain=(-1.0, -1.0, 3.0, 3.0)) do builder
+        for (id, z) in ((11, 1.0), (12, 2.0))
+            PlantGeom.add_object!(
+                builder, H.triangle_mesh();
+                group="plants", type="Leaf", id=id, at=(0.0, 0.0, z),
+            )
+        end
+    end
+    light = LightSimulation(scene, models; options=options)
+    kernel = ArchimedLightModel(
+        light; object_resolver=owner -> owner.source_instance_id == 1 ? :lower : :upper,
+    )
+    runtime = H.object_runtime(kernel, (:lower, :upper); consumer=true)
+    simulation = run!(runtime; outputs=:none)
+    # The one-sector fixture looks straight up: an exposed horizontal leaf
+    # has unit visibility, and the identical opaque leaf below is hidden.
+    @test final_state(simulation, :upper).sky_fraction ≈ 1.0
+    @test final_state(simulation, :lower).sky_fraction ≈ 0.0 atol=1e-12
+    @test final_state(simulation, :lower).seen_sky_fraction ≈ 0.0 atol=1e-12
+end
+
+@testitem "Invalid sky visibility fails before publishing organ state" tags = [:plantsimengine, :fast] setup = [ArchimedLightPlantSimEngineTestSupport] begin
+    using ArchimedLight
+    using PlantSimEngine
+
+    const H = ArchimedLightPlantSimEngineTestSupport
+    scene, models, options = H.light_fixture()
+    light = LightSimulation(scene, models; options=options)
+    kernel = ArchimedLightModel(light; object_resolver=_ -> :leaf)
+    runtime = H.object_runtime(kernel, (:leaf,))
+    simulation = run!(runtime; outputs=:none)
+    step = run_light(light, H.sky(); step_duration_seconds=60.0)
+    cache = kernel.runtime_cache
+    before = H.status_values(final_state(simulation, :leaf), H.COUPLING_NAMES)
+    ext = Base.get_extension(ArchimedLight, :ArchimedLightPlantSimEngineExt)
+    node_id = only(cache.selected_metadata.node_id)
+
+    # No targets are supplied: every malformed result must fail before the
+    # publication function can reach assign_outputs!.
+    for value in (NaN, Inf, -0.1)
+        step.sky_fraction[node_id] = value
+        @test_throws ArgumentError ext._publish_light_step!(kernel, cache, nothing, step)
+        @test H.status_values(final_state(simulation, :leaf), H.COUPLING_NAMES) == before
+    end
+    delete!(step.sky_fraction, node_id)
+    @test_throws ArgumentError ext._publish_light_step!(kernel, cache, nothing, step)
+    @test H.status_values(final_state(simulation, :leaf), H.COUPLING_NAMES) == before
 end
