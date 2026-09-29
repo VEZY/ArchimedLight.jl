@@ -198,24 +198,16 @@ or unknown distributed variables are rejected before the light calculation.
 
 ### Sky visibility
 
-Both schemas publish `sky_fraction` from `LightStepResult.sky_fraction`.
-The adapter enables `LightOptions.include_sky_fraction` on its simulation
-when preparing the coupling, including after `update_options!`. Standalone
-light simulations still opt in explicitly.
+Both output schemas publish `sky_fraction` for every selected organ by
+default. Construct `ArchimedLightModel` normally; no `LightOptions` setting or
+separate leaf sky-view value is needed for Monteith. The scene model produces
+`sky_fraction` even when incident shortwave radiation is zero.
 
-ArchimedLight computes this value as the mean visible projected area across
-sky sectors divided by component mesh area. The direct-sun sector is excluded;
-visibility therefore remains available when incident radiation is zero.
-When several geometric components map to one organ, the adapter takes their
-mesh-area-weighted mean, using the same areas as the radiation outputs.
-
-The adapter preserves ArchimedLight's existing numerical convention: it
-neither rescales the value nor infers it from shortwave irradiance. Monteith
-uses `sky_fraction` for longwave exchange and documents a two-face range of
-0–2. The legacy ArchimedLight directional estimate is not a newly normalized
-hemispherical view-factor integral; using it retains that approximation.
-A change to the sky-view normalization must be made and validated explicitly
-in the light calculation, rather than hidden in this adapter.
+ArchimedLight calculates each component's value from its visible projected
+area across sky sectors, divided by its mesh area. The direct-sun sector is
+excluded. When several components map to one organ, the model publishes
+their mesh-area-weighted mean. Monteith uses the published value for longwave
+exchange.
 
 ## Supply the radiative forcing
 
