@@ -40,6 +40,7 @@ const _COUPLING_OUTPUT_NAMES = (
     :Ra_SW_f,
     :aPPFD,
     :area,
+    :sky_fraction,
 )
 
 const _FULL_OUTPUT_NAMES = (
@@ -62,6 +63,7 @@ const _FULL_OUTPUT_NAMES = (
     :Ra_SW_f,
     :aPPFD,
     :area,
+    :sky_fraction,
 )
 
 @inline _output_names(::Val{:coupling}) = _COUPLING_OUTPUT_NAMES
@@ -83,6 +85,7 @@ const _COUPLING_OUTPUTS = (
     Ra_SW_f=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
     aPPFD=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
     area=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    sky_fraction=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
 )
 
 const _FULL_OUTPUTS = (
@@ -105,6 +108,7 @@ const _FULL_OUTPUTS = (
     Ra_SW_f=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
     aPPFD=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
     area=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
+    sky_fraction=PlantSimEngine.Distributed(PlantSimEngine.Default(0.0)),
 )
 
 @inline _output_declarations(::Val{:coupling}) = _COUPLING_OUTPUTS
@@ -444,7 +448,7 @@ end
 function _new_output_columns(target_area)
     return merge(
         ArchimedLight._new_light_metric_columns(length(target_area)),
-        (area=target_area,),
+        (area=target_area, sky_fraction=zeros(Float64, length(target_area))),
     )
 end
 
@@ -457,6 +461,14 @@ function _prepare_distributed_light(
     model_revision::Int,
     environment_revision::Int,
 )
+    # Sky visibility is a required distributed output. Enable its calculation
+    # lazily, including after a caller replaces the simulation options.
+    if !model.simulation.options.include_sky_fraction
+        ArchimedLight.update_options!(
+            model.simulation,
+            ArchimedLight.LightOptions(model.simulation.options; include_sky_fraction=true),
+        )
+    end
     light_cache = ArchimedLight._ensure_light_cache!(model.simulation)
     metadata = light_cache.component_metadata
     metadata === nothing && throw(ArgumentError(
@@ -740,6 +752,31 @@ function _publish_light_step!(
         "ArchimedLight returned a result from another scene generation; no organ " *
         "status was modified.",
     ))
+    sky_fraction = step.sky_fraction
+    sky_fraction === nothing && throw(ArgumentError(
+        "ArchimedLight did not compute the required `sky_fraction` output; " *
+        "no organ status was modified.",
+    ))
+    # Validate exact selected-component coverage before publishing any outputs.
+    for node_id in cache.selected_metadata.node_id
+        haskey(sky_fraction, node_id) || throw(ArgumentError(
+            "ArchimedLight sky_fraction is missing component $node_id; " *
+            "no organ status was modified.",
+        ))
+        value = sky_fraction[node_id]
+        isfinite(value) && value >= 0.0 || throw(ArgumentError(
+            "ArchimedLight sky_fraction must be finite and non-negative; " *
+            "got $value for component $node_id. No organ status was modified.",
+        ))
+    end
+    ArchimedLight._mean_owner_metric!(
+        cache.columns.sky_fraction,
+        sky_fraction,
+        cache.selected_metadata.node_id,
+        cache.component_to_target,
+        cache.selected_metadata.radiative_area,
+        cache.target_radiative_area,
+    )
     ArchimedLight._fill_aggregated_metric_columns!(
         cache.columns,
         step,

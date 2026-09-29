@@ -61,13 +61,13 @@ through `outputs_`; this single `OutputTo` binds all of them to the selected org
 
 Use the mesh surface as the reference area for both light interception and
 leaf physiology. ArchimedLight's `aPPFD` then connects directly to FvCB, and
-`Ra_SW_f` connects directly to Monteith. Both packages declare these fluxes
+`Ra_SW_f` connects directly to Monteith. The simulated `sky_fraction` also
+supplies Monteith's sky-view input. Both packages declare these fluxes
 with the same `:surface_area` contract; no area conversion is needed.
 
-The following example shows these two bindings. It assumes your leaf objects
-already provide the other required physiology inputs, including `d` and
-`sky_fraction`, and that `stomatal_conductance_application` is configured for
-the same leaves.
+The following example shows these bindings. It assumes your leaf objects
+already provide the other required physiology inputs, including `d`, and
+that `stomatal_conductance_application` is configured for the same leaves.
 
 ```julia
 using PlantBiophysics
@@ -91,6 +91,10 @@ leaf_energy_balance_application = ModelSpec(
     inputs=(
         :Ra_SW_f => One(
             within=Self(), application=:archimed_light, var=:Ra_SW_f,
+            policy=HoldLast(),
+        ),
+        :sky_fraction => One(
+            within=Self(), application=:archimed_light, var=:sky_fraction,
             policy=HoldLast(),
         ),
     ),
@@ -145,6 +149,7 @@ The default `:coupling` schema keeps the hot publication path compact:
 | `Ra_SW_f` | `Ra_PAR_f + Ra_NIR_f` | `W m⁻²` |
 | `aPPFD` | absorbed photosynthetic photon flux density | `μmol m⁻² s⁻¹` |
 | `area` | mesh surface area used by the light solver for normalization | `m²` |
+| `sky_fraction` | simulated visible-sky fraction, area-weighted over the organ components | dimensionless |
 
 `area` is the sum of the retained geometric triangle areas mapped to each
 target object. For a leaf represented by a single lamina surface, this is its
@@ -172,7 +177,7 @@ incident and absorbed variables:
 - `Ri_PAR_0_q`, `Ri_NIR_0_q`, `Ri_PAR_q`, and `Ri_NIR_q`;
 - `Ra_PAR_0_f`, `Ra_NIR_0_f`, `Ra_PAR_f`, and `Ra_NIR_f`;
 - `Ra_PAR_0_q`, `Ra_NIR_0_q`, `Ra_PAR_q`, and `Ra_NIR_q`; and
-- the three derived/coupling columns `Ra_SW_f`, `aPPFD`, and `area`.
+- the coupling columns `Ra_SW_f`, `aPPFD`, `area`, and `sky_fraction`.
 
 Choose the schema on the model; a single destination declaration infers its variables:
 
@@ -195,11 +200,26 @@ full_application = ModelSpec(
 When using explicit `vars`, provide a tuple of declared variable names. Missing
 or unknown distributed variables are rejected before the light calculation.
 
-!!! warning "No `sky_fraction` output"
-    Neither schema publishes `sky_fraction`. Models that scientifically require
-    a sky-view factor must declare and obtain it from an explicit producer; it
-    must not be inferred from irradiance or silently substituted by this
-    adapter.
+### Sky visibility
+
+Both schemas publish `sky_fraction` from `LightStepResult.sky_fraction`.
+The adapter enables `LightOptions.include_sky_fraction` on its simulation
+when preparing the coupling, including after `update_options!`. Standalone
+light simulations still opt in explicitly.
+
+ArchimedLight computes this value as the mean visible projected area across
+sky sectors divided by component mesh area. The direct-sun sector is excluded;
+visibility therefore remains available when incident radiation is zero.
+When several geometric components map to one organ, the adapter takes their
+mesh-area-weighted mean, using the same areas as the radiation outputs.
+
+The adapter preserves ArchimedLight's existing numerical convention: it
+neither rescales the value nor infers it from shortwave irradiance. Monteith
+uses `sky_fraction` for longwave exchange and documents a two-face range of
+0–2. The legacy ArchimedLight directional estimate is not a newly normalized
+hemispherical view-factor integral; using it retains that approximation.
+A change to the sky-view normalization must be made and validated explicitly
+in the light calculation, rather than hidden in this adapter.
 
 ## Supply the radiative forcing
 
