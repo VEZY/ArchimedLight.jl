@@ -119,6 +119,11 @@ the simplified optical coefficients and equal two-sided split. Analytical plate
 tests verify the numerical weighting; they do not replace physical measurements
 of irradiance within a scene.
 
+Explore the [Evaluation](evaluation.md) page to compare the current algorithm
+with an independent surface-integral reference in four interactive 3D scenes.
+It also explains how the reference handles projected area, occlusion, diffuse
+transmission, and repeated exchanges.
+
 ## Optical Coefficients
 
 In model files, `optical_properties` store scattering factors by waveband:

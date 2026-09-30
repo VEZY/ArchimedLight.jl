@@ -20,7 +20,7 @@ makedocs(;
         prettyurls=get(ENV, "CI", "false") == "true",
         canonical="https://VEZY.github.io/ArchimedLight.jl",
         edit_link="main",
-        assets=String[],
+        assets=["assets/scattering-evaluation.css", "assets/scattering-evaluation.js"],
         size_threshold=700000,
     ),
     pages=[
@@ -39,6 +39,7 @@ makedocs(;
             "Meteo Inputs" => "reference_meteo.md",
         ],
         "Outputs" => "outputs.md",
+        "Evaluation" => "evaluation.md",
         "Performance Benchmarks" => "performance_benchmarks.md",
         "Under The Hood" => [
             "Pipeline Overview" => "theory_pipeline.md",
