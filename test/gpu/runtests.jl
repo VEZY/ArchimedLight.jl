@@ -45,6 +45,7 @@ function _emitter_scene()
     face2node = Int[]
     nodes = Dict{Int,PlantGeom.SceneNodeData{Float64}}()
     mtg = MultiScaleTreeGraph.Node(
+        length(specs) + 1,
         MultiScaleTreeGraph.MutableNodeMTG(:/, :Scene, 0, 0),
         Dict{Symbol,Any}(),
     )
@@ -219,6 +220,26 @@ end
                 @test cpu_scattering.dense.node_ids == gpu_scattering.dense.node_ids
                 @test cpu_scattering.dense.added_power.par ≈ gpu_scattering.dense.added_power.par atol = 1e-4 rtol = 1e-4
                 @test cpu_scattering.dense.added_power.nir ≈ gpu_scattering.dense.added_power.nir atol = 1e-4 rtol = 1e-4
+
+                @testset "Complete light steps" begin
+                    cpu_sim = ArchimedLight.LightSimulation(scene, models; options)
+                    gpu_sim = ArchimedLight.LightSimulation(
+                        scene, models; options,
+                        interception_backend=interception_backend,
+                        scattering_backend=ArchimedLight.RasterGPUScatteringBackend(interception_backend),
+                    )
+                    for input in (row, sky)
+                        duration = input isa ArchimedLight.SkyState ? (; step_duration_seconds=1800.0) : (;)
+                        cpu_step = ArchimedLight.run_light(cpu_sim, input; duration...)
+                        gpu_step = ArchimedLight.run_light(gpu_sim, input; duration...)
+                        for quantity in (:incident_flux, :incident_energy, :absorbed_flux, :absorbed_energy),
+                            order in (:initial, :total), band in (:par, :nir)
+                            cpu_values = getproperty(getproperty(getproperty(cpu_step.budget, quantity), order), band)
+                            gpu_values = getproperty(getproperty(getproperty(gpu_step.budget, quantity), order), band)
+                            @test _dict_close(cpu_values, gpu_values; atol=1e-3, rtol=1e-4)
+                        end
+                    end
+                end
 
                 emitter_scene = _emitter_scene()
                 emitter_models = ArchimedLight.prepare_models([

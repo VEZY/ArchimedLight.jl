@@ -72,14 +72,30 @@ ARCHIMEDLIGHT_TEST_METAL=required julia --project=test/gpu test/gpu/runtests.jl
 ```
 
 The focused Metal suite checks the installed version and atomic capability,
-then compares RasterGPU first-order interception and scattering against the CPU
-raster reference. Use `ARCHIMEDLIGHT_TEST_METAL=1` for an optional local run or
-`required` when unavailable Metal hardware must fail validation.
+then compares RasterGPU first-order interception, scattering, and complete light
+steps against the CPU raster reference. Use `ARCHIMEDLIGHT_TEST_METAL=1` for an
+optional local run or `required` when unavailable Metal hardware must fail
+validation.
 
 Metal.jl 1.10.3 reports KernelAbstractions atomic support only when the active
 toolchain exposes MSL 4.1 or newer. The package version supplies the registered
 implementation, but it cannot upgrade the system Metal compiler; the strict
 suite fails before launching kernels when `supports_atomics(device)` is false.
+
+## CUDA Validation
+
+In a Julia environment containing CUDA and this ArchimedLight checkout, run the
+NVIDIA regression from the repository root:
+
+```julia
+include("test/gpu/cuda-runtests.jl")
+```
+
+On a cluster, run it on an allocated GPU compute node. The suite requires a
+functional NVIDIA GPU and compares complete CPU and GPU light budgets for both
+weather rows and explicit sky states, with and without toric boundaries. It also
+checks that successive steps reuse the device cache. It uses normal Julia
+compilation settings.
 
 ## Validation
 

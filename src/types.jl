@@ -738,6 +738,7 @@ Fields:
   possible.
 - `include_sky_fraction`: store the per-node `sky_fraction` map in each
   [`LightStepResult`](@ref). Leave `false` unless downstream code needs it.
+  [`ArchimedLightModel`](@ref) enables this automatically for its organ outputs.
   When options are read from a config file, this is enabled by requesting
   `sky_fraction` in `component_variables` or `opf_variables`.
 - `store_node_metadata`: retain a lightweight per-scene node metadata snapshot

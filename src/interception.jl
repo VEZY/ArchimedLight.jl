@@ -1351,10 +1351,12 @@ function _resolved_type_key(group_model::GroupModel, type_name::AbstractString)
                     )
                 end,
             )
+            # Preserved optical metadata may contain `missing`; comparison
+            # must still produce a Boolean for this fallback decision.
             if first_sig === nothing
                 first_key = type_key
                 first_sig = sig
-            elseif sig != first_sig
+            elseif !isequal(sig, first_sig)
                 equivalent = false
                 break
             end

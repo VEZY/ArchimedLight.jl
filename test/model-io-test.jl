@@ -1,3 +1,22 @@
+@testitem "Mesh type fallback compares optional optical metadata safely" tags=[:model_io, :fast] begin
+    using OrderedCollections: OrderedDict
+
+    types = OrderedDict{String,ArchimedLight.TypeModel}()
+    for name in ("Leaf", "Stem")
+        optics = ArchimedLight.OpticalProperties(
+            0.15, 0.30, OrderedDict{String,Any}("annotation" => missing),
+        )
+        types[name] = ArchimedLight.TypeModel(
+            interception=ArchimedLight.InterceptionModel(optical_properties=optics),
+        )
+    end
+    group = ArchimedLight.GroupModel("plant"; types)
+    @test ArchimedLight._resolved_type_key(group, "mesh") == "Leaf"
+    @test ArchimedLight._resolved_type_key(group, "Stem") == "Stem"
+    types["Stem"].interception.optical_properties.extras["annotation"] = "different"
+    @test ArchimedLight._resolved_type_key(group, "mesh") === nothing
+end
+
 @testitem "Model IO YAML and typed models agree" tags=[:model_io, :fast] begin
     using OrderedCollections: OrderedDict
 
