@@ -2,8 +2,6 @@ name: Test on PRs
 
 on:
   pull_request:
-    branches:
-      - main
     paths:
       - "src/**"
       - "ext/**"
@@ -11,7 +9,7 @@ on:
       - "*.toml"
       - ".github/workflows/TestOnPRs.yml"
       - ".github/workflows/ReusableTest.yml"
-    types: [ opened, synchronize, reopened ]
+    types: [opened, synchronize, reopened]
 
 concurrency:
   # Skip intermediate builds: always.
