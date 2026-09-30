@@ -1671,6 +1671,13 @@ function _single_band_flux(
     compute_directional_fluxes(tmp, turtle, options).par
 end
 
+const _ExtraBandLightResult = Tuple{
+    Dict{String,Dict{Int,Float64}},
+    Dict{String,Dict{Int,Float64}},
+    Dict{String,Float64},
+    Dict{String,Dict{Int,Float64}},
+}
+
 function _compute_extra_band_light(
     scene::PlantGeom.SceneGeometry,
     models::LightModels,
@@ -1810,7 +1817,9 @@ mutable struct LightSimulationCache
     scattering_mode::Symbol
     scattering_backend::Union{Nothing,ScatteringBackend}
     prepared::Union{Nothing,PreparedInterceptionData}
-    rastergpu_data::Union{Nothing,RasterGPUSceneData}
+    # Retain the device object without putting its many array type parameters
+    # into host-side cache inference; kernels dispatch on its concrete type.
+    rastergpu_data::Any
     render_geometry::LightRenderGeometry
     component_metadata::Union{Nothing,LightComponentMetadata}
     node_metadata::Union{Nothing,LightNodeMetadata}
@@ -3440,6 +3449,112 @@ function _compute_extra_band_light_cached(
     return extra_0_q, extra_q, extras_irr, extra_emitter_escaped_power
 end
 
+# Keep backend-dependent device-array types out of the step orchestrator's
+# inference graph. The numerical kernels still specialize on their backend.
+struct _LightStepInterception
+    first::FirstOrderResult
+    prepared::Union{Nothing,PreparedInterceptionData}
+    responses_cache::Union{Nothing,SectorResponsesCache}
+    scattering_topology::Union{Nothing,ScatteringTopologyCache}
+    rastergpu_data::Any
+end
+
+@noinline function _uncached_step_interception(
+    cache::LightSimulationCache,
+    ib::InterceptionBackend,
+    turtle::TurtleGrid,
+    fluxes::DirectionalFluxes,
+    extra_irr::Dict{String,Float64},
+)
+    scene, models, options = cache.scene, cache.models, cache.options
+    prepared = cache.prepared
+    responses_cache = nothing
+    scattering_topology = nothing
+    rastergpu_data = nothing
+    if ib isa RasterCPUBackend && options.scattering && isempty(extra_irr)
+        prepared === nothing && (prepared = _prepare_interception_data(scene, models, options; include_budget_maps=true))
+        first, scattering_topology =
+            _stream_first_order_with_scattering_topology(prepared, scene, models, turtle, fluxes, options)
+    elseif ib isa RasterCPUBackend && (options.scattering || !isempty(extra_irr))
+        prepared === nothing && (prepared = _prepare_interception_data(scene, models, options; include_budget_maps=true))
+        responses_cache = _build_sector_responses(prepared, scene, models, turtle, options)
+        first = _combine_sector_responses(responses_cache, fluxes)
+    elseif ib isa RasterGPUBackend
+        prepared === nothing && (prepared = _prepare_interception_data(
+            scene,
+            models,
+            options;
+            include_budget_maps=true,
+        ))
+        rastergpu_data = cache.rastergpu_data === nothing ?
+                         _rastergpu_scene_data(prepared, ib.config) :
+                         cache.rastergpu_data
+        first = compute_first_order(rastergpu_data, turtle, fluxes, options)
+    else
+        first = compute_first_order(scene, models, turtle, fluxes, options; backend=ib)
+    end
+    return _LightStepInterception(
+        first, prepared, responses_cache, scattering_topology, rastergpu_data,
+    )
+end
+
+# Assemble outputs behind a separate compilation boundary so backend selection
+# does not specialize the budget and metadata code on every device-array type.
+@noinline function _finish_light_step(
+    cache::LightSimulationCache,
+    sky::SkyState,
+    turtle::TurtleGrid,
+    fluxes::DirectionalFluxes,
+    first::FirstOrderResult,
+    scat::Union{Nothing,ScatteringResult},
+    prepared::Union{Nothing,PreparedInterceptionData},
+    responses_cache::Union{Nothing,SectorResponsesCache},
+    extra_0_q::Dict{String,Dict{Int,Float64}},
+    extra_q::Dict{String,Dict{Int,Float64}},
+    extra_irr::Dict{String,Float64},
+    extra_emitter_escaped_power::Dict{String,Dict{Int,Float64}},
+    step_duration_seconds::Real,
+)
+    scene, models, options = cache.scene, cache.models, cache.options
+    budget = integrate_light(
+        scene,
+        models,
+        first,
+        scat,
+        options;
+        step_duration_seconds=step_duration_seconds,
+        extra_initial_energy_per_band=extra_0_q,
+        extra_energy_per_band=extra_q,
+        extra_emitter_escaped_power_per_band=extra_emitter_escaped_power,
+        component_area_per_node=prepared === nothing ? nothing : prepared.component_area_per_node,
+        absorption_par_per_node=prepared === nothing ? nothing : prepared.absorption_par_per_node,
+        absorption_nir_per_node=prepared === nothing ? nothing : prepared.absorption_nir_per_node,
+    )
+    sky_fraction =
+        options.include_sky_fraction ?
+        _compute_sky_fraction(
+            scene,
+            models,
+            turtle,
+            options;
+            prepared=prepared,
+            responses_cache=responses_cache,
+        ) : nothing
+    return LightStepResult(
+        sky,
+        turtle,
+        fluxes,
+        _materialize_first_order_result(first),
+        scat,
+        budget,
+        extra_irr,
+        sky_fraction,
+        cache.render_geometry,
+        cache.node_metadata,
+        cache.component_metadata,
+    )
+end
+
 function _run_light_step_cached(
     cache::LightSimulationCache,
     meteo_row;
@@ -3490,38 +3605,27 @@ function _run_light_step_cached(
         first = _combine_sector_responses(responses_cache, fluxes)
         scat = _assemble_cached_scattering(cache, entry, fluxes, nir_scattering)
         extra_0_q, extra_q, extra_irr, extra_emitter_escaped_power =
-            _compute_extra_band_light_cached(
+            Base.inferencebarrier(_compute_extra_band_light_cached)(
                 cache,
                 entry,
                 meteo_row,
                 sky,
                 turtle,
                 resolved,
-            )
+            )::_ExtraBandLightResult
     else
-        if ib isa RasterCPUBackend && options.scattering && isempty(extra_irr)
-            prepared === nothing && (prepared = _prepare_interception_data(scene, models, options; include_budget_maps=true))
-            first, scattering_topology =
-                _stream_first_order_with_scattering_topology(prepared, scene, models, turtle, fluxes, options)
-        elseif ib isa RasterCPUBackend && (options.scattering || !isempty(extra_irr))
-            prepared === nothing && (prepared = _prepare_interception_data(scene, models, options; include_budget_maps=true))
-            responses_cache = _build_sector_responses(prepared, scene, models, turtle, options)
-            first = _combine_sector_responses(responses_cache, fluxes)
-        elseif ib isa RasterGPUBackend
-            prepared === nothing && (prepared = _prepare_interception_data(
-                scene,
-                models,
-                options;
-                include_budget_maps=true,
-            ))
-            rastergpu_data = cache.rastergpu_data === nothing ?
-                             _rastergpu_scene_data(prepared, ib.config) :
-                             cache.rastergpu_data
-            first = compute_first_order(rastergpu_data, turtle, fluxes, options)
-        else
-            first = compute_first_order(scene, models, turtle, fluxes, options; backend=ib)
-        end
-        scat = _compute_scattering_with_flags(
+        # Infer this orchestration with a fixed host result, then specialize the
+        # backend work at runtime. Keep expensive abstract device-array subtype
+        # comparisons out of the orchestrator on Julia 1.12 with CUDA loaded.
+        interception = Base.inferencebarrier(_uncached_step_interception)(
+            cache, ib, turtle, fluxes, extra_irr,
+        )::_LightStepInterception
+        first = interception.first
+        prepared = interception.prepared
+        responses_cache = interception.responses_cache
+        scattering_topology = interception.scattering_topology
+        rastergpu_data = interception.rastergpu_data
+        scat = Base.inferencebarrier(_compute_scattering_with_flags)(
             scene,
             models,
             turtle,
@@ -3535,9 +3639,9 @@ function _run_light_step_cached(
             responses_cache=responses_cache,
             scattering_topology=scattering_topology,
             rastergpu_data=rastergpu_data,
-        )
+        )::Union{Nothing,ScatteringResult}
         extra_0_q, extra_q, extra_irr, extra_emitter_escaped_power =
-            _compute_extra_band_light(
+            Base.inferencebarrier(_compute_extra_band_light)(
                 scene,
                 models,
                 meteo_row,
@@ -3552,45 +3656,13 @@ function _run_light_step_cached(
                 responses_cache=responses_cache,
                 prepared=prepared,
                 resolved_step=resolved,
-            )
+            )::_ExtraBandLightResult
     end
     nir_interception || (first = _disable_nir_first_order_local(first))
-    budget = integrate_light(
-        scene,
-        models,
-        first,
-        scat,
-        options;
-        step_duration_seconds=resolved.duration_seconds,
-        extra_initial_energy_per_band=extra_0_q,
-        extra_energy_per_band=extra_q,
-        extra_emitter_escaped_power_per_band=extra_emitter_escaped_power,
-        component_area_per_node=prepared === nothing ? nothing : prepared.component_area_per_node,
-        absorption_par_per_node=prepared === nothing ? nothing : prepared.absorption_par_per_node,
-        absorption_nir_per_node=prepared === nothing ? nothing : prepared.absorption_nir_per_node,
-    )
-    sky_fraction =
-        options.include_sky_fraction ?
-        _compute_sky_fraction(
-            scene,
-            models,
-            turtle,
-            options;
-            prepared=prepared,
-            responses_cache=responses_cache,
-        ) : nothing
-    return LightStepResult(
-        sky,
-        turtle,
-        fluxes,
-        _materialize_first_order_result(first),
-        scat,
-        budget,
-        extra_irr,
-        sky_fraction,
-        cache.render_geometry,
-        cache.node_metadata,
-        cache.component_metadata,
+    return _finish_light_step(
+        cache, sky, turtle, fluxes, first, scat, prepared, responses_cache,
+        extra_0_q, extra_q, extra_irr, extra_emitter_escaped_power,
+        resolved.duration_seconds,
     )
 end
 
@@ -3625,25 +3697,15 @@ function _run_light_sky_cached(
         first = _combine_sector_responses(responses_cache, fluxes)
         scat = _assemble_cached_scattering(cache, entry, fluxes, nir_scattering)
     else
-        if ib isa RasterCPUBackend && options.scattering
-            prepared === nothing && (prepared = _prepare_interception_data(scene, models, options; include_budget_maps=true))
-            first, scattering_topology =
-                _stream_first_order_with_scattering_topology(prepared, scene, models, turtle, fluxes, options)
-        elseif ib isa RasterGPUBackend
-            prepared === nothing && (prepared = _prepare_interception_data(
-                scene,
-                models,
-                options;
-                include_budget_maps=true,
-            ))
-            rastergpu_data = cache.rastergpu_data === nothing ?
-                             _rastergpu_scene_data(prepared, ib.config) :
-                             cache.rastergpu_data
-            first = compute_first_order(rastergpu_data, turtle, fluxes, options)
-        else
-            first = compute_first_order(scene, models, turtle, fluxes, options; backend=ib)
-        end
-        scat = _compute_scattering_with_flags(
+        interception = Base.inferencebarrier(_uncached_step_interception)(
+            cache, ib, turtle, fluxes, extra_irr,
+        )::_LightStepInterception
+        first = interception.first
+        prepared = interception.prepared
+        responses_cache = interception.responses_cache
+        scattering_topology = interception.scattering_topology
+        rastergpu_data = interception.rastergpu_data
+        scat = Base.inferencebarrier(_compute_scattering_with_flags)(
             scene,
             models,
             turtle,
@@ -3657,10 +3719,10 @@ function _run_light_sky_cached(
             responses_cache=responses_cache,
             scattering_topology=scattering_topology,
             rastergpu_data=rastergpu_data,
-        )
+        )::Union{Nothing,ScatteringResult}
     end
     extra_0_q, extra_q, extra_irr, extra_emitter_escaped_power =
-        _compute_extra_band_light(
+        Base.inferencebarrier(_compute_extra_band_light)(
             scene,
             models,
             nothing,
@@ -3674,44 +3736,12 @@ function _run_light_sky_cached(
                                cache.scattering_backend,
             responses_cache=responses_cache,
             prepared=prepared,
-        )
+        )::_ExtraBandLightResult
     nir_interception || (first = _disable_nir_first_order_local(first))
-    budget = integrate_light(
-        scene,
-        models,
-        first,
-        scat,
-        options;
-        step_duration_seconds=Float64(step_duration_seconds),
-        extra_initial_energy_per_band=extra_0_q,
-        extra_energy_per_band=extra_q,
-        extra_emitter_escaped_power_per_band=extra_emitter_escaped_power,
-        component_area_per_node=prepared === nothing ? nothing : prepared.component_area_per_node,
-        absorption_par_per_node=prepared === nothing ? nothing : prepared.absorption_par_per_node,
-        absorption_nir_per_node=prepared === nothing ? nothing : prepared.absorption_nir_per_node,
-    )
-    sky_fraction =
-        options.include_sky_fraction ?
-        _compute_sky_fraction(
-            scene,
-            models,
-            turtle,
-            options;
-            prepared=prepared,
-            responses_cache=responses_cache,
-        ) : nothing
-    return LightStepResult(
-        sky,
-        turtle,
-        fluxes,
-        _materialize_first_order_result(first),
-        scat,
-        budget,
-        extra_irr,
-        sky_fraction,
-        cache.render_geometry,
-        cache.node_metadata,
-        cache.component_metadata,
+    return _finish_light_step(
+        cache, sky, turtle, fluxes, first, scat, prepared, responses_cache,
+        extra_0_q, extra_q, extra_irr, extra_emitter_escaped_power,
+        Float64(step_duration_seconds),
     )
 end
 

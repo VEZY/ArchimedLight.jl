@@ -859,9 +859,11 @@ end
         @test light.options.include_sky_fraction
         @test status.sky_fraction ≈ expected
         @test status.seen_sky_fraction ≈ expected
-        @test all(value -> isapprox(value, expected), outputs(simulation)[
+        history = outputs(simulation)[
             (:archimed_light, ObjectId(:leaf), :sky_fraction)
-        ])
+        ]
+        @test first.(history) == [1.0, 2.0]
+        @test all(value -> isapprox(value, expected), last.(history))
         dark && @test iszero(status.Ra_SW_f)
 
         # A public options update must not disable a declared output or leave
