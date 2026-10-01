@@ -1,9 +1,5 @@
 @testmodule RegressionReportHarness begin
     include(joinpath(@__DIR__, "regression_matrix", "harness.jl"))
-
-    # Redirect only this isolated harness module to temporary test baselines.
-    const TEST_BASELINE_ROOT = Ref{String}("")
-    _baseline_root() = TEST_BASELINE_ROOT[]
 end
 
 @testitem "Regression comparison preserves every physical component" tags=[:core, :fast] setup=[RegressionReportHarness] begin
@@ -92,7 +88,9 @@ end
 
     harness = RegressionReportHarness
     mktempdir() do tmp
-        harness.TEST_BASELINE_ROOT[] = joinpath(tmp, "baselines")
+        # Redirect only this isolated harness module, without redefining a method.
+        original_baseline_root = harness._BASELINE_ROOT[]
+        harness._BASELINE_ROOT[] = joinpath(tmp, "baselines")
         try
             scenario = harness.RegressionScenario("report_status", :synthetic, "report_status")
             data = (kind=:scene_outputs, figure=nothing)
@@ -127,7 +125,7 @@ end
                 end
             end
         finally
-            harness.TEST_BASELINE_ROOT[] = ""
+            harness._BASELINE_ROOT[] = original_baseline_root
         end
     end
 end

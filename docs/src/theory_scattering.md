@@ -2,10 +2,6 @@
 
 After first-order interception, ARCHIMED can redistribute part of the intercepted energy between scene components through iterative scattering.
 
-## Scattering In One Sentence
-
-The model takes the energy first intercepted by each component, applies a waveband-specific scattering coefficient, and redistributes that scattered pool between adjacent visible hits along the same directional ray paths used for interception.
-
 The light intercepted by an object can be either absorbed, reflected, or transmitted:
 
 ![Reflectance, transmittance, absorptance](assets/optical_properties_reflectance_transmittance.jpg)
@@ -19,19 +15,20 @@ In practice, the model takes the energy first intercepted by each object compute
 The figure shows the three steps used to turn first-order ray paths into
 scattering transfers.
 
-Panel 1 shows the geometric information that ARCHIMED reuses. For each turtle
-direction, the scene is projected onto a raster grid and each pixel ray records
-the ordered stack of objects it crosses. In the figure, the short double-headed
-arrows mark the ray segments where energy can be exchanged in both directions: purple between the top and middle
-objects, teal between the top and bottom objects, and orange between the middle
-and bottom objects.
+For one light direction, and the three components depicted in the figure, the algorithm runs in two main steps:
 
-Energy exchange is then computed using links (Panel 2) between nodes that present shared ray segments. The links are built from the number of shared hits along the ray path, and they are used to transfer energy between the nodes in proportion to their shared ray paths. Each node's scattering coefficient determines how much of its intercepted energy is redistributed, and the pair links determine how that scattered energy is shared with their neighbors.
+**Step 1: Build the visibility links (panel 1&2)**
 
-Panel 3 shows how the graph is used during propagation. A node's current power is
-multiplied by its scattering coefficient, normalized by its total number of
-relevant directional hits, and split between the two transfer sides. Each pair
-link then receives that per-hit share multiplied by its common-hit count, so
+We shoot many parallel rays from the sky direction through the pixels. Some rays hit the components directly (yellow arrows). This step is the first-order interception stage, which computes the intercepted energy for each component. Then, some light is transmitted or reflected and continues along the ray path (panel 1). Some of those rays hit other components, and some escape to the sky. The algorithm counts how many rays connect each pair of components along the ray path, to tell us who is visible from whom, and how strongly (depending on the number of common rays).
+
+**Step 2: Exchange energy  (panel 3)**
+
+Based on the visibility links (which organ sees which, and how many rays connect them), the algorithm redistributes the scattered energy between components. Each component absorbs part of the energy, and transmits or reflects the rest to its neighbors again. The more rays connect two components, the more energy is exchanged between them. We do this iteratively until the remaining scattered energy in the scene is small enough to stop.
+
+In more detail, panel 3 shows how the graph is used during propagation. A node's current power is
+multiplied by its scattering coefficient, normalized by the sum of its
+angularly weighted directional hits, and split between the two transfer sides. Each pair
+link then receives that share multiplied by its weighted common-hit count, so
 neighbors receive energy in proportion to their shared ray paths with the source
 node. The received scattered power becomes part of the next iteration.
 
@@ -45,8 +42,8 @@ For each node and band:
 
 1. start from the current intercepted or previously scattered energy
 2. multiply by the node scattering coefficient
-3. divide by the total number of relevant directional hits and by two transfer sides
-4. multiply that per-hit share by each pair link's common-hit count
+3. divide by the sum of angularly weighted source hits and by two transfer sides
+4. multiply that share by each pair link's angularly weighted common-hit count
 5. accumulate the resulting received energy on linked neighboring hits
 6. treat sky-facing shares with no receiving scene object as escaped energy
 
@@ -68,9 +65,64 @@ The default `scattering_stop_ratio = 0.01` means the iteration stops once the re
 
 Both incident radiation and scattering exchanges are described over a finite set of discrete directions. The directional discretization is a key assumption of the ARCHIMED method, and it is used for both first-order interception and scattering. The directional set is defined by the turtle sectors, which are built from the meteo step and the sky model.
 
-### Lambertian-Style Redistribution
+### Lambertian Redistribution
 
-The scattering logic assumes that the scattered pool can be redistributed across the available directional links in proportion to their shared ray paths. This is a Lambertian-style assumption, which is a common simplification in plant optics. It is not a full BRDF / BTDF description, but it is sufficient for the purpose of redistributing intercepted energy between scene components.
+The scattered power follows a discrete Lambertian distribution: outgoing
+radiance is independent of viewing angle, while power within a solid angle is
+proportional to the apparent source area. The division by two shares the scattered
+pool between the two directions along each ray path, retaining the additional
+assumption of equal reflectance and transmittance.
+
+ARCHIMED rasterizes surfaces on a horizontal ground plane. For a planar component
+of area `A` and unit normal `n`, let `s_k` be an upward unit turtle direction and
+`s_z,k` its vertical component. With the whole projected component inside the
+projection bounds, the raw directional hit count approximately follows:
+
+```text
+H_k ∝ A × |n · s_k| / s_z,k
+```
+
+The projection already encodes the apparent source area. To remove the extra
+horizontal-plane factor and integrate over solid angle, the graph weights each
+direction by `w_k = s_z,k × sector.weight`. Here `sector.weight` is the sector's
+normalized solid angle; the common factor `2π` cancels during normalization.
+For source `i` and receiver `j`, the transfer per iteration is:
+
+```text
+weighted_hits[i] = sum_k(w_k × source_hits[i, k])
+weighted_links[j, i] = sum_k(w_k × link_hits[j, i, k])
+received[j ← i] = current[i] × scattering_coefficient[i]
+                  × weighted_links[j, i] / (2 × weighted_hits[i])
+```
+
+A source with no weighted hits transfers no power. Source totals include rays
+that escape without hitting another object, so successful links are never
+renormalized to hide escape. Explicit `:sun` directions are excluded from this
+angular quadrature. The weights depend on geometry and sector solid angles,
+not on the current sky brightness or incident flux. No additional cosine to
+the source normal is applied: it is already present in the hit count.
+
+For a horizontal surface this gives power proportional to `s_z,k × ΔΩ_k`;
+for an inclined surface it gives `|n · s_k| × ΔΩ_k`. This is the
+[Lambertian radiometric integral](https://pbr-book.org/4ed/Radiometry%2C_Spectra%2C_and_Color/Working_with_Radiometric_Integrals)
+approximated with the selected turtle directions and raster pixels. Finer pixels
+do not remove errors due to a coarse angular grid. In particular, per-component
+discrete normalization preserves the scattered power but does not guarantee exact
+continuum view factors or reciprocity at finite angular resolution.
+
+The historical Java MUSC implementation, and Julia before the issue #55
+correction, used unweighted link and source-hit counts. Equal ray energies with
+horizontal rasterization overrepresented shallow directions, even with fine
+pixels. The correction implements the technical manual's stated Lambertian
+assumption and intentionally changes historical scattering results. It retains
+the simplified optical coefficients and equal two-sided split. Analytical plate
+tests verify the numerical weighting; they do not replace physical measurements
+of irradiance within a scene.
+
+Explore the [Evaluation](evaluation.md) page to compare the current algorithm
+with an independent surface-integral reference in four interactive 3D scenes.
+It also explains how the reference handles projected area, occlusion, diffuse
+transmission, and repeated exchanges.
 
 ## Optical Coefficients
 
@@ -85,6 +137,10 @@ optical_properties:
 PAR has typically low scattering because most intercepted PAR is absorbed by leaves. Whereas NIR scattering is typically high, meaning much more of the intercepted NIR is re-emitted into the scattering process.
 
 ## Artificial Light Emitters
+
+Artificial emitters use a separate, cosine-weighted source calculation. Their
+initial emission is calculated before the subsequent scattering by ordinary
+surfaces described above.
 
 The light source formalism can be read with three indices:
 source `s`, waveband `b`, and direction `d`. Natural illumination has sources

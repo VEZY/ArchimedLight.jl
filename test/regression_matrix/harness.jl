@@ -49,9 +49,9 @@ function _regression_profile()
     lowercase(strip(get(ENV, "ARCHIMEDLIGHT_REGRESSION_PROFILE", "fast")))
 end
 
-function _baseline_root()
-    joinpath(@__DIR__, "baselines")
-end
+const _BASELINE_ROOT = Ref{String}(joinpath(@__DIR__, "baselines"))
+
+_baseline_root() = _BASELINE_ROOT[]
 
 function _default_case_options()
     OrderedDict{String,Any}(

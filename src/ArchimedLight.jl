@@ -9,6 +9,9 @@ import Serialization
 import Dates
 import OrderedCollections: OrderedDict
 import PlantMeteo
+import Adapt
+import KernelAbstractions
+using KernelAbstractions: @atomic, @index
 import Tables
 import YAML
 import CSV
@@ -41,8 +44,8 @@ export PixelHitStackPolicy
 export AutoPixelHitStack
 export SmallPixelHitStack
 export VectorPixelHitStack
-export RasterCPUBackend
-export RaycastScatteringBackend
+export RasterCPUBackend, RasterGPUBackendConfig, RasterGPUBackend
+export RaycastScatteringBackend, RasterGPUScatteringBackend
 export SkyState
 export LightBudget
 export LightStepResult

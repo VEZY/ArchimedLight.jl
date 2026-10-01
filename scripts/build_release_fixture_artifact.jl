@@ -257,16 +257,20 @@ function _refresh_release_references!(repo_root::AbstractString, dataset_root::A
     ENV["ARCHIMEDLIGHT_RELEASE_DATA_ROOT"] = dataset_root
     try
         Pkg.activate(joinpath(repo_root, "test"); io=devnull)
-        include(joinpath(repo_root, "test", "release", "harness.jl"))
-        fixtures = Base.invokelatest(select_fixtures, Base.invokelatest(julia_fixtures))
-        isempty(fixtures) && error("No release fixtures selected for reference refresh.")
-        total = length(fixtures)
-        for (i, fx) in enumerate(fixtures)
-            @info "Refreshing release references" index=i total=total fixture=fx.id
-            data = Base.invokelatest(fixture_runtime_data, fx)
-            numeric = Base.invokelatest(write_fixture_numeric_references!, fx; out_root=nothing)
-            image = Base.invokelatest(write_fixture_reference_image!, fx; data=data)
-            @info "Refreshed release references" fixture=fx.id numeric_files=length(numeric) image=image
+        harness = Module(gensym(:ReleaseReferenceRefresh))
+        Base.include(harness, joinpath(repo_root, "test", "release", "harness.jl"))
+        # Enter the new world before looking up bindings introduced by include.
+        Base.invokelatest() do
+            fixtures = harness.select_fixtures(harness.julia_fixtures())
+            isempty(fixtures) && error("No release fixtures selected for reference refresh.")
+            total = length(fixtures)
+            for (i, fx) in enumerate(fixtures)
+                @info "Refreshing release references" index=i total=total fixture=fx.id
+                data = harness.fixture_runtime_data(fx)
+                numeric = harness.write_fixture_numeric_references!(fx; data=data)
+                image = harness.write_fixture_reference_image!(fx; data=data)
+                @info "Refreshed release references" fixture=fx.id numeric_files=length(numeric) image=image
+            end
         end
     finally
         old_project === nothing || Pkg.activate(dirname(old_project); io=devnull)

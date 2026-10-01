@@ -4,9 +4,11 @@ version = "0.2.0"
 authors = ["Rémi Vezy <VEZY@users.noreply.github.com> and contributors"]
 
 [deps]
+Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 GeometryBasics = "5c1252a2-5f33-56bf-86c9-59e7332b4326"
+KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MultiScaleTreeGraph = "dd4a991b-8a45-4075-bede-262ee62d5583"
 OrderedCollections = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
@@ -26,9 +28,11 @@ ArchimedLightMakieExt = "Makie"
 ArchimedLightPlantSimEngineExt = "PlantSimEngine"
 
 [compat]
+Adapt = "4"
 CSV = "0.10.15, 1.0"
 Dates = "1"
 GeometryBasics = "0.5"
+KernelAbstractions = "0.9, 0.10"
 LinearAlgebra = "1"
 Makie = "0.24"
 MultiScaleTreeGraph = "0.16"
@@ -41,7 +45,7 @@ StaticArrays = "1"
 Tables = "1"
 Test = "1"
 YAML = "0.4"
-julia = "1.10"
+julia = "1.12"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

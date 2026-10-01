@@ -55,12 +55,15 @@ Energy balance, transpiration, and photosynthesis are intentionally out of scope
 
 ## Quick Start
 
+This tutorial uses 1 cm pixels instead of the default 1 mm pixels to keep the coffee simulation quick.
+
 ```@example home_quick_start
 using ArchimedLight
 
 repo_root = normpath(joinpath(dirname(pathof(ArchimedLight)), ".."))
 config = joinpath(repo_root, "example_2", "config.yml")
 sim, meteo = read_simulation(config)
+update_options!(sim, LightOptions(sim.options; pixel_size=0.01))
 
 step = run_light(sim, first(meteo))
 
@@ -87,12 +90,14 @@ The simulation results are grouped by quantity and waveband in `LightBudget`. Wh
 - [Model Files Reference](reference_models.md)
 - [Meteo Inputs Reference](reference_meteo.md)
 - [Outputs](outputs.md)
+- [Evaluation: scattering in 3D](evaluation.md)
 - [CPU Performance Benchmarks](performance_benchmarks.md)
 - [Pipeline Overview](theory_pipeline.md)
 - [First-Order Interception](theory_interception.md)
 - [Scattering And Optical Assumptions](theory_scattering.md)
 - [Full Example](full_example.md)
 - [Composable Stages](stages.md)
+- [GPU Backends And Benchmarks](gpu_backends.md)
 - [API Reference](api.md)
 
 ## Contributors
