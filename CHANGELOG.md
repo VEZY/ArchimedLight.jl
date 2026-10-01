@@ -1,56 +1,66 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 ### Breaking changes
 
-- Rename the PlantSimEngine output `radiative_mesh_area` to `area` in both
-  schemas. Update status access, output requests, and source selectors to use
-  `area`. Its value remains the geometric mesh surface area; pixel projection
-  corrections do not change it. The separate `component_values` table retains
-  its `radiative_mesh_area` column.
-- Use the common `:surface_area` contract for `aPPFD` and `Ra_SW_f`, and
-  `unit=:square_metre`, `basis=:organ` for `area`. With the matching
-  PlantBiophysics update, leaf meshes provide the shared reference area and
-  both fluxes connect directly to FvCB and Monteith. Remove the previous
-  mesh-to-leaf conversion applications. Radiation calculations and
-  normalization are unchanged; ground-area canopy fluxes still require LAI
-  conversion before leaf physiology.
-
-### Fixed
-
-- Correct Lambertian scattering on the horizontal raster by weighting both
-  transfer links and source-hit totals by sector solid angle and the direction's
-  vertical component. Escaping rays remain in the normalization. This removes
-  the excess scattering into shallow directions reported in issue #55 and
-  intentionally changes scattered-light results relative to historical Java
+- Require Julia 1.12 or later, with PlantGeom 0.20, MultiScaleTreeGraph 0.16,
+  and PlantMeteo 0.9.
+- Correct Lambertian scattering on the horizontal raster. Transfer links and
+  source-hit totals now use sector solid angle and the direction's vertical
+  component, with escaping rays retained in the normalization. This removes
+  excess scattering into shallow directions (issue #55) and intentionally
+  changes scattered-light results relative to v0.1.3 and historical Java
   outputs. The equal reflection/transmission assumption is retained.
-
-## 0.2.0
+- For users of development versions of the PlantSimEngine extension, rename
+  the organ output `radiative_mesh_area` to `area` in both schemas. Update
+  status access, output requests, and source selectors accordingly. Replace
+  the previous mesh-to-leaf conversion applications with the shared
+  `:surface_area` contracts described below. The separate `component_values`
+  table retains its `radiative_mesh_area` column.
 
 ### Added
 
+- Add experimental `RasterGPUBackend` interception and
+  `RasterGPUScatteringBackend` scattering through KernelAbstractions, with
+  toric boundaries, reusable device buffers, and configurable hit-stack and
+  tile capacities. Overflow raises an error rather than truncating hits.
+- Provide explicit Metal and CUDA setup examples and dedicated GPU parity
+  test entry points. GPU runtime packages remain optional; the caller supplies
+  the device backend. `RasterGPUBackend()` defaults to the
+  KernelAbstractions CPU backend.
+- Support automatic, dense atomic, and sparse host-reduced accumulation of
+  scattering links, with a configurable memory limit for dense accumulation.
 - Couple a scene-scale light calculation to PlantSimEngine 0.15 objects through
-  an optional extension. Select organ destinations with `OutputTo` and publish
-  light outputs by stable object identity.
-- Resolve registered PlantGeom 0.20, MultiScaleTreeGraph 0.16, and PlantMeteo 0.9
-  without development branches or Git revision overrides.
+  the optional `ArchimedLightModel` extension. Select organ destinations with
+  `OutputTo` and publish distributed light outputs by stable object identity,
+  including when the scene changes.
+- Provide a compact default `:coupling` output schema and a `:full` schema
+  with additional initial/total PAR and NIR flux and energy diagnostics.
+  Both schemas publish simulated `sky_fraction` automatically, including in
+  darkness, without manual leaf initialization or an opt-in setting.
+- Declare `aPPFD` and `Ra_SW_f` with the common `:surface_area` contract, and
+  `area` with `unit=:square_metre`, `basis=:organ`. With compatible
+  PlantBiophysics models, leaf meshes provide the shared reference area for
+  direct coupling to FvCB and Monteith. `area` remains geometric mesh surface
+  area; ground-area canopy fluxes still require LAI conversion before leaf
+  physiology.
+- Add `LightComponentMetadata`, `component_values`, `component_values!`, and
+  `CompiledComponentAggregation` for component output collection and reusable
+  aggregation keyed by source object identity.
+- Run small one-plate and two-plate numeric and reference-image comparisons in
+  the regular test suite. Add independent angular and surface Lambertian
+  reference tests alongside the larger release validation suite.
 
-### Breaking changes
+### Changed
 
-The area-contract changes below describe 0.2.0 and are superseded by the
-Unreleased changes above.
-
-- The PlantSimEngine extension declared `aPPFD` and `Ra_SW_f` as rates per
-  radiative mesh area and `radiative_mesh_area` as an organ area. Direct
-  coupling of those raw flux densities to contracted leaf-area physiology
-  inputs was rejected.
-- PlantBiophysics workflows required a finite positive
-  `botanical_leaf_area` and used `RadiativeMeshToLeafPPFD` or
-  `RadiativeMeshToLeafShortwave`. The boundary preserved absorbed quantity:
-  `raw_flux * radiative_mesh_area == leaf_flux * botanical_leaf_area`.
-- Raw output field names and the `:coupling` and `:full` schemas are unchanged.
-  No contract was added to the `Ri_*` or component PAR/NIR diagnostic fields.
+- Reuse prepared geometry and metadata during component CSV export and cached
+  light calculations, and reduce costly compiler inference in GPU workflows.
+- Make executable documentation examples lighter through coarser explicit
+  demonstration grids and reuse of time-series results. Keep expensive media
+  validation in a separate optional workflow.
+- Refresh scattering fixture references for the corrected Lambertian
+  computation while retaining strict numeric comparison tolerances.
 
 ### Fixed
 
@@ -58,3 +68,9 @@ Unreleased changes above.
   NIR. The historical `names=Dict(:absorbed_nir_flux => :Ra_SW_f)` call remains
   accepted and produces that corrected sum with a deprecation warning; the new
   `:absorbed_shortwave_flux` selector expresses the same request directly.
+- Honor requested sky-fraction storage for `SkyState` simulations and publish
+  it consistently through cached calculations and PlantSimEngine option
+  refreshes.
+- Preserve all components in regression comparisons when source keys repeat,
+  report nonblocking drift accurately, and avoid overwriting the regression
+  harness baseline-root method in tests.
