@@ -33,7 +33,7 @@ interception = RasterGPUBackend(
 scattering = RasterGPUScatteringBackend(interception)
 
 sim, meteo = read_simulation(
-    "config.yml";
+    joinpath(dirname(dirname(pathof(ArchimedLight))), "example_1", "config.yml"),
     interception_backend=interception,
     scattering_backend=scattering,
 )
@@ -41,7 +41,7 @@ step = run_light(sim, first(meteo))
 ```
 
 Replace `MtlArray` with the corresponding array type for another
-KernelAbstractions backend.
+KernelAbstractions backend, i.e. `CuArray` for CUDA, `ROCArray` for AMDGPU and `oneArray` for oneAPI.
 
 ## Configuration
 

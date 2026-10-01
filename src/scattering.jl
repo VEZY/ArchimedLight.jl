@@ -9,8 +9,8 @@ end
 
 struct ScatteringTopologyCache
     pair_counts::ScatteringPairCounts
-    sun_hits::Dict{Int,Int}
-    sun_hits_by_node::Vector{Int}
+    weighted_hits::Dict{Int,Float64}
+    weighted_hits_by_node::Vector{Float64}
     node_ids::Vector{Int}
     pair_to_idx::Vector{Int}
     pair_from_idx::Vector{Int}
@@ -58,14 +58,14 @@ end
 @inline _unpack_scattering_to(edge::UInt64) = Int(UInt32(edge >> 32))
 @inline _unpack_scattering_from(edge::UInt64) = Int(UInt32(edge & 0xffffffff))
 
-function _edge_counts_from_packed(edge_counts::Dict{UInt64,Int})
+function _edge_counts_from_packed(edge_counts::AbstractDict{UInt64,<:Real})
     isempty(edge_counts) && return ScatteringPairCounts(Int[], Int[], Int[])
 
     # Sort once when materializing the final graph so iteration order is deterministic.
     packed_edges = sort!(collect(keys(edge_counts)))
     to_nodes = Int[]
     from_nodes = Int[]
-    counts = Int[]
+    counts = Float64[]
     sizehint!(to_nodes, length(packed_edges))
     sizehint!(from_nodes, length(packed_edges))
     sizehint!(counts, length(packed_edges))
@@ -185,44 +185,60 @@ end
 
 mutable struct ScatteringStackScratch
     nearest_nonvirtual_below::Vector{Int}
+    directional_edges::Dict{UInt64,Int}
 end
 
-ScatteringStackScratch() = ScatteringStackScratch(Int[])
+ScatteringStackScratch() = ScatteringStackScratch(Int[], Dict{UInt64,Int}())
 
-function _accumulate_sun_hits!(
-    sun_hits::Dict{Int,Int},
+# A horizontal raster overcounts oblique ray bundles by 1 / direction[3].
+# Multiplying raw links AND all source hits by sz * dOmega recovers Lambertian
+# projected-area quadrature. The common 2pi in dOmega cancels in the ratio.
+@inline function _scattering_direction_weight(sector::TurtleSector)
+    sector.source == :sun && return 0.0
+    return max(Float64(sector.direction[3]), 0.0) * max(sector.weight, 0.0)
+end
+
+function _merge_weighted_edges!(weighted::Dict{UInt64,Float64}, raw::Dict{UInt64,Int}, weight::Float64)
+    for (edge, count) in raw
+        weighted[edge] = get(weighted, edge, 0.0) + weight * count
+    end
+    return weighted
+end
+
+function _accumulate_weighted_hits!(
+    weighted_hits::Dict{Int,Float64},
     projection::DirectionProjectionResult,
+    weight::Float64,
     node_ids::Union{Nothing,Vector{Int}}=nothing,
 )
     for (nid, h) in projection.node_hits
-        sun_hits[nid] = get(sun_hits, nid, 0) + h
+        weighted_hits[nid] = get(weighted_hits, nid, 0.0) + weight * h
     end
     return nothing
 end
 
-function _accumulate_sun_hits!(
-    sun_hits::Dict{Int,Int},
+function _accumulate_weighted_hits!(
+    weighted_hits::Dict{Int,Float64},
     projection::DenseDirectionProjectionResult,
-    node_ids::Union{Nothing,Vector{Int}},
+    weight::Float64,
+    node_ids::Vector{Int},
 )
-    node_ids === nothing && error("DenseDirectionProjectionResult sun-hit accumulation requires node_ids")
     @inbounds for i in eachindex(projection.node_hits)
         h = projection.node_hits[i]
         h == 0 && continue
         nid = node_ids[i]
-        sun_hits[nid] = get(sun_hits, nid, 0) + h
+        weighted_hits[nid] = get(weighted_hits, nid, 0.0) + weight * h
     end
     return nothing
 end
 
-function _accumulate_sun_hits!(
-    sun_hits_by_node::Vector{Int},
+function _accumulate_weighted_hits!(
+    weighted_hits_by_node::Vector{Float64},
     projection::DenseDirectionProjectionResult,
+    weight::Float64,
 )
-    @inbounds for i in eachindex(projection.node_hits, sun_hits_by_node)
-        h = projection.node_hits[i]
-        h == 0 && continue
-        sun_hits_by_node[i] += h
+    @inbounds for i in eachindex(projection.node_hits, weighted_hits_by_node)
+        weighted_hits_by_node[i] += weight * projection.node_hits[i]
     end
     return nothing
 end
@@ -291,8 +307,8 @@ function _stack_transfer_pairs_no_virtual!(
 end
 
 function _accumulate_scattering_counts!(
-    edge_counts::Dict{UInt64,Int},
-    sun_hits::Dict{Int,Int},
+    weighted_edge_counts::Dict{UInt64,Float64},
+    weighted_hits::Dict{Int,Float64},
     sector::TurtleSector,
     projection::DirectionProjectionResult,
     virtual_nodes::Set{Int},
@@ -301,10 +317,10 @@ function _accumulate_scattering_counts!(
     node_ids::Union{Nothing,Vector{Int}}=nothing,
     stacks_sorted::Bool=false,
 )
-    if sector.source == :sun
-        _accumulate_sun_hits!(sun_hits, projection, node_ids)
-        return nothing
-    end
+    weight = _scattering_direction_weight(sector)
+    weight > 0.0 || return nothing
+    _accumulate_weighted_hits!(weighted_hits, projection, weight, node_ids)
+    edge_counts = empty!(scratch.directional_edges)
 
     no_virtual_nodes = isempty(virtual_nodes)
     for stack in values(projection.pixel_hits)
@@ -316,6 +332,7 @@ function _accumulate_scattering_counts!(
             _stack_transfer_pairs!(edge_counts, stack, virtual_nodes, scratch, node_group)
         end
     end
+    _merge_weighted_edges!(weighted_edge_counts, edge_counts, weight)
     return nothing
 end
 
@@ -683,8 +700,8 @@ function _merge_dense_edge_counts!(
 end
 
 function _accumulate_scattering_counts!(
-    edge_counts::Dict{UInt64,Int},
-    sun_hits::Dict{Int,Int},
+    weighted_edge_counts::Dict{UInt64,Float64},
+    weighted_hits::Dict{Int,Float64},
     sector::TurtleSector,
     projection::DenseDirectionProjectionResult,
     virtual_node_mask::Vector{Bool},
@@ -695,10 +712,10 @@ function _accumulate_scattering_counts!(
     no_virtual_nodes::Union{Nothing,Bool}=nothing,
 )
     node_ids === nothing && error("DenseDirectionProjectionResult scattering accumulation requires node_ids")
-    if sector.source == :sun
-        _accumulate_sun_hits!(sun_hits, projection, node_ids)
-        return nothing
-    end
+    weight = _scattering_direction_weight(sector)
+    weight > 0.0 || return nothing
+    _accumulate_weighted_hits!(weighted_hits, projection, weight, node_ids)
+    edge_counts = empty!(scratch.directional_edges)
 
     no_virtual = no_virtual_nodes === nothing ? !any(virtual_node_mask) : no_virtual_nodes
     for stack in values(projection.pixel_hits)
@@ -723,12 +740,13 @@ function _accumulate_scattering_counts!(
             )
         end
     end
+    _merge_weighted_edges!(weighted_edge_counts, edge_counts, weight)
     return nothing
 end
 
 function _accumulate_scattering_counts!(
-    edge_counts::Dict{UInt64,Int},
-    sun_hits_by_node::Vector{Int},
+    weighted_edge_counts::Dict{UInt64,Float64},
+    weighted_hits_by_node::Vector{Float64},
     sector::TurtleSector,
     projection::DenseDirectionProjectionResult,
     virtual_node_mask::Vector{Bool},
@@ -739,10 +757,10 @@ function _accumulate_scattering_counts!(
     no_virtual_nodes::Union{Nothing,Bool}=nothing,
 )
     node_ids === nothing && error("DenseDirectionProjectionResult scattering accumulation requires node_ids")
-    if sector.source == :sun
-        _accumulate_sun_hits!(sun_hits_by_node, projection)
-        return nothing
-    end
+    weight = _scattering_direction_weight(sector)
+    weight > 0.0 || return nothing
+    _accumulate_weighted_hits!(weighted_hits_by_node, projection, weight)
+    edge_counts = empty!(scratch.directional_edges)
 
     no_virtual = no_virtual_nodes === nothing ? !any(virtual_node_mask) : no_virtual_nodes
     for stack in values(projection.pixel_hits)
@@ -767,6 +785,7 @@ function _accumulate_scattering_counts!(
             )
         end
     end
+    _merge_weighted_edges!(weighted_edge_counts, edge_counts, weight)
     return nothing
 end
 
@@ -774,8 +793,8 @@ function _pair_counts_for_scattering(scene::PlantGeom.SceneGeometry, models::Lig
     geometry = _scene_geometry_for_interception(scene, models, options)
     virtual_nodes = _virtual_sensor_node_ids(geometry.node_group, geometry.node_type, models)
     cache_ctx = _projection_cache_context(geometry.vertices, geometry.faces, geometry.face2node, geometry.plotbox, options)
-    edge_counts = Dict{UInt64,Int}()
-    sun_hits = Dict{Int,Int}()
+    edge_counts = Dict{UInt64,Float64}()
+    weighted_hits = Dict{Int,Float64}()
     scratch = ScatteringStackScratch()
 
     for sector in turtle.sectors
@@ -783,7 +802,7 @@ function _pair_counts_for_scattering(scene::PlantGeom.SceneGeometry, models::Lig
             _direction_projection_cached(geometry.vertices, geometry.faces, geometry.face2node, sector.direction, options, geometry.plotbox, cache_ctx)
         _accumulate_scattering_counts!(
             edge_counts,
-            sun_hits,
+            weighted_hits,
             sector,
             projection,
             virtual_nodes,
@@ -792,7 +811,7 @@ function _pair_counts_for_scattering(scene::PlantGeom.SceneGeometry, models::Lig
         )
     end
 
-    return _edge_counts_from_packed(edge_counts), sun_hits, geometry.node_ids, geometry.node_group
+    return _edge_counts_from_packed(edge_counts), weighted_hits, geometry.node_ids, geometry.node_group
 end
 
 function _pair_counts_from_projections(
@@ -805,8 +824,8 @@ function _pair_counts_from_projections(
     virtual_node_mask::Union{Nothing,Vector{Bool}}=nothing,
     stacks_sorted::Bool=false,
 )
-    edge_counts = Dict{UInt64,Int}()
-    sun_hits = Dict{Int,Int}()
+    edge_counts = Dict{UInt64,Float64}()
+    weighted_hits = Dict{Int,Float64}()
     scratch = ScatteringStackScratch()
     no_virtual_nodes = isempty(virtual_nodes)
 
@@ -815,7 +834,7 @@ function _pair_counts_from_projections(
         if projection isa DenseDirectionProjectionResult
             _accumulate_scattering_counts!(
                 edge_counts,
-                sun_hits,
+                weighted_hits,
                 turtle.sectors[i],
                 projection,
                 virtual_node_mask,
@@ -828,7 +847,7 @@ function _pair_counts_from_projections(
         else
             _accumulate_scattering_counts!(
                 edge_counts,
-                sun_hits,
+                weighted_hits,
                 turtle.sectors[i],
                 projection,
                 virtual_nodes,
@@ -840,7 +859,7 @@ function _pair_counts_from_projections(
         end
     end
 
-    return _edge_counts_from_packed(edge_counts), sun_hits
+    return _edge_counts_from_packed(edge_counts), weighted_hits
 end
 
 function _pair_counts_from_streamed_projections(
@@ -849,8 +868,8 @@ function _pair_counts_from_streamed_projections(
     options::LightOptions;
     stacks_sorted::Bool=false,
 )
-    edge_counts = Dict{UInt64,Int}()
-    sun_hits = Dict{Int,Int}()
+    edge_counts = Dict{UInt64,Float64}()
+    weighted_hits = Dict{Int,Float64}()
     scratch = ScatteringStackScratch()
     no_virtual_nodes = isempty(prepared.virtual_nodes)
 
@@ -859,7 +878,7 @@ function _pair_counts_from_streamed_projections(
         if projection isa DenseDirectionProjectionResult
             _accumulate_scattering_counts!(
                 edge_counts,
-                sun_hits,
+                weighted_hits,
                 sector,
                 projection,
                 prepared.virtual_node_mask,
@@ -872,7 +891,7 @@ function _pair_counts_from_streamed_projections(
         else
             _accumulate_scattering_counts!(
                 edge_counts,
-                sun_hits,
+                weighted_hits,
                 sector,
                 projection,
                 prepared.virtual_nodes,
@@ -884,113 +903,36 @@ function _pair_counts_from_streamed_projections(
         end
     end
 
-    return _edge_counts_from_packed(edge_counts), sun_hits
+    return _edge_counts_from_packed(edge_counts), weighted_hits
 end
 
-function _all_dir_hits_for_scattering(first::FirstOrderResult, sun_hits::Dict{Int,Int}, options::LightOptions, node_ids)
-    dense = first.dense
-    all_hits =
-        if dense !== nothing && isempty(first.hits_per_node)
-            if dense.node_ids == node_ids
-                Dict{Int,Int}(nid => dense.hits_per_node[i] for (i, nid) in pairs(node_ids))
-            else
-                dense_index = Dict{Int,Int}(nid => i for (i, nid) in pairs(dense.node_ids))
-                Dict{Int,Int}(nid => get(dense.hits_per_node, get(dense_index, nid, 0), 0) for nid in node_ids)
-            end
-        else
-            Dict{Int,Int}(nid => get(first.hits_per_node, nid, 0) for nid in node_ids)
-        end
-    if !options.all_in_turtle
-        for (nid, hsun) in sun_hits
-            all_hits[nid] = max(0, get(all_hits, nid, 0) - hsun)
-        end
-    end
-    return all_hits
+function _dense_weighted_hits(topology::ScatteringTopologyCache, node_ids::Vector{Int})
+    node_ids == topology.node_ids && return copy(topology.weighted_hits_by_node)
+    return Float64[get(topology.weighted_hits, nid, 0.0) for nid in node_ids]
 end
 
-function _dense_all_dir_hits_for_scattering(
-    first::FirstOrderResult,
-    sun_hits_by_node::Vector{Int},
-    options::LightOptions,
-    node_ids::Vector{Int},
-    topology_node_ids::Vector{Int},
-)
-    dense = first.dense
-    all_hits =
-        if dense !== nothing && isempty(first.hits_per_node) && dense.node_ids == node_ids
-            copy(dense.hits_per_node)
-        else
-            out = zeros(Int, length(node_ids))
-            if dense !== nothing && isempty(first.hits_per_node)
-                dense_index = Dict{Int,Int}(nid => i for (i, nid) in pairs(dense.node_ids))
-                @inbounds for (i, nid) in pairs(node_ids)
-                    out[i] = get(dense.hits_per_node, get(dense_index, nid, 0), 0)
-                end
-            else
-                @inbounds for (i, nid) in pairs(node_ids)
-                    out[i] = get(first.hits_per_node, nid, 0)
-                end
-            end
-            out
-        end
-    if !options.all_in_turtle
-        if node_ids == topology_node_ids
-            @inbounds for i in eachindex(all_hits, sun_hits_by_node)
-                all_hits[i] = max(0, all_hits[i] - sun_hits_by_node[i])
-            end
-        else
-            topology_index = Dict{Int,Int}(nid => i for (i, nid) in pairs(topology_node_ids))
-            @inbounds for (i, nid) in pairs(node_ids)
-                sun_idx = get(topology_index, nid, 0)
-                sun_idx == 0 && continue
-                all_hits[i] = max(0, all_hits[i] - sun_hits_by_node[sun_idx])
-            end
-        end
-    end
-    return all_hits
-end
-
-function _dense_int_vector_to_node_dict(node_ids::Vector{Int}, values::AbstractVector{<:Integer})
-    out = Dict{Int,Int}()
-    sizehint!(out, length(node_ids))
-    @inbounds for i in eachindex(node_ids)
-        out[node_ids[i]] = Int(values[i])
-    end
-    return out
-end
-
-function _dense_nonzero_int_vector_to_node_dict(node_ids::Vector{Int}, values::AbstractVector{<:Integer})
-    out = Dict{Int,Int}()
-    @inbounds for i in eachindex(node_ids, values)
-        value = Int(values[i])
-        value == 0 && continue
-        out[node_ids[i]] = value
-    end
-    return out
-end
-
-function _merge_sun_hits_into_dense!(
-    sun_hits_by_node::Vector{Int},
-    sun_hits::Dict{Int,Int},
+function _merge_weighted_hits_into_dense!(
+    weighted_hits_by_node::Vector{Float64},
+    weighted_hits::Dict{Int,Float64},
     node_index::Dict{Int,Int},
 )
-    isempty(sun_hits) && return sun_hits_by_node
-    for (nid, h) in sun_hits
+    isempty(weighted_hits) && return weighted_hits_by_node
+    for (nid, h) in weighted_hits
         idx = get(node_index, nid, 0)
         idx == 0 && continue
-        sun_hits_by_node[idx] += h
+        weighted_hits_by_node[idx] += h
     end
-    return sun_hits_by_node
+    return weighted_hits_by_node
 end
 
-function _merge_sun_hits_into_dense!(
-    sun_hits_by_node::Vector{Int},
-    sun_hits::Dict{Int,Int},
+function _merge_weighted_hits_into_dense!(
+    weighted_hits_by_node::Vector{Float64},
+    weighted_hits::Dict{Int,Float64},
     node_ids::Vector{Int},
 )
-    return _merge_sun_hits_into_dense!(
-        sun_hits_by_node,
-        sun_hits,
+    return _merge_weighted_hits_into_dense!(
+        weighted_hits_by_node,
+        weighted_hits,
         Dict{Int,Int}(nid => i for (i, nid) in pairs(node_ids)),
     )
 end
@@ -1050,7 +992,7 @@ end
 
 struct ScatteringSceneContext
     pair_counts::ScatteringPairCounts
-    all_hits::Dict{Int,Int}
+    all_hits::Dict{Int,Float64}
     node_ids::Vector{Int}
     node_group::Dict{Int,String}
     node_type::Dict{Int,String}
@@ -1059,7 +1001,7 @@ end
 
 function _topology_dense_index_arrays(
     pair_counts::ScatteringPairCounts,
-    sun_hits::Dict{Int,Int},
+    weighted_hits::Dict{Int,Float64},
     node_ids::Vector{Int},
     node_index::Dict{Int,Int},
 )
@@ -1070,31 +1012,31 @@ function _topology_dense_index_arrays(
         pair_to_idx[edge_idx] = node_index[pair_counts.to_nodes[edge_idx]]
         pair_from_idx[edge_idx] = node_index[pair_counts.from_nodes[edge_idx]]
     end
-    sun_hits_by_node = zeros(Int, length(node_ids))
-    for (nid, h) in sun_hits
+    weighted_hits_by_node = zeros(Float64, length(node_ids))
+    for (nid, h) in weighted_hits
         idx = get(node_index, nid, 0)
         idx == 0 && continue
-        sun_hits_by_node[idx] = h
+        weighted_hits_by_node[idx] = h
     end
-    return pair_to_idx, pair_from_idx, sun_hits_by_node
+    return pair_to_idx, pair_from_idx, weighted_hits_by_node
 end
 
 function _topology_dense_index_arrays(
     pair_counts::ScatteringPairCounts,
-    sun_hits::Dict{Int,Int},
+    weighted_hits::Dict{Int,Float64},
     node_ids::Vector{Int},
 )
     return _topology_dense_index_arrays(
         pair_counts,
-        sun_hits,
+        weighted_hits,
         node_ids,
         Dict{Int,Int}(nid => i for (i, nid) in pairs(node_ids)),
     )
 end
 
 function _merge_packed_edge_counts_as_indexed!(
-    indexed_edge_counts::Dict{Int,Int},
-    packed_edge_counts::Dict{UInt64,Int},
+    indexed_edge_counts::AbstractDict{Int,<:AbstractFloat},
+    packed_edge_counts::AbstractDict{UInt64,<:Real},
     node_ids::Vector{Int},
     node_index::Dict{Int,Int},
 )
@@ -1111,8 +1053,8 @@ function _merge_packed_edge_counts_as_indexed!(
 end
 
 function _merge_packed_edge_counts_as_indexed!(
-    indexed_edge_counts::Dict{Int,Int},
-    packed_edge_counts::Dict{UInt64,Int},
+    indexed_edge_counts::AbstractDict{Int,<:AbstractFloat},
+    packed_edge_counts::AbstractDict{UInt64,<:Real},
     node_ids::Vector{Int},
 )
     return _merge_packed_edge_counts_as_indexed!(
@@ -1124,7 +1066,7 @@ function _merge_packed_edge_counts_as_indexed!(
 end
 
 function _pair_counts_from_indexed_edges(
-    indexed_edge_counts::Dict{Int,Int},
+    indexed_edge_counts::AbstractDict{Int,<:Real},
     node_ids::Vector{Int},
 )
     isempty(indexed_edge_counts) && return ScatteringPairCounts(Int[], Int[], Int[]), Int[], Int[]
@@ -1134,7 +1076,7 @@ function _pair_counts_from_indexed_edges(
     from_nodes = Int[]
     to_idx = Int[]
     from_idx = Int[]
-    counts = Int[]
+    counts = Float64[]
     sizehint!(to_nodes, length(dense_edges))
     sizehint!(from_nodes, length(dense_edges))
     sizehint!(to_idx, length(dense_edges))
@@ -1160,15 +1102,15 @@ function _build_scattering_topology_cache(
     models::LightModels,
     prepared::PreparedInterceptionData,
     pair_counts::ScatteringPairCounts,
-    sun_hits::Dict{Int,Int},
+    weighted_hits::Dict{Int,Float64},
 )
     return _build_scattering_topology_cache(
         scene,
         models,
         prepared,
         pair_counts,
-        zeros(Int, length(prepared.geometry.node_ids)),
-        sun_hits,
+        zeros(Float64, length(prepared.geometry.node_ids)),
+        weighted_hits,
     )
 end
 
@@ -1177,13 +1119,13 @@ function _build_scattering_topology_cache(
     models::LightModels,
     prepared::PreparedInterceptionData,
     pair_counts::ScatteringPairCounts,
-    sun_hits_by_node::Vector{Int},
-    extra_sun_hits::Dict{Int,Int},
+    weighted_hits_by_node::Vector{Float64},
+    extra_weighted_hits::Dict{Int,Float64},
 )
     group_type_coeffs = _group_optical_coeffs(models)
     node_ids = copy(prepared.geometry.node_ids)
-    length(sun_hits_by_node) == length(node_ids) ||
-        throw(ArgumentError("dense sun-hit vector length $(length(sun_hits_by_node)) does not match topology node count $(length(node_ids))"))
+    length(weighted_hits_by_node) == length(node_ids) ||
+        throw(ArgumentError("dense weighted-hit vector length $(length(weighted_hits_by_node)) does not match topology node count $(length(node_ids))"))
     node_index = prepared.geometry.node_index
     node_type = Dict{Int,String}()
     for nid in node_ids
@@ -1192,15 +1134,15 @@ function _build_scattering_topology_cache(
         type_name = get(prepared.geometry.node_type, nid, default_type)
         node_type[nid] = isempty(type_name) ? default_type : type_name
     end
-    pair_to_idx, pair_from_idx, _unused_sun_hits =
-        _topology_dense_index_arrays(pair_counts, Dict{Int,Int}(), node_ids, node_index)
-    dense_sun_hits = copy(sun_hits_by_node)
-    _merge_sun_hits_into_dense!(dense_sun_hits, extra_sun_hits, node_index)
-    sun_hits = _dense_nonzero_int_vector_to_node_dict(node_ids, dense_sun_hits)
+    pair_to_idx, pair_from_idx, _unused_weighted_hits =
+        _topology_dense_index_arrays(pair_counts, Dict{Int,Float64}(), node_ids, node_index)
+    dense_weighted_hits = copy(weighted_hits_by_node)
+    _merge_weighted_hits_into_dense!(dense_weighted_hits, extra_weighted_hits, node_index)
+    weighted_hits = _dense_vector_to_node_dict(node_ids, dense_weighted_hits)
     return ScatteringTopologyCache(
         pair_counts,
-        sun_hits,
-        dense_sun_hits,
+        weighted_hits,
+        dense_weighted_hits,
         node_ids,
         pair_to_idx,
         pair_from_idx,
@@ -1215,9 +1157,9 @@ function _build_scattering_topology_cache_from_indexed_edges(
     scene::PlantGeom.SceneGeometry,
     models::LightModels,
     prepared::PreparedInterceptionData,
-    indexed_edge_counts::Dict{Int,Int},
-    packed_edge_counts::Dict{UInt64,Int},
-    sun_hits::Dict{Int,Int},
+    indexed_edge_counts::AbstractDict{Int,<:Real},
+    packed_edge_counts::AbstractDict{UInt64,<:Real},
+    weighted_hits::Dict{Int,Float64},
 )
     return _build_scattering_topology_cache_from_indexed_edges(
         scene,
@@ -1225,8 +1167,8 @@ function _build_scattering_topology_cache_from_indexed_edges(
         prepared,
         indexed_edge_counts,
         packed_edge_counts,
-        zeros(Int, length(prepared.geometry.node_ids)),
-        sun_hits,
+        zeros(Float64, length(prepared.geometry.node_ids)),
+        weighted_hits,
     )
 end
 
@@ -1234,15 +1176,15 @@ function _build_scattering_topology_cache_from_indexed_edges(
     scene::PlantGeom.SceneGeometry,
     models::LightModels,
     prepared::PreparedInterceptionData,
-    indexed_edge_counts::Dict{Int,Int},
-    packed_edge_counts::Dict{UInt64,Int},
-    sun_hits_by_node::Vector{Int},
-    extra_sun_hits::Dict{Int,Int},
+    indexed_edge_counts::AbstractDict{Int,<:Real},
+    packed_edge_counts::AbstractDict{UInt64,<:Real},
+    weighted_hits_by_node::Vector{Float64},
+    extra_weighted_hits::Dict{Int,Float64},
 )
     group_type_coeffs = _group_optical_coeffs(models)
     node_ids = copy(prepared.geometry.node_ids)
-    length(sun_hits_by_node) == length(node_ids) ||
-        throw(ArgumentError("dense sun-hit vector length $(length(sun_hits_by_node)) does not match topology node count $(length(node_ids))"))
+    length(weighted_hits_by_node) == length(node_ids) ||
+        throw(ArgumentError("dense weighted-hit vector length $(length(weighted_hits_by_node)) does not match topology node count $(length(node_ids))"))
     node_index = prepared.geometry.node_index
     node_type = Dict{Int,String}()
     for nid in node_ids
@@ -1251,15 +1193,16 @@ function _build_scattering_topology_cache_from_indexed_edges(
         type_name = get(prepared.geometry.node_type, nid, default_type)
         node_type[nid] = isempty(type_name) ? default_type : type_name
     end
-    _merge_packed_edge_counts_as_indexed!(indexed_edge_counts, packed_edge_counts, node_ids, node_index)
-    pair_counts, pair_to_idx, pair_from_idx = _pair_counts_from_indexed_edges(indexed_edge_counts, node_ids)
-    dense_sun_hits = copy(sun_hits_by_node)
-    _merge_sun_hits_into_dense!(dense_sun_hits, extra_sun_hits, node_index)
-    sun_hits = _dense_nonzero_int_vector_to_node_dict(node_ids, dense_sun_hits)
+    weighted_indexed_edges = Dict{Int,Float64}(indexed_edge_counts)
+    _merge_packed_edge_counts_as_indexed!(weighted_indexed_edges, packed_edge_counts, node_ids, node_index)
+    pair_counts, pair_to_idx, pair_from_idx = _pair_counts_from_indexed_edges(weighted_indexed_edges, node_ids)
+    dense_weighted_hits = copy(weighted_hits_by_node)
+    _merge_weighted_hits_into_dense!(dense_weighted_hits, extra_weighted_hits, node_index)
+    weighted_hits = _dense_vector_to_node_dict(node_ids, dense_weighted_hits)
     return ScatteringTopologyCache(
         pair_counts,
-        sun_hits,
-        dense_sun_hits,
+        weighted_hits,
+        dense_weighted_hits,
         node_ids,
         pair_to_idx,
         pair_from_idx,
@@ -1275,10 +1218,10 @@ function _build_scattering_topology_cache(
     models::LightModels,
     prepared::PreparedInterceptionData,
     turtle::TurtleGrid,
-    projections::AbstractVector{DirectionProjectionResult},
+    projections::AbstractVector{<:Union{DirectionProjectionResult,DenseDirectionProjectionResult}},
     stacks_sorted::Bool=false,
 )
-    pair_counts, sun_hits = _pair_counts_from_projections(
+    pair_counts, weighted_hits = _pair_counts_from_projections(
         turtle,
         projections,
         prepared.virtual_nodes,
@@ -1288,7 +1231,7 @@ function _build_scattering_topology_cache(
         prepared.virtual_node_mask,
         stacks_sorted,
     )
-    return _build_scattering_topology_cache(scene, models, prepared, pair_counts, sun_hits)
+    return _build_scattering_topology_cache(scene, models, prepared, pair_counts, weighted_hits)
 end
 
 function _build_scattering_topology_cache(
@@ -1299,13 +1242,13 @@ function _build_scattering_topology_cache(
     options::LightOptions;
     stacks_sorted::Bool=false,
 )
-    pair_counts, sun_hits = _pair_counts_from_streamed_projections(
+    pair_counts, weighted_hits = _pair_counts_from_streamed_projections(
         prepared,
         turtle,
         options;
         stacks_sorted=stacks_sorted,
     )
-    return _build_scattering_topology_cache(scene, models, prepared, pair_counts, sun_hits)
+    return _build_scattering_topology_cache(scene, models, prepared, pair_counts, weighted_hits)
 end
 
 function _dense_scattering_static_graph!(
@@ -1374,14 +1317,8 @@ function _transfer_graph_from_topology(
     options::LightOptions,
 )
     node_ids = _node_ids_for_scattering(topology, first)
-    dense_all_hits = _dense_all_dir_hits_for_scattering(
-        first,
-        topology.sun_hits_by_node,
-        options,
-        node_ids,
-        topology.node_ids,
-    )
-    all_hits = _dense_int_vector_to_node_dict(node_ids, dense_all_hits)
+    dense_all_hits = _dense_weighted_hits(topology, node_ids)
+    all_hits = _dense_vector_to_node_dict(node_ids, dense_all_hits)
     coeff_par, coeff_nir, dense_static =
         if node_ids == topology.node_ids
             cp, cn, cp_dense, cn_dense =
@@ -1424,7 +1361,7 @@ function _transfer_graph_from_topology(
 end
 
 function _scattering_context(scene::PlantGeom.SceneGeometry, models::LightModels, turtle::TurtleGrid, first::FirstOrderResult, options::LightOptions)
-    pair_counts, sun_hits, geom_node_ids, node_group = _pair_counts_for_scattering(scene, models, turtle, options)
+    pair_counts, weighted_hits, geom_node_ids, node_group = _pair_counts_for_scattering(scene, models, turtle, options)
     group_type_coeffs = _group_optical_coeffs(models)
 
     node_set = Set{Int}()
@@ -1438,7 +1375,7 @@ function _scattering_context(scene::PlantGeom.SceneGeometry, models::LightModels
         push!(node_set, nid)
     end
     node_ids = collect(node_set)
-    all_hits = _all_dir_hits_for_scattering(first, sun_hits, options, node_ids)
+    all_hits = Dict{Int,Float64}(nid => get(weighted_hits, nid, 0.0) for nid in node_ids)
     node_type = Dict{Int,String}()
     for nid in node_ids
         g = get(node_group, nid, _scene_group(scene, nid, ""))
@@ -1699,25 +1636,25 @@ function _pair_counts_from_rastergpu_projections(
     turtle::TurtleGrid,
     options::LightOptions,
 )
-    prepared = data.prepared
-    geometry = prepared.geometry
-    edge_counts = Dict{UInt64,Int}()
-    sun_hits_by_node = zeros(Int, length(geometry.node_ids))
+    geometry = data.prepared.geometry
+    edge_counts = Dict{UInt64,Float64}()
+    directional_edges = Dict{UInt64,Int}()
+    weighted_hits_by_node = zeros(Float64, length(geometry.node_ids))
 
     for sector in turtle.sectors
-        if sector.source == :sun
-            _rastergpu_project_direction!(data, sector.direction, options)
-            copyto!(data.node_counts_host, data.node_counts_dev)
-            @inbounds for idx in eachindex(sun_hits_by_node)
-                sun_hits_by_node[idx] += Int(data.node_counts_host[idx])
-            end
-        else
-            _rastergpu_project_direction!(data, sector.direction, options; accumulate_dense_edges=true)
-            _rastergpu_accumulate_device_scattering_edges!(edge_counts, data)
+        weight = _scattering_direction_weight(sector)
+        weight > 0.0 || continue
+        _rastergpu_project_direction!(data, sector.direction, options; accumulate_dense_edges=true)
+        copyto!(data.node_counts_host, data.node_counts_dev)
+        @inbounds for idx in eachindex(weighted_hits_by_node)
+            weighted_hits_by_node[idx] += weight * data.node_counts_host[idx]
         end
+        empty!(directional_edges)
+        _rastergpu_accumulate_device_scattering_edges!(directional_edges, data)
+        _merge_weighted_edges!(edge_counts, directional_edges, weight)
     end
 
-    return _edge_counts_from_packed(edge_counts), sun_hits_by_node
+    return _edge_counts_from_packed(edge_counts), weighted_hits_by_node
 end
 
 """
@@ -1735,14 +1672,14 @@ function build_scattering_transfer_graph(
     options::LightOptions,
     backend::RasterGPUScatteringBackend,
 )
-    pair_counts, sun_hits_by_node = _pair_counts_from_rastergpu_projections(data, turtle, options)
+    pair_counts, weighted_hits_by_node = _pair_counts_from_rastergpu_projections(data, turtle, options)
     topology = _build_scattering_topology_cache(
         scene,
         models,
         data.prepared,
         pair_counts,
-        sun_hits_by_node,
-        Dict{Int,Int}(),
+        weighted_hits_by_node,
+        Dict{Int,Float64}(),
     )
     return _transfer_graph_from_topology(topology, first, options)
 end
@@ -2337,15 +2274,15 @@ function _dense_scattering_band_arrays(
     return initial, coeff
 end
 
-function _scattering_static_edge_device_arrays(static::DenseScatteringStaticGraph, backend)
-    return get!(static.device_cache, backend) do
+function _scattering_static_edge_device_arrays(static::DenseScatteringStaticGraph, backend, ::Type{T}=Float64) where {T<:AbstractFloat}
+    return get!(static.device_cache, (objectid(backend), :edges, T)) do
         n_edges = length(static.counts)
         to_idx_dev = KernelAbstractions.allocate(backend, Int, n_edges)
         from_idx_dev = KernelAbstractions.allocate(backend, Int, n_edges)
-        counts_dev = KernelAbstractions.allocate(backend, Int, n_edges)
+        counts_dev = KernelAbstractions.allocate(backend, T, n_edges)
         KernelAbstractions.copyto!(backend, to_idx_dev, static.to_idx)
         KernelAbstractions.copyto!(backend, from_idx_dev, static.from_idx)
-        KernelAbstractions.copyto!(backend, counts_dev, static.counts)
+        KernelAbstractions.copyto!(backend, counts_dev, T === Float64 ? static.counts : T.(static.counts))
         (
             to_idx_dev=to_idx_dev,
             from_idx_dev=from_idx_dev,
@@ -2355,10 +2292,10 @@ function _scattering_static_edge_device_arrays(static::DenseScatteringStaticGrap
     end
 end
 
-function _scattering_graph_all_hits_device_array(dense::DenseScatteringGraph, backend)
-    return get!(dense.device_cache, backend) do
-        all_hits_dev = KernelAbstractions.allocate(backend, Int, length(dense.all_hits))
-        KernelAbstractions.copyto!(backend, all_hits_dev, dense.all_hits)
+function _scattering_graph_all_hits_device_array(dense::DenseScatteringGraph, backend, ::Type{T}=Float64) where {T<:AbstractFloat}
+    return get!(dense.device_cache, (objectid(backend), :hits, T)) do
+        all_hits_dev = KernelAbstractions.allocate(backend, T, length(dense.all_hits))
+        KernelAbstractions.copyto!(backend, all_hits_dev, T === Float64 ? dense.all_hits : T.(dense.all_hits))
         all_hits_dev
     end
 end
@@ -2403,10 +2340,10 @@ function _scattering_coeff_device_array(
     return coeff_dev
 end
 
-function _copy_scattering_static_device_arrays(graph::ScatteringTransferGraph, backend)
+function _copy_scattering_static_device_arrays(graph::ScatteringTransferGraph, backend, ::Type{T}=Float64) where {T<:AbstractFloat}
     dense = _dense_scattering_graph(graph)
-    all_hits_dev = _scattering_graph_all_hits_device_array(dense, backend)
-    edge_arrays = _scattering_static_edge_device_arrays(dense.static, backend)
+    all_hits_dev = _scattering_graph_all_hits_device_array(dense, backend, T)
+    edge_arrays = _scattering_static_edge_device_arrays(dense.static, backend, T)
     return (
         all_hits_dev=all_hits_dev,
         to_idx_dev=edge_arrays.to_idx_dev,
@@ -2583,7 +2520,7 @@ function _propagate_scattering_one_band_device_dense_only(
     workgroupsize::Int,
     scattering_eltype::Type{<:AbstractFloat},
 )
-    static_device_arrays = _copy_scattering_static_device_arrays(graph, backend)
+    static_device_arrays = _copy_scattering_static_device_arrays(graph, backend, scattering_eltype)
     return _propagate_scattering_one_band_device_dense_only_static(
         initial_power_per_node,
         graph,
@@ -2607,7 +2544,7 @@ function _propagate_scattering_one_band_device(
     workgroupsize::Int,
     scattering_eltype::Type{<:AbstractFloat},
 )
-    static_device_arrays = _copy_scattering_static_device_arrays(graph, backend)
+    static_device_arrays = _copy_scattering_static_device_arrays(graph, backend, scattering_eltype)
     return _propagate_scattering_one_band_device_static(
         initial_power_per_node,
         graph,
@@ -2634,7 +2571,7 @@ function _propagate_scattering_two_bands_device(
     workgroupsize::Int,
     scattering_eltype::Type{<:AbstractFloat},
 )
-    static_device_arrays = _copy_scattering_static_device_arrays(graph, backend)
+    static_device_arrays = _copy_scattering_static_device_arrays(graph, backend, scattering_eltype)
     added_par, it_par, conv_par, dense_par = _propagate_scattering_one_band_device_static(
         initial_par,
         graph,

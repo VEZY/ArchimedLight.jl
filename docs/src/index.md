@@ -87,6 +87,7 @@ The simulation results are grouped by quantity and waveband in `LightBudget`. Wh
 - [Model Files Reference](reference_models.md)
 - [Meteo Inputs Reference](reference_meteo.md)
 - [Outputs](outputs.md)
+- [Evaluation: scattering in 3D](evaluation.md)
 - [CPU Performance Benchmarks](performance_benchmarks.md)
 - [Pipeline Overview](theory_pipeline.md)
 - [First-Order Interception](theory_interception.md)

@@ -437,9 +437,9 @@ function _build_sector_responses(
         isempty(prepared.emitter_nodes) ? nothing : Dict{Tuple{Int,Int},Float64}()
     emitter_escaped_fraction =
         isempty(prepared.emitter_nodes) ? nothing : Dict{Int,Float64}()
-    scattering_edge_counts = options.scattering ? Dict{UInt64,Int}() : nothing
-    scattering_sun_hits = options.scattering ? Dict{Int,Int}() : nothing
-    scattering_sun_hits_by_node = options.scattering ? zeros(Int, length(geometry.node_ids)) : nothing
+    scattering_edge_counts = options.scattering ? Dict{UInt64,Float64}() : nothing
+    scattering_weighted_hits = options.scattering ? Dict{Int,Float64}() : nothing
+    scattering_weighted_hits_by_node = options.scattering ? zeros(Float64, length(geometry.node_ids)) : nothing
     scattering_scratch = options.scattering ? ScatteringStackScratch() : nothing
     no_virtual_nodes = isempty(prepared.virtual_nodes)
 
@@ -503,7 +503,7 @@ function _build_sector_responses(
             if projection isa DenseDirectionProjectionResult
                 _accumulate_scattering_counts!(
                     scattering_edge_counts,
-                    scattering_sun_hits_by_node,
+                    scattering_weighted_hits_by_node,
                     sector,
                     projection,
                     prepared.virtual_node_mask,
@@ -516,7 +516,7 @@ function _build_sector_responses(
             else
                 _accumulate_scattering_counts!(
                     scattering_edge_counts,
-                    scattering_sun_hits,
+                    scattering_weighted_hits,
                     sector,
                     projection,
                     prepared.virtual_nodes,
@@ -550,8 +550,8 @@ function _build_sector_responses(
                 models,
                 prepared,
                 _edge_counts_from_packed(scattering_edge_counts),
-                scattering_sun_hits_by_node,
-                scattering_sun_hits,
+                scattering_weighted_hits_by_node,
+                scattering_weighted_hits,
             )
         else
             nothing
@@ -778,8 +778,8 @@ function _accumulate_dense_projection_first_order_and_scattering!(
     incident_power_par::Vector{Float64},
     incident_power_nir::Vector{Float64},
     hits_per_node::Vector{Int},
-    scattering_edge_counts::Dict{UInt64,Int},
-    scattering_sun_hits_by_node::Vector{Int},
+    scattering_edge_counts::Dict{UInt64,Float64},
+    scattering_weighted_hits_by_node::Vector{Float64},
     sector::TurtleSector,
     projection::DenseDirectionProjectionResult,
     prepared::PreparedInterceptionData,
@@ -793,11 +793,9 @@ function _accumulate_dense_projection_first_order_and_scattering!(
     @inbounds for i in eachindex(projection.node_hits)
         hits_per_node[i] += projection.node_hits[i]
     end
-
-    if sector.source == :sun
-        _accumulate_sun_hits!(scattering_sun_hits_by_node, projection)
-    end
-
+    weight = _scattering_direction_weight(sector)
+    _accumulate_weighted_hits!(scattering_weighted_hits_by_node, projection, weight)
+    directional_edges = empty!(scratch.directional_edges)
     active_flux = par_flux != 0.0 || nir_flux != 0.0
     pixel_area = geometry.plotbox.pixel_area
     no_virtual_nodes = isempty(prepared.virtual_nodes)
@@ -820,17 +818,17 @@ function _accumulate_dense_projection_first_order_and_scattering!(
                 nir_flux,
             )
         end
-        if sector.source != :sun && n_hits > 1
+        if weight > 0.0 && n_hits > 1
             if no_virtual_nodes
                 _accumulate_scattering_counts_dense_no_virtual!(
-                    scattering_edge_counts,
+                    directional_edges,
                     stack,
                     geometry.pavement_node_mask,
                     geometry.node_ids,
                 )
             else
                 _accumulate_scattering_counts_dense!(
-                    scattering_edge_counts,
+                    directional_edges,
                     stack,
                     prepared.virtual_node_mask,
                     geometry.pavement_node_mask,
@@ -840,14 +838,15 @@ function _accumulate_dense_projection_first_order_and_scattering!(
             end
         end
     end
+    _merge_weighted_edges!(scattering_edge_counts, directional_edges, weight)
     return nothing
 end
 
 function _fill_dense_projection_area_hits_and_scattering!(
     sector_area::Vector{Float64},
     hits_all_sectors::Vector{Int},
-    scattering_edge_counts::Dict{UInt64,Int},
-    scattering_sun_hits_by_node::Vector{Int},
+    scattering_edge_counts::Dict{UInt64,Float64},
+    scattering_weighted_hits_by_node::Vector{Float64},
     sector::TurtleSector,
     projection::DenseDirectionProjectionResult,
     prepared::PreparedInterceptionData,
@@ -856,21 +855,12 @@ function _fill_dense_projection_area_hits_and_scattering!(
     stacks_sorted::Bool=false,
 )
     geometry = prepared.geometry
-    if sector.source == :sun
-        @inbounds for i in eachindex(projection.node_hits)
-            h = projection.node_hits[i]
-            h == 0 && continue
-            hits_all_sectors[i] += h
-            scattering_sun_hits_by_node[i] += h
-        end
-    else
-        @inbounds for i in eachindex(projection.node_hits)
-            h = projection.node_hits[i]
-            h == 0 && continue
-            hits_all_sectors[i] += h
-        end
+    @inbounds for i in eachindex(projection.node_hits)
+        hits_all_sectors[i] += projection.node_hits[i]
     end
-
+    weight = _scattering_direction_weight(sector)
+    _accumulate_weighted_hits!(scattering_weighted_hits_by_node, projection, weight)
+    directional_edges = empty!(scratch.directional_edges)
     pixel_area = geometry.plotbox.pixel_area
     no_virtual_nodes = isempty(prepared.virtual_nodes)
     @inbounds for stack in values(projection.pixel_hits)
@@ -886,17 +876,17 @@ function _fill_dense_projection_area_hits_and_scattering!(
             prepared.virtual_node_mask,
             prepared.node_transparency_by_index,
         )
-        if sector.source != :sun && n_hits > 1
+        if weight > 0.0 && n_hits > 1
             if no_virtual_nodes
                 _accumulate_scattering_counts_dense_no_virtual!(
-                    scattering_edge_counts,
+                    directional_edges,
                     stack,
                     geometry.pavement_node_mask,
                     geometry.node_ids,
                 )
             else
                 _accumulate_scattering_counts_dense!(
-                    scattering_edge_counts,
+                    directional_edges,
                     stack,
                     prepared.virtual_node_mask,
                     geometry.pavement_node_mask,
@@ -906,6 +896,7 @@ function _fill_dense_projection_area_hits_and_scattering!(
             end
         end
     end
+    _merge_weighted_edges!(scattering_edge_counts, directional_edges, weight)
     return nothing
 end
 
@@ -924,9 +915,9 @@ function _stream_first_order_with_scattering_topology(
     emitter_escaped_power_par = zeros(Float64, length(geometry.node_ids))
     emitter_escaped_power_nir = zeros(Float64, length(geometry.node_ids))
     hits_per_node = zeros(Int, length(geometry.node_ids))
-    scattering_edge_counts = Dict{UInt64,Int}()
-    scattering_sun_hits = Dict{Int,Int}()
-    scattering_sun_hits_by_node = zeros(Int, length(geometry.node_ids))
+    scattering_edge_counts = Dict{UInt64,Float64}()
+    scattering_weighted_hits = Dict{Int,Float64}()
+    scattering_weighted_hits_by_node = zeros(Float64, length(geometry.node_ids))
     scattering_scratch = ScatteringStackScratch()
     no_virtual_nodes = isempty(prepared.virtual_nodes)
     emitter_sector_fraction = _lambertian_sector_fractions(turtle)
@@ -1003,7 +994,7 @@ function _stream_first_order_with_scattering_topology(
         if projection isa DenseDirectionProjectionResult
             _accumulate_scattering_counts!(
                 scattering_edge_counts,
-                scattering_sun_hits_by_node,
+                scattering_weighted_hits_by_node,
                 sector,
                 projection,
                 prepared.virtual_node_mask,
@@ -1016,7 +1007,7 @@ function _stream_first_order_with_scattering_topology(
         else
             _accumulate_scattering_counts!(
                 scattering_edge_counts,
-                scattering_sun_hits,
+                scattering_weighted_hits,
                 sector,
                 projection,
                 prepared.virtual_nodes,
@@ -1072,8 +1063,8 @@ function _stream_first_order_with_scattering_topology(
         models,
         prepared,
         _edge_counts_from_packed(scattering_edge_counts),
-        scattering_sun_hits_by_node,
-        scattering_sun_hits,
+        scattering_weighted_hits_by_node,
+        scattering_weighted_hits,
     )
     return first, topology
 end
