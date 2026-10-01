@@ -10,7 +10,8 @@ This page documents those three layers and then explains the ARCHIMED-style CSV 
 
 ## 1. In-Memory Outputs: `LightBudget`
 
-The core output of `run_light` for one meteo row is:
+The core output of `run_light` for one meteo row is shown below. This example
+uses 1 cm pixels for a quick demonstration and also requests sky visibility.
 
 ```@example outputs
 using ArchimedLight
@@ -18,8 +19,7 @@ using ArchimedLight
 repo_root = normpath(joinpath(dirname(pathof(ArchimedLight)), ".."))
 config = joinpath(repo_root, "example_2", "config.yml")
 sim, meteo = read_simulation(config)
-sky_options = LightOptions(sim.options; include_sky_fraction=true)
-sim = LightSimulation(sim.scene, sim.models; options=sky_options)
+update_options!(sim, LightOptions(sim.options; pixel_size=0.01, include_sky_fraction=true))
 row = first(meteo)
 step = run_light(sim, row)
 budget = step.budget;

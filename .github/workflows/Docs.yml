@@ -33,6 +33,7 @@ jobs:
   docs:
     name: Documentation
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       actions: write # needed to allow julia-actions/cache to proactively delete old caches that it has created
       contents: write
@@ -51,14 +52,11 @@ jobs:
             Pkg.develop(PackageSpec(path=pwd()))
             Pkg.instantiate()'
       - uses: julia-actions/julia-buildpkg@v1
-      - name: Run doctest
-        run: |
-          julia --project=docs -e '
-            using Documenter: DocMeta, doctest
-            using ArchimedLight
-            DocMeta.setdocmeta!(ArchimedLight, :DocTestSetup, :(using ArchimedLight); recursive=true)
-            doctest(ArchimedLight)'
-      - uses: julia-actions/julia-docdeploy@v1
+      # makedocs runs the package and manual doctests together with the examples.
+      - name: Build and deploy documentation
+        uses: julia-actions/julia-docdeploy@v1
         env:
+          # Show the page and executable block responsible for a slow build.
+          JULIA_DEBUG: Documenter
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}

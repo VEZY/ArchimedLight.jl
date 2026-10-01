@@ -32,12 +32,16 @@ than relying on the `cache` field or cache object layout.
 
 File-based run:
 
+The checked example uses 1 cm pixels for a quick demonstration. Omit the
+`update_options!` call to use the bundled coffee configuration's 1 mm pixels.
+
 ```@example api_file_workflow
 using ArchimedLight
 
 repo_root = normpath(joinpath(dirname(pathof(ArchimedLight)), ".."))
 config = joinpath(repo_root, "example_2", "config.yml")
 sim, meteo = read_simulation(config)
+update_options!(sim, LightOptions(sim.options; pixel_size=0.01))
 step = run_light(sim, first(meteo))
 series = run_light(sim, meteo);
 ```

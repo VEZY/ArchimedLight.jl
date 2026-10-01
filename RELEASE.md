@@ -177,6 +177,10 @@ unchanged `Figure(size=(900,700))`; the previous HiDPI assets were 1800×1400.
 
 Build the manual:
 
+The executable coffee tutorials explicitly use 1 cm pixels for quick learning
+examples instead of the default 1 mm pixels in `example_2/config.yml`.
+The ten-hour tutorial also reuses directional responses with `cache_radiation`.
+
 ```bash
 julia --project=docs docs/make.jl
 ```

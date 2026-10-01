@@ -55,12 +55,15 @@ Energy balance, transpiration, and photosynthesis are intentionally out of scope
 
 ## Quick Start
 
+This tutorial uses 1 cm pixels instead of the default 1 mm pixels to keep the coffee simulation quick.
+
 ```@example home_quick_start
 using ArchimedLight
 
 repo_root = normpath(joinpath(dirname(pathof(ArchimedLight)), ".."))
 config = joinpath(repo_root, "example_2", "config.yml")
 sim, meteo = read_simulation(config)
+update_options!(sim, LightOptions(sim.options; pixel_size=0.01))
 
 step = run_light(sim, first(meteo))
 
