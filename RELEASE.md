@@ -260,6 +260,57 @@ Upload the exact verified tarball asset named in the `Artifacts.toml` URL to the
 GitHub release before General registration. Do not rebuild or refresh references
 at that point: the uploaded bytes must be the same bytes tested locally.
 
+### Rebuild the complete bundle after reviewing changed figures
+
+Updating PNGs alone does not update the numeric references. For an accepted
+computation change such as the Lambertian correction, regenerate both the CSVs
+and images before packaging the new release dataset. Use the fixture directory
+you reviewed as the source; do not modify a historical artifact in place.
+
+In a Kaimon Julia session for this repository's `test/` project:
+
+```julia
+repo_root = dirname(dirname(Base.active_project()))
+source_root = "/path/to/reviewed-release-fixtures"
+working_root = joinpath(mktempdir(), "release-fixtures")
+cp(source_root, working_root)
+
+version = "0.2.0" # Match the version being released.
+asset = "archimedlight-release-fixtures-v$(version).tar.gz"
+tarball = joinpath(tempdir(), asset)
+url = "https://github.com/VEZY/ArchimedLight.jl/releases/download/v$(version)/$(asset)"
+
+include(joinpath(repo_root, "scripts", "build_release_fixture_artifact.jl"))
+main([
+    "--test-root", working_root,
+    "--refresh-references",
+    "--tarball", tarball,
+    "--url", url,
+])
+```
+
+This simulates every enabled fixture, regenerates its numeric and visual
+references, builds the archive, and updates `Artifacts.toml` with the new
+artifact tree hash, download URL, and archive SHA-256. It does not upload the
+archive or create a release. If all CSVs and PNGs have already been regenerated
+and reviewed, omit `--refresh-references` to package those exact references.
+
+Review the regenerated figures and numeric changes. Then test the packaged
+artifact itself, rather than only its working copy, in the same session:
+
+```julia
+using Artifacts: artifact_hash, artifact_path
+using TestItemRunner
+
+hash = artifact_hash("archimedlight-release-fixtures", joinpath(repo_root, "Artifacts.toml"))
+ENV["ARCHIMEDLIGHT_RELEASE_FIXTURES_DIR"] = artifact_path(hash)
+TestItemRunner.run_tests(repo_root; filter=ti -> :release in ti.tags, verbose=true)
+```
+
+Keep the printed hashes with the release evidence and upload that exact
+`tarball` as the release asset. A refresh establishes the proposed baseline;
+the numerical and visual review establishes whether its changes are accepted.
+
 ## 5. Run The Regression Matrix
 
 Run the normal matrix:

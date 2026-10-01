@@ -437,8 +437,8 @@ function write_fixture_observed_outputs!(fx::JuliaFixture, out_root::AbstractStr
     return files
 end
 
-function write_fixture_numeric_references!(fx::JuliaFixture; out_root::Union{Nothing,AbstractString}=nothing)
-    data = fixture_runtime_data(fx)
+function write_fixture_numeric_references!(fx::JuliaFixture; out_root::Union{Nothing,AbstractString}=nothing, data=nothing)
+    data === nothing && (data = fixture_runtime_data(fx))
     ref_dir = out_root === nothing ? fixture_reference_dir(fx) : String(out_root)
     existing = fixture_numeric_reference_paths(fx; existing_only=false)
     for (_, path) in existing
