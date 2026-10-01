@@ -116,11 +116,25 @@ After first-order interception, ARCHIMED can run a multiple-scattering step, kno
 
 The first input to MUSC is the amount of energy initially intercepted by each node. Java stores that at node level in `MirNodeInfo`. For scattering, this initial intercepted energy is repartitioned by waveband according to the spectral composition of the source. Then, for each waveband, each node computes a scattering energy per hit. The governing idea is simple: the total energy available to be scattered by a node is multiplied by its scattering coefficient for the waveband, divided by the total number of relevant directional hits, and split between upward and downward transfer. In the Java code this appears as the characteristic division by the hit count and then by two.
 
+This gives equal energy per scattered ray, an explicit rule in the
+[ARCHIMED FSPM 2020 methods](https://archimed-platform.github.io/publication/vezy-light-exchanges-discrete-2020/).
+Java's `Musc.setHitEnergyToNodes` also states that the division by two assumes
+equal reflectance and transmittance; `energyTransfer` then multiplies by the raw
+number of rays linking two nodes. With horizontal rasterization, unweighted
+counts overrepresent shallow directions relative to the technical manual's
+stated Lambertian assumption. Julia corrects this inherited discrepancy by
+weighting both links and total source hits by the direction's vertical component
+and sector solid angle before aggregation. Escaping source rays remain in the
+normalization. The equal two-sided split is retained, but scattering outputs
+intentionally differ from the historical Java reference. Finite angular and
+pixel resolution still require convergence checks. See
+[Scattering And Optical Assumptions](theory_scattering.md) for the derivation.
+
 The transfer itself uses the pixel stacks. Along a pixel stack, adjacent visible components exchange scattered energy upward and downward. Virtual sensors are treated specially so that they remain transparent to the transfer. Ground paving is often added because scattering without any ground receiver would miss an important part of the exchange, especially near the bottom of the canopy. This is why Java warns that paving should be enabled when scattering is requested.
 
 The iterative process repeats until the remaining scattered energy becomes small enough. The active stopping rule in the original Java implementation is waveband-wise: for each waveband, scattering stops when the total scattered energy in the current iteration is less than 1 percent of the initially intercepted energy in that waveband at the scene scale. This is an empirical convergence rule, not a rigorous radiative residual norm, but it is the one the historical model uses.
 
-The Julia implementation reproduces this logic in `compute_scattering`. The current port supports the same broad semantics: waveband-specific scattering coefficients, hit-count normalization, exclusion of the direct sun sector from certain scattering paths when `all_in_turtle=false`, virtual-sensor transparency, and iterative stopping based on the relative amount of remaining scattered energy. The implementation is written in a more data-oriented style than Java, but conceptually it is the same model.
+The Julia implementation reproduces this logic in `compute_scattering`. The current port supports the same broad semantics: waveband-specific scattering coefficients, angularly weighted hit normalization, exclusion of explicit direct sun sectors from scattering quadrature, virtual-sensor transparency, and iterative stopping based on the relative amount of remaining scattered energy. The implementation is written in a more data-oriented style than Java, but conceptually it is the same model.
 
 ![Scattering transfer on a pixel stack](assets/archimed_scattering_transfer.svg)
 
@@ -144,9 +158,9 @@ Another difference is dependency factoring. In Java, scene reading, plant transf
 
 ## What is already implemented in Julia and what is still imperfect
 
-The Julia port already covers most of the light-only feature set needed for parity work. It can read Java-style configurations, ingest OPS scenes and their referenced geometry, interpret ARCHIMED model files for optics and special interception behaviors, compute sky and solar forcing with substeps, build ARCHIMED-style turtles, run first-order interception with rasterized projections and toricity, run iterative scattering, and export Java-like CSV outputs. This means the remaining work is not primarily about missing large features. It is mainly about getting the same answers, component by component and step by step, as the frozen Java reference outputs.
+The Julia port already covers most of the light-only feature set needed for parity work. It can read Java-style configurations, ingest OPS scenes and their referenced geometry, interpret ARCHIMED model files for optics and special interception behaviors, compute sky and solar forcing with substeps, build ARCHIMED-style turtles, run first-order interception with rasterized projections and toricity, run iterative scattering, and export Java-like CSV outputs. Frozen Java outputs remain useful references for unchanged numerical behavior. Deliberate physical corrections, including Lambertian scattering weights, require independent references instead of exact Java parity.
 
-At the time of writing, the remaining discrepancies are concentrated in exact border and toric rasterization parity. A few wrapped pixels near scene boundaries can still be assigned differently in Julia and Java, and that is enough to create component-level differences in intercepted radiation for the affected fixtures. These errors are localized rather than systemic, which is why scene totals can already look good while some component rows still differ. In practical terms, this means the Julia implementation is already a faithful reimplementation of the ARCHIMED light pipeline in structure and in most behaviors, but parity work still benefits from targeted regression fixtures.
+Besides deliberate physical corrections, residual implementation discrepancies include exact border and toric rasterization parity. A few wrapped pixels near scene boundaries can still be assigned differently in Julia and Java, and that is enough to create component-level differences in intercepted radiation for the affected fixtures. These errors are localized rather than systemic, which is why scene totals can already look good while some component rows still differ. In practical terms, this means the Julia implementation is already a faithful reimplementation of the ARCHIMED light pipeline in structure and in most behaviors, but parity work still benefits from targeted regression fixtures.
 
 ## A step-by-step mental model of one simulation step
 

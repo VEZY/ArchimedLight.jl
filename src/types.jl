@@ -1472,19 +1472,25 @@ ScatteringResult(
 
 Compact transfer-edge storage for scattering graphs.
 
-The hot topology builder accumulates counts with packed integer keys, then materializes this
-container once so downstream code can still iterate edges as `((to, from), count)` pairs
-without keeping tuple-key dictionaries in the graph.
+The hot topology builder accumulates angularly weighted ray counts with packed integer
+keys, then materializes this container once so downstream code can still iterate edges as
+`((to, from), count)` tuples without keeping tuple-key dictionaries in the graph.
 """
 struct ScatteringPairCounts
     to_nodes::Vector{Int}
     from_nodes::Vector{Int}
-    counts::Vector{Int}
+    counts::Vector{Float64}
 end
+
+ScatteringPairCounts(
+    to_nodes::AbstractVector{<:Integer},
+    from_nodes::AbstractVector{<:Integer},
+    counts::AbstractVector{<:Real},
+) = ScatteringPairCounts(Vector{Int}(to_nodes), Vector{Int}(from_nodes), Vector{Float64}(counts))
 
 Base.length(pair_counts::ScatteringPairCounts) = length(pair_counts.counts)
 Base.isempty(pair_counts::ScatteringPairCounts) = isempty(pair_counts.counts)
-Base.eltype(::Type{ScatteringPairCounts}) = Pair{Tuple{Int,Int},Int}
+Base.eltype(::Type{ScatteringPairCounts}) = Tuple{Tuple{Int,Int},Float64}
 
 function Base.iterate(pair_counts::ScatteringPairCounts, state::Int=1)
     state > length(pair_counts.counts) && return nothing
@@ -1492,10 +1498,10 @@ function Base.iterate(pair_counts::ScatteringPairCounts, state::Int=1)
     return item, state + 1
 end
 
-function ScatteringPairCounts(pair_counts::Dict{Tuple{Int,Int},Int})
+function ScatteringPairCounts(pair_counts::AbstractDict{<:Tuple{Integer,Integer},<:Real})
     to_nodes = Int[]
     from_nodes = Int[]
-    counts = Int[]
+    counts = Float64[]
     sizehint!(to_nodes, length(pair_counts))
     sizehint!(from_nodes, length(pair_counts))
     sizehint!(counts, length(pair_counts))
@@ -1510,7 +1516,7 @@ end
 struct DenseScatteringStaticGraph
     to_idx::Vector{Int}
     from_idx::Vector{Int}
-    counts::Vector{Int}
+    counts::Vector{Float64}
     coeff_par::Vector{Float64}
     coeff_nir::Vector{Float64}
     device_cache::IdDict{Any,Any}
@@ -1544,7 +1550,7 @@ end
 function DenseScatteringStaticGraph(
     to_idx::Vector{Int},
     from_idx::Vector{Int},
-    counts::Vector{Int},
+    counts::AbstractVector{<:Real},
     node_ids::Vector{Int},
     coeff_par_by_node::Dict{Int,Float64},
     coeff_nir_by_node::Dict{Int,Float64},
@@ -1555,34 +1561,34 @@ function DenseScatteringStaticGraph(
         coeff_par[i] = get(coeff_par_by_node, nid, 0.0)
         coeff_nir[i] = get(coeff_nir_by_node, nid, 0.0)
     end
-    return DenseScatteringStaticGraph(to_idx, from_idx, counts, coeff_par, coeff_nir, IdDict{Any,Any}())
+    return DenseScatteringStaticGraph(to_idx, from_idx, Vector{Float64}(counts), coeff_par, coeff_nir, IdDict{Any,Any}())
 end
 
 struct DenseScatteringGraph
-    all_hits::Vector{Int}
+    all_hits::Vector{Float64}
     static::DenseScatteringStaticGraph
     device_cache::IdDict{Any,Any}
 end
 
-function DenseScatteringGraph(all_hits::Vector{Int}, static::DenseScatteringStaticGraph)
-    return DenseScatteringGraph(all_hits, static, IdDict{Any,Any}())
+function DenseScatteringGraph(all_hits::AbstractVector{<:Real}, static::DenseScatteringStaticGraph)
+    return DenseScatteringGraph(Vector{Float64}(all_hits), static, IdDict{Any,Any}())
 end
 
 function DenseScatteringGraph(
-    all_hits::Dict{Int,Int},
+    all_hits::AbstractDict{<:Integer,<:Real},
     node_ids::Vector{Int},
     static::DenseScatteringStaticGraph,
 )
-    hit_counts = zeros(Int, length(node_ids))
+    hit_counts = zeros(Float64, length(node_ids))
     @inbounds for (i, nid) in pairs(node_ids)
-        hit_counts[i] = get(all_hits, nid, 0)
+        hit_counts[i] = get(all_hits, nid, 0.0)
     end
     return DenseScatteringGraph(hit_counts, static, IdDict{Any,Any}())
 end
 
 function DenseScatteringGraph(
     pair_counts::ScatteringPairCounts,
-    all_hits::Dict{Int,Int},
+    all_hits::AbstractDict{<:Integer,<:Real},
     node_ids::Vector{Int},
     coeff_par_by_node::Dict{Int,Float64},
     coeff_nir_by_node::Dict{Int,Float64},
@@ -1595,11 +1601,13 @@ end
     ScatteringTransferGraph
 
 Compact scene-scale topology used by the scattering solver to move energy
-between nodes.
+between nodes. Link counts and total source hits use the same angular weights.
+Low-level constructors also accept integer counts, which are converted to `Float64`
+without applying additional directional weights.
 """
 struct ScatteringTransferGraph
     pair_counts::ScatteringPairCounts
-    all_hits::Dict{Int,Int}
+    all_hits::Dict{Int,Float64}
     node_ids::Vector{Int}
     node_group::Dict{Int,String}
     node_type::Dict{Int,String}
@@ -1614,7 +1622,7 @@ end
 
 function ScatteringTransferGraph(
     pair_counts::ScatteringPairCounts,
-    all_hits::Dict{Int,Int},
+    all_hits::AbstractDict{<:Integer,<:Real},
     node_ids::Vector{Int},
     node_group::Dict{Int,String},
     node_type::Dict{Int,String},
@@ -1627,7 +1635,7 @@ function ScatteringTransferGraph(
 )
     return ScatteringTransferGraph(
         pair_counts,
-        all_hits,
+        Dict{Int,Float64}(all_hits),
         node_ids,
         node_group,
         node_type,
@@ -1642,8 +1650,8 @@ function ScatteringTransferGraph(
 end
 
 function ScatteringTransferGraph(
-    pair_counts::Dict{Tuple{Int,Int},Int},
-    all_hits::Dict{Int,Int},
+    pair_counts::AbstractDict{<:Tuple{Integer,Integer},<:Real},
+    all_hits::AbstractDict{<:Integer,<:Real},
     node_ids::Vector{Int},
     node_group::Dict{Int,String},
     node_type::Dict{Int,String},

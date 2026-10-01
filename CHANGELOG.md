@@ -17,6 +17,15 @@
   normalization are unchanged; ground-area canopy fluxes still require LAI
   conversion before leaf physiology.
 
+### Fixed
+
+- Correct Lambertian scattering on the horizontal raster by weighting both
+  transfer links and source-hit totals by sector solid angle and the direction's
+  vertical component. Escaping rays remain in the normalization. This removes
+  the excess scattering into shallow directions reported in issue #55 and
+  intentionally changes scattered-light results relative to historical Java
+  outputs. The equal reflection/transmission assumption is retained.
+
 ## 0.2.0
 
 ### Added
