@@ -63,6 +63,8 @@ function _pse_benchmark_options()
         toricity=false,
         pixel_size=0.05,
         cache_radiation=true,
+        # Match the sky visibility required by the distributed coupling outputs.
+        include_sky_fraction=true,
     )
 end
 
