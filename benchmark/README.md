@@ -23,3 +23,12 @@ Before changing shared benchmark cases, execute every applicable case once on
 both compared revisions. Loading the suite alone does not execute benchmark
 setup or the measured operations. Preserve identical forcing, geometry, and
 output-retention settings when comparing timings.
+
+`scene-preparation.jl` isolates the MTG lookup cost in emitter preparation.
+In a Julia session using the test environment, include that file and call
+`ScenePreparationBenchmark.run_scaling()`. It checks emitted-power equality
+against the previous root-search implementation at 1,000, 4,000, and 8,000
+geometry nodes, with and without active emitters. Timings are warmed minima
+of three samples; the fast no-emitter path uses batched measurements. Map-reuse
+timings exclude map construction, while standalone timings include it. These
+measurements do not measure a complete scene preparation or simulation day.
