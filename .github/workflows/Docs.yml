@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - ".github/workflows/Docs.yml"
+      - ".github/workflows/RebuildWheatDemo.yml"
       - "docs/**"
       - "src/**"
       - "ext/**"
@@ -17,6 +18,7 @@ on:
       - main
     paths:
       - ".github/workflows/Docs.yml"
+      - ".github/workflows/RebuildWheatDemo.yml"
       - "docs/**"
       - "src/**"
       - "ext/**"
@@ -30,8 +32,19 @@ concurrency:
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 
 jobs:
+  rebuild-wheat:
+    # Main, release tags and manual Docs runs publish a freshly compiled demo.
+    # PR previews continue to validate the committed artifact.
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/RebuildWheatDemo.yml
+
   docs:
     name: Documentation
+    needs: rebuild-wheat
+    # A skipped rebuild is expected on PRs. A failed rebuild blocks publication.
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || needs.rebuild-wheat.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -40,6 +53,17 @@ jobs:
       statuses: write
     steps:
       - uses: actions/checkout@v7
+      - name: Download this revision's rebuilt browser artifact
+        if: needs.rebuild-wheat.result == 'success'
+        uses: actions/download-artifact@v8
+        with:
+          name: wheat-browser-demo
+          path: ${{ runner.temp }}/wheat-browser-demo
+      - name: Install the rebuilt HTML and Wasm for documentation publication
+        if: needs.rebuild-wheat.result == 'success'
+        run: |
+          cp "$RUNNER_TEMP/wheat-browser-demo/docs/src/assets/live-wheat/index.html" docs/src/assets/live-wheat/index.html
+          cp "$RUNNER_TEMP/wheat-browser-demo/docs/src/assets/live-wheat/light.wasm" docs/src/assets/live-wheat/light.wasm
       - uses: actions/setup-node@v7
         with:
           node-version: "24"

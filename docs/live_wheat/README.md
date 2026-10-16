@@ -6,6 +6,26 @@ checked-in HTML, Wasm module and `preview.png`; they do not install WasmTarget,
 compile WebAssembly, start a Julia server, or precompute the demo's light
 results. Other documentation examples still run their normal Julia calculations.
 
+## Automatic rebuilds
+
+The Docs workflow rebuilds the demo from source before publishing changes on
+`main`, a pushed release tag, or a manual Docs run. It calls the reusable
+`RebuildWheatDemo.yml` workflow with Julia 1.13.1, verifies native reference
+cases, compiles WebAssembly, exports Bonito HTML, then runs all 54 browser
+numerical checks. A failed rebuild blocks that documentation deployment.
+
+Relevant pull requests also run the source rebuild as a separate check.
+Their documentation previews keep using the committed demo. Ordinary local
+documentation builds do the same. The rebuild workflow can also be started
+manually on a chosen revision; that standalone run produces an artifact
+without publishing documentation or committing generated files.
+
+The `wheat-browser-demo` Actions artifact retains the generated HTML, Wasm,
+receipt, resolved `Manifest.toml` and numerical report for 90 days. The receipt
+records the source revision, native and build-source hashes, Julia/compiler
+versions and manifest hash. The documentation job downloads only the rebuilt
+HTML and Wasm for publication, leaving the repository and release tag intact.
+
 Documenter builds the documentation site with Bonito.DocumenterBonito.
 Bonito also exports this demo's
 self-contained HTML using `NoConnection`; WGLMakie renders its retained mesh.
@@ -41,10 +61,10 @@ compiler run or change the numerical module.
 
 This is a version-pinned rebuild recipe, rather than a fully locked build:
 there is no committed `Manifest.toml` for transitive dependencies, and native
-ArchimedLight helpers come from the current repository checkout. A fresh
-end-to-end compilation and byte-identical rebuild have not yet been demonstrated
-for this integrated artifact. Rebuilding is a separate maintainer operation;
-ordinary documentation CI validates the checked-in module instead.
+ArchimedLight helpers come from the current repository checkout. Each rebuild
+records and archives its resolved dependency graph. Numerical equivalence is
+checked against retained native references; byte-identical output across
+different machines or toolchain resolutions is not guaranteed.
 
 A **clean checkout** can execute the complete Wasm numerical parity suite
 without Julia (WasmGC support required; tested with Node 24.10):
