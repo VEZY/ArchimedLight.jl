@@ -8,7 +8,6 @@ using Bonito: @js_str
 WGLMakie.activate!()
 @assert length(browser_vertex_nodes) == length(WGLMakie.GeometryBasics.coordinates(browser_mesh))
 @assert all(0 <= i < length(browser_initial_par) for i in browser_vertex_nodes)
-browser_speed_note = "Browser execution is slower than native Julia in local tests."
 browser_vertex_par = Float32[browser_initial_par[Int(i) + 1] for i in browser_vertex_nodes]
 browser_points = WGLMakie.GeometryBasics.coordinates(browser_mesh)
 browser_xbounds = extrema(p[1] for p in browser_points)
@@ -136,8 +135,6 @@ browser_app = Bonito.App(; title="Wheat light interception") do session
         style="display: flex; flex-wrap: wrap; align-items: center; gap: 28px; margin: 14px 0 4px;")
     page = Bonito.DOM.main(
         sliders, options, status,
-        Bonito.DOM.p(browser_speed_note; id="light-speed-note",
-            style="color: #64748b; font-size: 13px; margin: 2px 0 8px;"),
         browser_figure,
         Bonito.DOM.p("15 May 2025 · interpolated Montpellier weather · fixed wheat architecture";
             style="color: #64748b; font-size: 13px; margin: 8px 0;");

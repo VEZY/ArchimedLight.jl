@@ -6,6 +6,30 @@ import {fileURLToPath} from 'node:url';
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const readJSON = name => JSON.parse(fs.readFileSync(path.join(dir, name === 'input_data.json' ? 'inputs' : 'fixtures', name), 'utf8'));
 const bytes = fs.readFileSync(path.join(dir, '../src/assets/live-wheat/light.wasm'));
+// Bonito's static export stores the Uint8 Wasm vector in its MessagePack
+// session, nested in a base64 JavaScript source. Inspect data without executing
+// the export, so CI tests the same numerical module shipped to browsers.
+const html = fs.readFileSync(path.join(dir, '../src/assets/live-wheat/index.html'), 'utf8');
+const embeddedModules = [];
+const magic = Buffer.from([0, 97, 115, 109, 1, 0, 0, 0]);
+for (const script of html.matchAll(/data:application\/javascript;base64,([A-Za-z0-9+/=]+)/g)) {
+    const source = Buffer.from(script[1], 'base64').toString('utf8');
+    for (const session of source.matchAll(/data:application\/octet-stream;base64,([A-Za-z0-9+/=]+)/g)) {
+        const data = Buffer.from(session[1], 'base64');
+        for (let offset = data.indexOf(magic); offset >= 0; offset = data.indexOf(magic, offset + magic.length)) {
+            // MessagePack ext32: four-byte payload length, then Bonito's UInt8
+            // extension type 18. Fail explicitly if the export format changes.
+            if (offset < 6 || data[offset - 6] !== 0xc9 || data[offset - 1] !== 18) {
+                throw new Error('Unrecognized embedded Wasm encoding in Bonito HTML');
+            }
+            const length = data.readUInt32BE(offset - 5);
+            embeddedModules.push(data.subarray(offset, offset + length));
+        }
+    }
+}
+if (embeddedModules.length !== 1 || !embeddedModules[0].equals(bytes)) {
+    throw new Error('HTML must embed exactly the checked-in light.wasm module; rebuild or re-export both artifacts together');
+}
 const mod = await WebAssembly.compile(bytes, {builtins: ['js-string']});
 const moduleImports = WebAssembly.Module.imports(mod);
 if (moduleImports.length !== 0) {

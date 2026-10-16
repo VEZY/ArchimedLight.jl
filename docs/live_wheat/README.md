@@ -33,9 +33,17 @@ compiler runs. The emitted numerical module must have no imports.
 The output HTML is written directly to `../src/assets/live-wheat/index.html`,
 and the emitted module to the adjacent checked-in `light.wasm`.
 `artifact_receipt.json` records source/artifact hashes and whether the module
-was recompiled or reused. The initial integration retains the independently
-verified module and Bonito export byte for byte, adding only the maintained
-CSS/readiness shell; it makes no new compiler-run claim.
+was recompiled or reused. The initial integration reused the independently
+verified module and Bonito export, adding the maintained CSS/readiness shell.
+Later presentation edits are recorded in the receipt; they do not imply a new
+compiler run or change the numerical module.
+
+This is a version-pinned rebuild recipe, rather than a fully locked build:
+there is no committed `Manifest.toml` for transitive dependencies, and native
+ArchimedLight helpers come from the current repository checkout. A fresh
+end-to-end compilation and byte-identical rebuild have not yet been demonstrated
+for this integrated artifact. Rebuilding is a separate maintainer operation;
+ordinary documentation CI validates the checked-in module instead.
 
 A **clean checkout** can execute the complete Wasm numerical parity suite
 without Julia (WasmGC support required; tested with Node 24.10):
@@ -44,7 +52,8 @@ without Julia (WasmGC support required; tested with Node 24.10):
 node check_wasm.mjs
 ```
 
-It compares all 1,894 receivers in nine baseline hour cases, 41 configured
+It first checks that the HTML embeds exactly the adjacent `light.wasm`, then
+compares all 1,894 receivers in nine baseline hour cases, 41 configured
 cases, and four configuration transitions. These retained references come
 from independent public native ArchimedLight runs, rather than the Wasm
 kernel itself. Original validation across these cases found a maximum error
