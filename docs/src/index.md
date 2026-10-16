@@ -2,46 +2,61 @@
 CurrentModule = ArchimedLight
 ```
 
-# ArchimedLight.jl
+# Explore light in a plant scene
 
-`ArchimedLight.jl` is the Julia reimplementation of the ARCHIMED light model. This model computes the interception and scattering of light by complex 3D scenes, with a focus on performance. It uses a rasterization-based approach for first-order interception and an iterative method for scattering, with flexible options for optical properties and directional response.
-
-It is designed around a simple workflow: build or read a scene, define optical
-models, create a `LightSimulation`, then call `run_light` for one meteo row or
-a complete meteo table.
+Move the sun over this wheat plant: change the **hour** to follow the shadow,
+turn **scattering** or
+**toricity** on and off, or compare the **pixel resolution** and **16, 46 or
+136 sky sectors**. Plant organs and ground share the same incident PAR scale
+(W m⁻²). Toricity repeats the plot periodically for the light calculation.
 
 ```@raw html
-<div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem;">
-  <video
-    style="width:100%; border-radius:0.75rem;"
-    autoplay muted loop playsinline controls preload="metadata"
-    poster="assets/archimedlight_day_cycle_1.png"
-    aria-label="ARCHIMED light simulation day cycle 1">
-    <source src="assets/archimedlight_day_cycle_1.mp4" type="video/mp4">
-  </video>
+<figure id="live-wheat" data-state="preview">
+  <div class="live-wheat-stage" aria-busy="false">
+    <img class="live-wheat-preview" src="assets/live-wheat/preview.png"
+      width="1280" height="720" loading="eager" fetchpriority="high"
+      alt="A three-dimensional wheat plant and its shadow on the ground, coloured by incident PAR irradiance, with controls for hour, resolution, scattering, toricity and sky sectors.">
+  </div>
+  <figcaption class="live-wheat-caption">
+    <span class="live-wheat-status" role="status" aria-live="polite"></span>
+    <a class="live-wheat-open" href="assets/live-wheat/index.html" target="_blank" rel="noopener">Open the standalone demo</a>.
+    The light calculation runs in your browser; no Julia server is needed.
+  </figcaption>
+  <noscript><p>Enable JavaScript to interact with the scene. The preview remains available above.</p></noscript>
+</figure>
+```
 
-  <video
-    style="width:100%; border-radius:0.75rem;"
-    autoplay muted loop playsinline controls preload="metadata"
-    poster="assets/archimedlight_day_cycle_2.png"
-    aria-label="ARCHIMED light simulation day cycle 2">
-    <source src="assets/archimedlight_day_cycle_2.mp4" type="video/mp4">
-  </video>
+This teaching scene uses the benchmark wheat architecture, whose cultivar is
+unspecified, and interpolated Montpellier weather for 15 May 2025. Architecture
+stays fixed while the hour changes. The browser runs a compiled specialization
+of the ArchimedLight calculations; see the [demo source and validation notes](https://github.com/VEZY/ArchimedLight.jl/tree/main/docs/live_wheat).
+
+<details>
+<summary>More scenes and reproducible day-cycle animations</summary>
+
+```@raw html
+<div class="archimed-animations">
+  <img src="assets/archimedlight_day_cycle_1.png" loading="lazy"
+    alt="Wheat scene coloured by incident PAR irradiance.">
+  <img src="assets/archimedlight_day_cycle_2.png" loading="lazy"
+    alt="Agrivoltaic wheat scene with shade from solar panels, coloured by incident PAR irradiance.">
 </div>
 ```
 
-<details>
-<summary>Reproducing the figures</summary>
-
-The animation runs the wheat and agrivoltaic wheat scenes from the
+These animations run the wheat and agrivoltaic wheat scenes from the
 `archimedlight-benchmark-scenes` artifact every 30 minutes over a representative
 clear-sky day. Each plot has about 2,500 explicit ground tiles, making the
 moving projected shade visible while the same color scale tracks incident PAR
 irradiance through the day. The script to reproduce these figures is in
-[`docs/make_video.jl`](https://github.com/VEZY/ArchimedLight.jl/blob/main/docs/make_video.jl).
+[`docs/make_video/make_video.jl`](https://github.com/VEZY/ArchimedLight.jl/blob/main/docs/make_video/make_video.jl).
 </details>
 
 ## Scope
+
+ArchimedLight reimplements the light core of ARCHIMED using rasterization for
+first-order interception and an iterative scattering calculation. Build or read
+a scene, define optical properties, create a `LightSimulation`, then call
+`run_light` for one meteo row or a complete meteo table.
 
 - ARCHIMED-style scene/model/meteo ingestion: `.ops`, `.opf`, `.gwa`, YAML models, and meteo CSV files
 - File-based and in-memory workflows through the same runtime API

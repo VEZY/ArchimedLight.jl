@@ -1,0 +1,10 @@
+/* Presentation shell only; numerical code and WGL geometry are untouched. */
+html, body { margin: 0; padding: 0; background: #fff; }
+body { overflow-x: hidden; }
+main { box-sizing: border-box; max-width: 1000px !important; padding: 8px !important; font-size: 15px !important; }
+main canvas { max-width: 100%; height: auto !important; }
+#light-hour, #light-resolution { min-width: 0; }
+@media (max-width: 480px) {
+  main > div:first-child { grid-template-columns: 75px minmax(50px, 1fr) 55px !important; column-gap: 8px !important; }
+  main > div:nth-child(2) { gap: 12px !important; }
+}
