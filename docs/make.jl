@@ -1,27 +1,42 @@
 using ArchimedLight
 using Documenter
+using Bonito
 
 # For interactive rendering:
 # using LiveServer
 # servedocs()
-# or julia --project=docs -e 'using LiveServer; LiveServer.serve(dir = "docs/build/1")'
+# or LiveServer.serve(dir=joinpath(@__DIR__, "build"))
 
 DocMeta.setdocmeta!(ArchimedLight, :DocTestSetup, :(using ArchimedLight); recursive=true)
 
 # Update the videos:
 # include(joinpath(@__DIR__, "make_video", "make_video.jl"))
 
+# Documenter still evaluates examples, checks references and deploys the site.
+# Bonito supplies its static HTML writer and documentation theme.
+home = (
+    name="ArchimedLight.jl",
+    text="Light in three-dimensional plant scenes",
+    tagline="Simulate sunlight, shade and scattering from individual organs to crop canopies.",
+    image="assets/archimedlight-logo.svg",
+    actions=[
+        (text="Run your first simulation", link="getting_started.html", theme="brand"),
+        (text="Explore the model", link="theory_pipeline.html", theme="alt"),
+    ],
+)
+
 makedocs(;
     modules=[ArchimedLight],
     authors="Rémi Vezy <VEZY@users.noreply.github.com> and contributors",
     repo=Documenter.Remotes.GitHub("VEZY", "ArchimedLight.jl"),
     sitename="ArchimedLight.jl",
-    format=Documenter.HTML(
-        prettyurls=get(ENV, "CI", "false") == "true",
-        canonical="https://VEZY.github.io/ArchimedLight.jl",
-        edit_link="main",
-        assets=["assets/scattering-evaluation.css", "assets/scattering-evaluation.js"],
-        size_threshold=700000,
+    format=Bonito.DocumenterBonito(;
+        repo="github.com/VEZY/ArchimedLight.jl",
+        devbranch="main",
+        devurl="dev",
+        version=get(ENV, "GITHUB_REF_TYPE", "") == "tag" ? get(ENV, "GITHUB_REF_NAME", "dev") : "dev",
+        home,
+        description="Light interception and scattering in three-dimensional plant scenes, computed in Julia.",
     ),
     pages=[
         "Home" => "index.md",
@@ -60,5 +75,13 @@ makedocs(;
     ],
 )
 
-deploydocs(; repo="github.com/VEZY/ArchimedLight.jl.git", devbranch="main", push_preview=true)
-# Visit https://VEZY.github.io/ArchimedLight.jl/previews/PR26 to visualize the preview of the PR #26
+include(joinpath(@__DIR__, "check_static_export.jl"))
+finish_static_export()
+
+if get(ENV, "ARCHIMEDLIGHT_DOCS_BUILD_ONLY", "false") != "true"
+    deploydocs(;
+        repo="github.com/VEZY/ArchimedLight.jl.git",
+        devbranch="main",
+        push_preview=true,
+    )
+end

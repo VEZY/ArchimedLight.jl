@@ -1,0 +1,30 @@
+{
+  "operation": "reused-verified-numerical-module-and-static-Bonito-export; removed-speed-comparison-and-appended-maintained-UI-shell-without-recompilation",
+  "julia_version_of_original_compilation": "1.13.1",
+  "wasmtarget_version_of_original_compilation": "0.5.3",
+  "wasm_bytes": 220336,
+  "receivers": 1894,
+  "triangles": 6462,
+  "wasm_sha256": "a6d846918745a8376a6286a015ce6b3185596ea94a60a011362d6e63fec814d0",
+  "original_export_sha256": "ed2824ca068fdfaad2627d9e1828ba1504a91451f238992edbd249146c2938d2",
+  "export_without_shell_matches_original_bytes": false,
+  "html_sha256": "f2d5d9afae13b9356812fd9859d858f75a838c18066c08a3316911c950f44f9a",
+  "preview_sha256": "1ea9fb9651ccb4391033a354e7703f5c81e2dc80b94675c1c6773b3c25bfa2bc",
+  "inputs_sha256": "56165c79458968e86f544bf7bb3542aab8b3112956c94588776d96d843b56e2c",
+  "sources": {
+    "inputs/input_data.json": "56165c79458968e86f544bf7bb3542aab8b3112956c94588776d96d843b56e2c",
+    "browser_light_kernel.jl": "3fd6490df6fbef28783156e1d0cf99ed388394d9365d46f965d00114861251c6",
+    "browser_scattering_kernel.jl": "40c0d3b20ac91f34591361896cf0a88bc58ebca89c0faa8d46ef10e667db69f6",
+    "browser_options_kernel.jl": "d78afe60975f010c05fcd8fe03ec34651e965dce16f27b3128eda957c453837e",
+    "compile_kernel.jl": "d598f1458cd3bf3c5ebb61601b0067ff292a80e68d15c5ef9507954377c30446",
+    "wasmtarget_julia_113.jl": "e21d22eff59b6f1ba78d1abd11bbf8c1684104bfed03c09c2258bbe12e76e575",
+    "browser_view.jl": "af89cda5552552248a978b4d5dec7f25d51f315b178be7f45a8983e3e4bfa78b",
+    "ready_bridge.js": "05ae7f96ec256983307417f127039538905d8b0f0ecb6724171e646be026a142",
+    "shell.css": "46e58f3641c1423abba58983c4f78e4f599e8d75dbed9ef91a79487e79d9983a",
+    "attach_shell.jl": "bd47d27317cfa83c1be5fa97fb56b3741e0c5dec1c640bf554ddeac5484b4aca"
+  },
+  "presentation_changes": [
+    "Removed the browser/native timing comparison paragraph.",
+    "Refreshed the preview screenshot after removing the comparison paragraph."
+  ]
+}
