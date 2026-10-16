@@ -2,8 +2,9 @@
 
 This directory maintains the static interactive artifact in
 `../src/assets/live-wheat/index.html`. Normal documentation builds copy that
-checked-in HTML and `preview.png`; they do not install WasmTarget, compile
-WebAssembly, start a Julia server, or calculate light.
+checked-in HTML, Wasm module and `preview.png`; they do not install WasmTarget,
+compile WebAssembly, start a Julia server, or precompute the demo's light
+results. Other documentation examples still run their normal Julia calculations.
 
 Documenter builds the documentation site with Bonito.DocumenterBonito.
 Bonito also exports this demo's
