@@ -31,25 +31,22 @@ unspecified, and interpolated Montpellier weather for 15 May 2025. Architecture
 stays fixed while the hour changes. The browser runs a compiled specialization
 of the ArchimedLight calculations; see the [demo source and validation notes](https://github.com/VEZY/ArchimedLight.jl/tree/main/docs/live_wheat).
 
-<details>
-<summary>More scenes and reproducible day-cycle animations</summary>
-
 ```@raw html
-<div class="archimed-animations">
-  <img src="assets/archimedlight_day_cycle_1.png" loading="lazy"
-    alt="Wheat scene coloured by incident PAR irradiance.">
-  <img src="assets/archimedlight_day_cycle_2.png" loading="lazy"
-    alt="Agrivoltaic wheat scene with shade from solar panels, coloured by incident PAR irradiance.">
-</div>
-```
-
-These animations run the wheat and agrivoltaic wheat scenes from the
-`archimedlight-benchmark-scenes` artifact every 30 minutes over a representative
-clear-sky day. Each plot has about 2,500 explicit ground tiles, making the
-moving projected shade visible while the same color scale tracks incident PAR
-irradiance through the day. The script to reproduce these figures is in
-[`docs/make_video/make_video.jl`](https://github.com/VEZY/ArchimedLight.jl/blob/main/docs/make_video/make_video.jl).
+<details>
+  <summary>More scenes and reproducible day-cycle animations</summary>
+  <div class="archimed-animations">
+    <img src="assets/archimedlight_day_cycle_1.png" loading="lazy"
+      alt="Wheat scene coloured by incident PAR irradiance.">
+    <img src="assets/archimedlight_day_cycle_2.png" loading="lazy"
+      alt="Agrivoltaic wheat scene with shade from solar panels, coloured by incident PAR irradiance.">
+  </div>
+  <p>The day-cycle animations run the wheat and agrivoltaic wheat benchmark
+  scenes every 30 minutes over a representative clear-sky day. About 2,500
+  receiving ground tiles show the moving shade on the same incident-PAR scale.
+  Reproduce them with
+  <a href="https://github.com/VEZY/ArchimedLight.jl/blob/main/docs/make_video/make_video.jl">docs/make_video/make_video.jl</a>.</p>
 </details>
+```
 
 ## Scope
 
@@ -84,6 +81,7 @@ step = run_light(sim, first(meteo))
 
 step.budget.incident_flux.total.par;
 step.budget.absorbed_energy.total.par;
+nothing # hide
 ```
 
 The simulation results are grouped by quantity and waveband in `LightBudget`. When you attach those values back onto the scene, the default attribute names keep the standard ARCHIMED naming convention such as `Ri_PAR_f`, `Ri_PAR_q`, and `Ra_PAR_q`.

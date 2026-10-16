@@ -76,3 +76,39 @@
 @media (prefers-reduced-motion: reduce) {
   #live-wheat .live-wheat-preview { transition: none; }
 }
+
+/* Put the live scene beside the hero, before the longer manual introduction. */
+.VPHome .VPHero { padding: 28px 24px 20px; }
+.VPHome .VPHero .name { font-size: 38px; }
+.VPHome .VPHero .text { font-size: 30px; }
+.VPHome .VPHero .tagline { font-size: 18px; }
+@media (min-width: 1000px) {
+  .VPHome {
+    display: grid;
+    grid-template-columns: minmax(280px, 0.38fr) minmax(0, 0.62fr);
+    column-gap: 32px;
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 24px;
+  }
+  .VPHome > .VPHero {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: center;
+    min-width: 0;
+    padding: 12px 0;
+  }
+  .VPHome > .VPDoc,
+  .VPHome > .VPDoc > .vp-doc { display: contents; }
+  .VPHome > .VPDoc > .vp-doc > * { grid-column: 1 / -1; }
+  /* Bonito emits raw HTML in display:contents wrappers. Give those grid
+     items a box so both the demo and later sections keep their columns. */
+  .VPHome > .VPDoc > .vp-doc > div { display: block !important; }
+  .VPHome > .VPDoc > .vp-doc > div:has(> #live-wheat) {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+  }
+  #live-wheat { margin: 0; }
+  #live-wheat .live-wheat-stage { height: clamp(450px, 45vw, 650px); }
+}
