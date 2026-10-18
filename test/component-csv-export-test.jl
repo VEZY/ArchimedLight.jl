@@ -207,6 +207,14 @@ end
     sim = LightSimulation(scene, ComponentCSVHelper._default_synthetic_models(); options=options)
     step = run_light(sim, SkyState(180.0, 90.0, 100.0, 50.0, 0.5, 0.5); step_duration_seconds=60.0)
     @test step.node_metadata === nothing
+    # Check missingness before CSV serialization: CSV 0.10 conflated empty
+    # strings with missing fields, whereas CSV 1.1 preserves the distinction.
+    metadata = ArchimedLight._component_output_metadata(sim, step)
+    identity_rows = ArchimedLight._component_rows_for_step(
+        sim, step, 1, metadata, ArchimedLight._component_output_order(metadata);
+        include_scattering_columns=false,
+    )
+    @test all(row -> ismissing(row["group"]) && ismissing(row["type"]), identity_rows)
     mktempdir() do directory
         path = joinpath(directory, "no-mtg.csv")
         write_component_values(path, sim, step)

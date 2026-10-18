@@ -1273,8 +1273,10 @@ function _scene_group_type_maps(scene::PlantGeom.SceneGeometry, node_ids)
     end
 
     for nid in wanted
-        haskey(node_group, nid) || (node_group[nid] = _scene_group(scene, nid, ""))
-        haskey(node_type, nid) || (node_type[nid] = _scene_type(scene, nid, ""))
+        # The traversal already covered the whole MTG. Missing IDs (including
+        # geometry-only scenes) have the same empty defaults as a failed lookup.
+        haskey(node_group, nid) || (node_group[nid] = "")
+        haskey(node_type, nid) || (node_type[nid] = "")
     end
 
     return node_group, node_type
@@ -1439,11 +1441,32 @@ function _use_upper_hit_pixel_table(models::LightModels, options::LightOptions)
     return true
 end
 
-function _emitter_power_per_band_per_node(scene::PlantGeom.SceneGeometry, models::LightModels)
+function _emitter_power_per_band_per_node(
+    scene::PlantGeom.SceneGeometry,
+    models::LightModels,
+    node_group=nothing,
+    node_type=nothing,
+)
     power_per_band = Dict{String,Dict{Int,Float64}}()
+    # Inspect models directly: unlike _group_light_emitters this also includes
+    # empty group names, preserving the resolver's fallback behavior.
+    any(group -> any(type -> _is_active_lambertian_emitter(type.light_emitter),
+        values(group.types)), values(models)) || return power_per_band
+    if node_group === nothing || node_type === nothing
+        node_group, node_type = _scene_group_type_maps(scene, keys(scene.nodes))
+    else
+        # Ignored or geometry-free nodes can be absent from interception maps.
+        missing_ids = [nid for nid in keys(scene.nodes)
+            if !haskey(node_group, nid) || !haskey(node_type, nid)]
+        if !isempty(missing_ids)
+            extra_group, extra_type = _scene_group_type_maps(scene, missing_ids)
+            node_group = merge(node_group, extra_group)
+            node_type = merge(node_type, extra_type)
+        end
+    end
     for nid in keys(scene.nodes)
-        group = _normalize_group_name_local(_scene_group(scene, nid, ""))
-        type_name = strip(_scene_type(scene, nid, ""))
+        group = _normalize_group_name_local(node_group[nid])
+        type_name = strip(node_type[nid])
         type_model = _type_model(models, group, type_name)
         type_model === nothing && continue
         emitter = type_model.light_emitter
@@ -4391,7 +4414,9 @@ function _prepare_interception_data(
     virtual_node_mask = [nid in virtual_nodes for nid in geometry.node_ids]
     upper_hit = _use_upper_hit_pixel_table(models, options)
     cache_ctx = _projection_cache_context(geometry.vertices, geometry.faces, geometry.face2node, geometry.plotbox, options)
-    emitter_power_per_band_per_node = _emitter_power_per_band_per_node(scene, models)
+    emitter_power_per_band_per_node = _emitter_power_per_band_per_node(
+        scene, models, geometry.node_group, geometry.node_type,
+    )
     emit_par = get(emitter_power_per_band_per_node, "PAR", Dict{Int,Float64}())
     emit_nir = get(emitter_power_per_band_per_node, "NIR", Dict{Int,Float64}())
     emitter_power_per_band_by_index = Dict{String,Vector{Float64}}()
