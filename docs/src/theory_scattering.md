@@ -73,17 +73,18 @@ proportional to the apparent source area. The division by two shares the scatter
 pool between the two directions along each ray path, retaining the additional
 assumption of equal reflectance and transmittance.
 
-ARCHIMED rasterizes surfaces on a horizontal ground plane. For a planar component
-of area `A` and unit normal `n`, let `s_k` be an upward unit turtle direction and
-`s_z,k` its vertical component. With the whole projected component inside the
-projection bounds, the raw directional hit count approximately follows:
+ARCHIMED samples directions at a fixed ground resolution. Periodic scenes use a
+horizontal raster; finite scenes use perpendicular pixels whose ground footprints
+are square. For a planar component of area `A` and unit normal `n`, let `s_k` be
+an upward unit turtle direction and `s_z,k` its vertical component. In either
+case, the raw directional hit count approximately follows:
 
 ```text
 H_k ∝ A × |n · s_k| / s_z,k
 ```
 
 The projection already encodes the apparent source area. To remove the extra
-horizontal-plane factor and integrate over solid angle, the graph weights each
+ground-sampling factor and integrate over solid angle, the graph weights each
 direction by `w_k = s_z,k × sector.weight`. Here `sector.weight` is the sector's
 normalized solid angle; the common factor `2π` cancels during normalization.
 For source `i` and receiver `j`, the transfer per iteration is:

@@ -722,8 +722,12 @@ Fields:
   if `true`, redistribute it into the turtle sectors.
 - `turtle_sectors`: number of diffuse sky sectors. Common values are `16`, `46`,
   or denser grids for smoother angular resolution.
-- `pixel_size`: raster pixel size in meters. Smaller values improve geometric
-  fidelity but increase runtime and memory use.
+- `pixel_size`: requested ground resolution in meters, with either toricity
+  setting. Periodic scenes fit horizontal raster cells to the plot dimensions.
+  Finite scenes use a perpendicular projection plane whose pixels back-project
+  to squares of this side length on horizontal ground, rotated with light
+  azimuth. Smaller values increase sampling density, runtime, and memory use.
+  ARCHIMED YAML files express this value in centimetres.
 - `area_ratio`: enable the ARCHIMED projected-area correction used for parity
   with the historical implementation.
 - `scattering`: enable multiple scattering after first-order interception.
@@ -751,6 +755,10 @@ Fields:
 - `pixel_hit_stack_mode`: typed [`PixelHitStackPolicy`](@ref) used for
   per-pixel hit stacks. The default is `AutoPixelHitStack`.
 - `toricity`: enable horizontal periodic wrapping of the simulated plot.
+  With `true`, projection uses the horizontal plot tile. With `false`, each
+  light direction uses a fitted perpendicular canvas covering the complete
+  scene geometry, so elevated objects are not clipped by the plot footprint.
+  This changes neither the physical ground geometry nor the units of `pixel_size`.
 - `radiation_timestep_minutes`: internal radiative substep used when a meteo
   row covers a coarser interval.
 - `radiation_input_semantics`: interpretation of supplied irradiances.

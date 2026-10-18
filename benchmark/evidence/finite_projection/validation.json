@@ -1,0 +1,78 @@
+{
+  "recorded_utc": "2026-10-18T12:06:40.444233+00:00",
+  "base_revision": "c3764cdaaa58c568ceef0b58719a92fdf1e119ea",
+  "code_sha256": {
+    "src/outputs.jl": "3d5f1bfff398003a8568417f943656c94b26e20409d16a17f5bdf713d72bd2ca",
+    "src/interception.jl": "c9c82c830ebf89c15445a50125f4a57a8a5c9b3b8b6f892ca9d023e4889aac9c",
+    "src/sky.jl": "48af0046a9b8f6902d338f121158ab61b225851541977bd7478e412d6e850d41",
+    "src/turtle.jl": "6a730bacbed5218232546c3d9b39a64344f19607598e301171208f7642f12fa4",
+    "src/pipeline.jl": "0805893e68c55f3f095e17720912c60c88962b7add0a3a8a09e2c23e72a9b1a0",
+    "src/io.jl": "a6c363599866b214a3875e24d5d38b6b1ef3f94aa99dcbfd781e74f8776b5b3b",
+    "src/visualization.jl": "9833a3bfff98dc707b5739745acdd88359fe6a33048f2fad63d5dbfc7c2cb7e3",
+    "src/types.jl": "e00301a31e01b5bc2e14eaf9cabb94c00e9e3c0edd10b1a07e5f56f64ae6e47a",
+    "src/attach.jl": "9459c624cd58386f73eaa076db7e1dec7021a6bf6a4e4f3380a5c8da5c679157",
+    "src/ArchimedLight.jl": "aab5c6629474d493cb4c1dd2d6737b94611583c3826337ccf295fee2f5b130bb",
+    "src/meteo.jl": "7943f33d8b024860670e3a0da2419605301fac463c527d155e6807abce999815",
+    "src/scattering.jl": "7294d9b5443f10e46b2284d3f09b112c47c8d7ae8019354de9a4f32fa247b274",
+    "src/plantsimengine.jl": "b367c48f4026a6c07c25b780c03d91e14fabcea0a6bd7684deac335ab0d7235d",
+    "src/query.jl": "e07a01737510d5c94e35781ab14f6662f90b2a330e2f273ca43735cb60c1443d",
+    "benchmark/finite_projection.jl": "cda88003bd473efc91d5e48902fd30ae3964b269f5464fc7abfb83cef50454ee"
+  },
+  "julia": "1.13.1",
+  "cpu": "Apple M3 Max",
+  "threads": 14,
+  "samples": 5,
+  "timing_scope": "fresh warmed prepared CPU solves; projection, topology, graph and both-band scattering included; preparation and compilation excluded",
+  "schema_version": 1,
+  "benchmark_driver": "benchmark/finite_projection.jl",
+  "scene": {
+    "config": "example_2/config.yml",
+    "plot_paving_override": 25,
+    "triangles": 118848,
+    "diffuse_directions": 16,
+    "explicit_sun": true
+  },
+  "forcing": {
+    "azimuth_deg": 90,
+    "elevations_deg": [
+      45,
+      10
+    ],
+    "horizontal_PAR_W_m2": 100,
+    "horizontal_NIR_W_m2": 50,
+    "direct_fraction": 0.7,
+    "diffuse_fraction": 0.3,
+    "area_ratio": true,
+    "cache_radiation": false,
+    "cache_pixel_table": false
+  },
+  "accuracy": {
+    "metric": "max over PAR/NIR of sum(abs(total_component_power - reference_total_component_power)) / sum(abs(reference_total_component_power)), excluding pavement components",
+    "reference_plane": "isotropic light-normal plane",
+    "reference_pixel_m": 0.000625,
+    "reference_refinement_coarse_pixel_m": 0.00125,
+    "cross_plane_ground_reference_pixel_m": 0.00125,
+    "selected_total_relative_L1_target": 0.05,
+    "per_component_accuracy_guarantee": false,
+    "first_order_max_relative_L1_selected": 0.052844804066259236,
+    "one_percent_accuracy_qualified": false,
+    "note": "Fine reference outputs and convergence evidence were retained from the 2026-10-16 study; aggregate accuracy was rechecked on this independent main-based branch."
+  },
+  "validation": {
+    "default_tests": {
+      "passed": 2758,
+      "failed": 0,
+      "errors": 0,
+      "total": 2758,
+      "seconds": 290.0
+    },
+    "metal_tests_passed": 57,
+    "metal_version": "1.11.1",
+    "finite_regression_cases_passed": 51,
+    "finite_regression_strict_cases": 7,
+    "exact_toric_controls": 4,
+    "prototype_directory_removed": true,
+    "temporary_prototype_reports_removed": true,
+    "completed_utc": "2026-10-18T12:11:30.116707+00:00"
+  }
+}

@@ -104,6 +104,22 @@ struct DenseDirectionProjectionResult{PH}
     projected_pixels_area::Vector{Float64}
 end
 
+struct PerpendicularProjectionWorkspace
+    vertices::Vector{StaticArrays.SVector{3,Float64}}
+    used::Vector{Int}
+    center::StaticArrays.SVector{3,Float64}
+end
+
+function PerpendicularProjectionWorkspace(vertices, faces)
+    used = sort!(unique!([Int(i) for face in faces for i in face]))
+    lo = reduce((a, b) -> min.(a, b), (vertices[i] for i in used))
+    hi = reduce((a, b) -> max.(a, b), (vertices[i] for i in used))
+    center = StaticArrays.SVector{3,Float64}((lo + hi) / 2)
+    return PerpendicularProjectionWorkspace(
+        fill(zero(StaticArrays.SVector{3,Float64}), length(vertices)), used, center,
+    )
+end
+
 struct InterceptionSceneData
     vertices
     faces::Vector{PlantGeom.Face3}
@@ -112,6 +128,7 @@ struct InterceptionSceneData
     node_ids::Vector{Int}
     node_index::Dict{Int,Int}
     plotbox
+    projection_workspace::Union{Nothing,PerpendicularProjectionWorkspace}
     node_group::Dict{Int,String}
     node_group_by_index::Vector{String}
     pavement_node_mask::Vector{Bool}
@@ -140,7 +157,7 @@ struct PreparedInterceptionData
     absorption_nir_per_node::Union{Nothing,Dict{Int,Float64}}
 end
 
-struct RasterGPUSceneData{P,B,VX,VY,VZ,F,N,T,M,I,C,S,H,O,G,A,D,K,KC,TC,TF,TO,E}
+mutable struct RasterGPUSceneData{P,B,VX,VY,VZ,F,N,T,M,I,C,S,H,O,G,A,D,K,KC,TC,TF,TO,E,R}
     prepared::P
     backend::B
     vertex_x_dev::VX
@@ -191,6 +208,12 @@ struct RasterGPUSceneData{P,B,VX,VY,VZ,F,N,T,M,I,C,S,H,O,G,A,D,K,KC,TC,TF,TO,E}
     edge_accumulation::Symbol
     dense_edge_limit_bytes::Int
     validate::Bool
+    config::R
+    active_plotbox
+    projection_area_scale::Float64
+    vertex_x_host::Vector{Float32}
+    vertex_y_host::Vector{Float32}
+    vertex_z_host::Vector{Float32}
 end
 
 struct RasterGPUFusedProjectionParams
@@ -1663,7 +1686,8 @@ function _emitter_transfer_weights(
     virtual_nodes::Set{Int},
     virtual_node_mask::Vector{Bool},
     node_ids::Vector{Int},
-    cache_ctx,
+    cache_ctx;
+    projection_workspace=nothing,
 )
     sector_fraction = _lambertian_sector_fractions(turtle)
     isempty(emitter_nodes) &&
@@ -1682,7 +1706,8 @@ function _emitter_transfer_weights(
         sector_fraction[i] > 0.0 || continue
         sector = turtle.sectors[i]
         projection =
-            _direction_projection_cached(vertices, faces, face2node, sector.direction, options, plotbox, cache_ctx, upper_hit=false)
+            _direction_projection_cached(vertices, faces, face2node, sector.direction, options, plotbox, cache_ctx;
+                upper_hit=false, projection_workspace)
         edge_counts = Dict{UInt64,Int}()
         observed_edge_counts = Dict{UInt64,Int}()
         total_from = Dict{Int,Int}()
@@ -1865,6 +1890,12 @@ function _projection_scene_key(vertices, faces, face2node, plotbox, options::Lig
     h = _stable_mix_i64(h, length(faces))
     h = _stable_mix_i64(h, length(face2node))
     h = _stable_mix_u64(h, _cfg_toricity(options) ? UInt64(1) : UInt64(0))
+    if !options.toricity
+        # Invalidate historical clipped-ground tables, and distinguish nominal
+        # pitches even when they produce the same fitted physical plotbox.
+        h = _stable_mix_u64(h, UInt64(0x7065727067726431))
+        h = _stable_mix_f64(h, options.pixel_size)
+    end
     h = _stable_mix_f64(h, plotbox.origin_x)
     h = _stable_mix_f64(h, plotbox.origin_y)
     h = _stable_mix_f64(h, plotbox.xdim)
@@ -2010,6 +2041,53 @@ function _plotbox(scene::PlantGeom.SceneGeometry, vertices, pixel_size::Float64)
         pix_y=pix_y,
         pixel_area=pixel_area,
     )
+end
+
+@inline _projection_pixel_area(options::LightOptions, plotbox) =
+    options.toricity ? plotbox.pixel_area : options.pixel_size^2
+
+function _perpendicular_projection_frame!(workspace, vertices, direction, pixel_size)
+    d = StaticArrays.SVector{3,Float64}(direction)
+    magnitude = norm(d)
+    isfinite(magnitude) && magnitude > 0 || throw(ArgumentError("light direction must be finite and nonzero"))
+    d /= magnitude
+    dx, dy, dz = d
+    # Horizontal directions have no ground footprint and contributed no raster
+    # hits in the historical ground projector. Keep that zero-hit behavior.
+    dz == 0 && return nothing
+    a = inv(1 + abs(dz))
+    u = StaticArrays.SVector(1 - dx * dx * a, -dx * dy * a, -dx * sign(dz))
+    v = StaticArrays.SVector(-dx * dy * a, 1 - dy * dy * a, -dy * sign(dz))
+    h = hypot(dx, dy)
+    if h > eps(Float64)
+        u = StaticArrays.SVector(-dy / h, dx / h, 0.0)
+        v = StaticArrays.SVector(-dz * dx / h, -dz * dy / h, h)
+    end
+    xmin = ymin = Inf
+    xmax = ymax = -Inf
+    @inbounds for i in workspace.used
+        p = vertices[i] - workspace.center
+        q = StaticArrays.SVector(dot(p, u), dot(p, v), dot(p, d))
+        workspace.vertices[i] = q
+        xmin = min(xmin, q[1]); xmax = max(xmax, q[1])
+        ymin = min(ymin, q[2]); ymax = max(ymax, q[2])
+    end
+    px, py = pixel_size, pixel_size * abs(dz)
+    ix = floor(Int, xmin / px) - 1
+    iy = floor(Int, ymin / py) - 1
+    nx = max(1, ceil(Int, xmax / px) - ix + 1)
+    ny = max(1, ceil(Int, ymax / py) - iy + 1)
+    box = (origin_x=ix * px, origin_y=iy * py, xdim=nx * px, ydim=ny * py,
+        nx=nx, ny=ny, pix_x=px, pix_y=py, pixel_area=px * py)
+    return (;vertices=workspace.vertices, plotbox=box,
+        direction=StaticArrays.SVector(0.0, 0.0, 1.0), area_scale=inv(abs(dz)))
+end
+
+function _projection_raster_inputs(vertices, faces, direction, options, plotbox, workspace=nothing)
+    options.toricity && return (;vertices, direction, plotbox)
+    workspace === nothing && (workspace = PerpendicularProjectionWorkspace(vertices, faces))
+    frame = _perpendicular_projection_frame!(workspace, vertices, direction, options.pixel_size)
+    return frame === nothing ? (;vertices, direction, plotbox) : frame
 end
 
 function _project_point_ground(point, direction)
@@ -3533,7 +3611,7 @@ function _visible_area_from_projection(
 )
     visible_area = Dict{Int,Float64}()
     sizehint!(visible_area, length(projection.node_hits))
-    pixel_area = plotbox.pixel_area
+    pixel_area = _projection_pixel_area(options, plotbox)
     for stack in values(projection.pixel_hits)
         isempty(stack) && continue
         stacks_sorted || _sort_hit_stack!(stack)
@@ -3571,7 +3649,7 @@ function _visible_area_from_projection_dense(
     stacks_sorted::Bool=false,
 )
     visible_area = zeros(Float64, length(geometry.node_ids))
-    pixel_area = plotbox.pixel_area
+    pixel_area = _projection_pixel_area(options, plotbox)
     for stack in values(projection.pixel_hits)
         isempty(stack) && continue
         stacks_sorted || _sort_hit_stack!(stack)
@@ -3633,7 +3711,7 @@ function _visible_area_from_projection_dense!(
     stacks_sorted::Bool=false,
 )
     fill!(visible_area, 0.0)
-    pixel_area = plotbox.pixel_area
+    pixel_area = _projection_pixel_area(options, plotbox)
     for stack in values(projection.pixel_hits)
         isempty(stack) && continue
         stacks_sorted || _sort_hit_stack!(stack)
@@ -3669,7 +3747,7 @@ function _visible_area_from_projection_dense(
     stacks_sorted::Bool=false,
 )
     visible_area = zeros(Float64, length(geometry.node_ids))
-    pixel_area = plotbox.pixel_area
+    pixel_area = _projection_pixel_area(options, plotbox)
     for stack in values(projection.pixel_hits)
         isempty(stack) && continue
         stacks_sorted || _sort_hit_stack!(stack)
@@ -3731,7 +3809,7 @@ function _visible_area_from_projection_dense!(
     stacks_sorted::Bool=false,
 )
     fill!(visible_area, 0.0)
-    pixel_area = plotbox.pixel_area
+    pixel_area = _projection_pixel_area(options, plotbox)
     for stack in values(projection.pixel_hits)
         isempty(stack) && continue
         stacks_sorted || _sort_hit_stack!(stack)
@@ -4004,19 +4082,21 @@ function _direction_projection_prepared(
     return DenseDirectionProjectionResult(pixel_hits, node_hits, projected_mesh_area, projected_pixels_area)
 end
 
-function _direction_projection(vertices, faces, face2node, direction, options::LightOptions, plotbox; upper_hit::Union{Nothing,Bool}=nothing)
+function _direction_projection(vertices, faces, face2node, direction, options::LightOptions, plotbox;
+    upper_hit::Union{Nothing,Bool}=nothing, projection_workspace=nothing)
     node_ids = unique(face2node)
     node_index = Dict{Int,Int}(nid => i for (i, nid) in enumerate(node_ids))
     face2node_index = [node_index[nid] for nid in face2node]
+    frame = _projection_raster_inputs(vertices, faces, direction, options, plotbox, projection_workspace)
     return _direction_projection_materialized(
-        vertices,
+        frame.vertices,
         faces,
         face2node,
         face2node_index,
         node_ids,
-        direction,
+        frame.direction,
         options,
-        plotbox;
+        frame.plotbox;
         upper_hit=upper_hit,
         dense_pixel_hits=false,
     )
@@ -4028,23 +4108,26 @@ function _direction_projection(
     options::LightOptions;
     upper_hit::Union{Nothing,Bool}=nothing,
 )
+    frame = _projection_raster_inputs(geometry.vertices, geometry.faces, direction,
+        options, geometry.plotbox, geometry.projection_workspace)
     return _direction_projection_materialized(
-        geometry.vertices,
+        frame.vertices,
         geometry.faces,
         geometry.face2node,
         geometry.face2node_index,
         geometry.node_ids,
-        direction,
+        frame.direction,
         options,
-        geometry.plotbox;
+        frame.plotbox;
         upper_hit=upper_hit,
         dense_pixel_hits=true,
     )
 end
 
-function _direction_projection_cached(vertices, faces, face2node, direction, options::LightOptions, plotbox, cache_ctx; upper_hit::Bool=false)
+function _direction_projection_cached(vertices, faces, face2node, direction, options::LightOptions, plotbox, cache_ctx;
+    upper_hit::Bool=false, projection_workspace=nothing)
     if cache_ctx === nothing
-        return _direction_projection(vertices, faces, face2node, direction, options, plotbox; upper_hit=upper_hit)
+        return _direction_projection(vertices, faces, face2node, direction, options, plotbox; upper_hit, projection_workspace)
     end
 
     path = _projection_cache_path(cache_ctx, direction, upper_hit)
@@ -4054,7 +4137,7 @@ function _direction_projection_cached(vertices, faces, face2node, direction, opt
         rm(path; force=true)
     end
 
-    result = _direction_projection(vertices, faces, face2node, direction, options, plotbox; upper_hit=upper_hit)
+    result = _direction_projection(vertices, faces, face2node, direction, options, plotbox; upper_hit, projection_workspace)
     _write_projection_cache(path, result)
     return result
 end
@@ -4067,14 +4150,16 @@ function _direction_projection_cached(
     upper_hit::Bool=false,
 )
     if cache_ctx === nothing
+        frame = _projection_raster_inputs(geometry.vertices, geometry.faces, direction,
+            options, geometry.plotbox, geometry.projection_workspace)
         return _direction_projection_prepared(
-            geometry.vertices,
+            frame.vertices,
             geometry.faces,
             geometry.face2node_index,
             geometry.node_ids,
-            direction,
+            frame.direction,
             options,
-            geometry.plotbox;
+            frame.plotbox;
             upper_hit=upper_hit,
             dense_pixel_hits=true,
         )
@@ -4087,15 +4172,17 @@ function _direction_projection_cached(
         rm(path; force=true)
     end
 
+    frame = _projection_raster_inputs(geometry.vertices, geometry.faces, direction,
+        options, geometry.plotbox, geometry.projection_workspace)
     result = _direction_projection_materialized(
-        geometry.vertices,
+        frame.vertices,
         geometry.faces,
         geometry.face2node,
         geometry.face2node_index,
         geometry.node_ids,
-        direction,
+        frame.direction,
         options,
-        geometry.plotbox;
+        frame.plotbox;
         upper_hit=upper_hit,
         dense_pixel_hits=false,
     )
@@ -4246,6 +4333,7 @@ function _scene_geometry_for_interception(
         node_ids,
         node_index,
         plotbox,
+        options.toricity ? nothing : PerpendicularProjectionWorkspace(vertices, faces),
         node_group,
         node_group_by_index,
         pavement_node_mask,
@@ -4673,12 +4761,24 @@ end
 function _rastergpu_scene_data(
     prepared::PreparedInterceptionData,
     config::RasterGPUBackendConfig,
+    ; allocation_plotbox=nothing,
+    pixel_capacity::Int=0,
+    tile_capacity::Int=0,
 )
     backend = config.backend
     KernelAbstractions.supports_atomics(backend) ||
         error("RasterGPUBackend requires a KernelAbstractions backend with atomic support.")
 
     geometry = prepared.geometry
+    plotbox = allocation_plotbox === nothing ? geometry.plotbox : allocation_plotbox
+    if allocation_plotbox === nothing && geometry.projection_workspace !== nothing
+        # Bootstrap from physical geometry, never from an arbitrarily enlarged
+        # scene domain. The actual direction supplies the exact requested pitch.
+        seed = _perpendicular_projection_frame!(geometry.projection_workspace,
+            geometry.vertices, StaticArrays.SVector(0.0, 0.0, 1.0),
+            min(plotbox.pix_x, plotbox.pix_y))
+        plotbox = seed.plotbox
+    end
     n_vertices = length(geometry.vertices)
     n_faces = length(geometry.faces)
     n_nodes = length(geometry.node_ids)
@@ -4690,12 +4790,13 @@ function _rastergpu_scene_data(
     n_pixels = _rastergpu_checked_product(
         "n_pixels",
         UInt8,
-        (geometry.plotbox.nx, geometry.plotbox.ny),
+        (plotbox.nx, plotbox.ny),
         config;
         context=_rastergpu_config_context(config; tile_size=tile_size, tile_face_capacity=tile_face_capacity),
     )
-    n_tiles_x = cld(geometry.plotbox.nx, tile_size)
-    n_tiles_y = cld(geometry.plotbox.ny, tile_size)
+    n_pixels = max(n_pixels, pixel_capacity)
+    n_tiles_x = cld(plotbox.nx, tile_size)
+    n_tiles_y = cld(plotbox.ny, tile_size)
     n_tiles = _rastergpu_checked_product(
         "n_tiles",
         UInt8,
@@ -4703,6 +4804,7 @@ function _rastergpu_scene_data(
         config;
         context=_rastergpu_config_context(config; n_pixels=n_pixels, tile_size=tile_size, tile_face_capacity=tile_face_capacity),
     )
+    n_tiles = max(n_tiles, tile_capacity)
     stackless_top_hit = prepared.upper_hit && tile_size == 1
     tile_candidate_len = _rastergpu_checked_product(
         "RasterGPU tile_faces_dev/tile_unwrapped_i_dev/tile_unwrapped_j_dev",
@@ -5027,12 +5129,19 @@ function _rastergpu_scene_data(
         config.edge_accumulation,
         config.dense_edge_limit_bytes,
         config.validate,
+        config,
+        plotbox,
+        1.0,
+        geometry.projection_workspace === nothing ? Float32[] : vertex_x,
+        geometry.projection_workspace === nothing ? Float32[] : vertex_y,
+        geometry.projection_workspace === nothing ? Float32[] : vertex_z,
     )
 end
 
 function _rastergpu_clear_direction!(data::RasterGPUSceneData)
     geometry = data.prepared.geometry
-    n_pixels = geometry.plotbox.nx * geometry.plotbox.ny
+    # Clear capacity, including padding left by a larger preceding direction.
+    n_pixels = length(data.counts_dev)
     n_nodes = length(geometry.node_ids)
     ndrange = max(n_pixels, n_nodes)
     ndrange == 0 && return data
@@ -5050,6 +5159,62 @@ function _rastergpu_clear_direction!(data::RasterGPUSceneData)
     )
     KernelAbstractions.synchronize(data.backend)
     return data
+end
+
+function _rastergpu_grow_direction_buffers!(data::RasterGPUSceneData, plotbox)
+    n_pixels = _rastergpu_checked_product("n_pixels", UInt8, (plotbox.nx, plotbox.ny), data.config)
+    n_tiles = _rastergpu_checked_product("n_tiles", UInt8,
+        (cld(plotbox.nx, data.tile_size), cld(plotbox.ny, data.tile_size)), data.config)
+    n_pixels <= length(data.counts_dev) && n_tiles <= length(data.tile_counts_dev) && return data
+    config = data.config
+    # Retain the chosen representation when :auto selected dense or sparse
+    # storage: those device array types are part of the prepared cache type.
+    policy = data.dense_edge_counts_dev === nothing ? :sparse_host_reduce : :dense_atomic
+    # :auto may already have admitted a larger dense matrix after checking the
+    # backend memory budget. Reusing it must not reapply the explicit-policy cap.
+    dense_limit = data.dense_edge_counts_dev === nothing ? config.dense_edge_limit_bytes :
+        max(config.dense_edge_limit_bytes, sizeof(Int32) * length(data.dense_edge_counts_dev))
+    allocation_config = RasterGPUBackendConfig(config.backend, config.workgroupsize,
+        config.max_hits_per_pixel, config.tile_size, config.tile_face_capacity,
+        config.top_hit_tile_size, config.top_hit_tile_face_capacity, policy,
+        dense_limit, config.validate)
+    grown = _rastergpu_scene_data(data.prepared, allocation_config;
+        allocation_plotbox=plotbox, pixel_capacity=length(data.counts_dev),
+        tile_capacity=length(data.tile_counts_dev))
+    for name in (:counts_dev, :nodes_dev, :heights_dev, :overflow_dev,
+        :edge_keys_dev, :edge_key_counts_dev, :tile_counts_dev, :tile_faces_dev,
+        :tile_unwrapped_i_dev, :tile_unwrapped_j_dev, :tile_overflow_dev,
+        :counts_host, :nodes_host, :heights_host, :overflow_host,
+        :edge_keys_host, :edge_key_counts_host, :edge_compact_host,
+        :tile_counts_host, :tile_overflow_host)
+        setfield!(data, name, getfield(grown, name))
+    end
+    return data
+end
+
+function _rastergpu_direction_inputs!(data::RasterGPUSceneData, direction, options::LightOptions)
+    geometry = data.prepared.geometry
+    inputs = _projection_raster_inputs(geometry.vertices, geometry.faces, direction,
+        options, geometry.plotbox, geometry.projection_workspace)
+    _rastergpu_grow_direction_buffers!(data, inputs.plotbox)
+    if !options.toricity || geometry.projection_workspace !== nothing
+        vertices = inputs.vertices
+        for host in (data.vertex_x_host, data.vertex_y_host, data.vertex_z_host)
+            length(host) == length(vertices) || resize!(host, length(vertices))
+        end
+        @inbounds for i in eachindex(vertices)
+            data.vertex_x_host[i] = Float32(vertices[i][1])
+            data.vertex_y_host[i] = Float32(vertices[i][2])
+            data.vertex_z_host[i] = Float32(vertices[i][3])
+        end
+        KernelAbstractions.copyto!(data.backend, data.vertex_x_dev, data.vertex_x_host)
+        KernelAbstractions.copyto!(data.backend, data.vertex_y_dev, data.vertex_y_host)
+        KernelAbstractions.copyto!(data.backend, data.vertex_z_dev, data.vertex_z_host)
+        KernelAbstractions.synchronize(data.backend)
+    end
+    data.active_plotbox = inputs.plotbox
+    data.projection_area_scale = hasproperty(inputs, :area_scale) ? inputs.area_scale : 1.0
+    return inputs.direction
 end
 
 function _rastergpu_clear_tile_bins!(data::RasterGPUSceneData)
@@ -5104,7 +5269,8 @@ function _rastergpu_project_direction!(
     accumulate_dense_edges::Bool=false,
 )
     geometry = data.prepared.geometry
-    plotbox = geometry.plotbox
+    direction = _rastergpu_direction_inputs!(data, direction, options)
+    plotbox = data.active_plotbox
     n_faces = length(geometry.faces)
     n_pixels = plotbox.nx * plotbox.ny
     n_nodes = length(geometry.node_ids)
@@ -5358,12 +5524,12 @@ function _rastergpu_copy_direction_response_host!(data::RasterGPUSceneData)
         sector_area=data.sector_area_host,
         projected_mesh_area=data.projected_mesh_area_host,
         projected_pixels_area=data.projected_pixels_area_host,
+        area_scale=data.projection_area_scale,
     )
 end
 
 function _rastergpu_copy_direction_stacks_host!(data::RasterGPUSceneData)
-    geometry = data.prepared.geometry
-    n_pixels = geometry.plotbox.nx * geometry.plotbox.ny
+    n_pixels = length(data.counts_dev)
     stack_len = n_pixels * data.max_hits_per_pixel
     length(data.nodes_dev) == stack_len || error(
         "RasterGPU emitter transfer requires full per-pixel hit stacks.",
@@ -5510,7 +5676,7 @@ function _compute_first_order_rastergpu(
         @inbounds for idx in eachindex(geometry.node_ids)
             hits_per_node[idx] += Int(response.node_counts[idx])
             has_flux || continue
-            pa = Float64(response.sector_area[idx])
+            pa = Float64(response.sector_area[idx]) * response.area_scale
             pa <= 0.0 && continue
             projected_area_per_node[idx] += pa
             par_flux != 0.0 && (incident_power_par[idx] += par_flux * pa)
@@ -5757,6 +5923,7 @@ function _compute_first_order(
             prepared.virtual_node_mask,
             geometry.node_ids,
             prepared.cache_ctx,
+            projection_workspace=geometry.projection_workspace,
         )
         _accumulate_emitter_band_power!(
             incident_power_par,
