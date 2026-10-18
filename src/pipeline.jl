@@ -399,8 +399,12 @@ function _dense_emitter_power(
 end
 
 function _turtle_cache_key(turtle::TurtleGrid, options::LightOptions)
-    h = hash((length(turtle.sectors), options.pixel_size, options.area_ratio))
+    # The explicit sun moves independently of the fixed sky quadrature. Its
+    # current response occupies one replaceable slot in the same cache entry.
+    n_fixed = count(s -> s.source != :sun, turtle.sectors)
+    h = hash((n_fixed, options.pixel_size, options.area_ratio))
     for s in turtle.sectors
+        s.source == :sun && continue
         d = s.direction
         h = hash(
             (
@@ -421,13 +425,15 @@ function _build_sector_responses(
     scene::PlantGeom.SceneGeometry,
     models::LightModels,
     turtle::TurtleGrid,
-    options::LightOptions,
+    options::LightOptions;
+    reserve_sun::Bool=false,
 )
     n = length(turtle.sectors)
     geometry = prepared.geometry
-    projected_area_by_sector = zeros(Float64, length(geometry.node_ids), n)
+    capacity = n + Int(reserve_sun)
+    projected_area_by_sector = zeros(Float64, length(geometry.node_ids), capacity)
     projected_area_active_indices = Int[]
-    projected_area_active_offsets = Vector{Int}(undef, n + 1)
+    projected_area_active_offsets = Vector{Int}(undef, capacity + 1)
     projected_area_active_offsets[1] = 1
     hits_all_sectors = zeros(Int, length(geometry.node_ids))
     emitter_sector_fraction = _lambertian_sector_fractions(turtle)
@@ -527,6 +533,13 @@ function _build_sector_responses(
                 )
             end
         end
+    end
+    if reserve_sun
+        # Keep the solar index span fixed as well as its matrix column. This
+        # bounds retained storage independently of the number of sun positions
+        # visited and avoids reallocating the diffuse active-index prefix.
+        append!(projected_area_active_indices, eachindex(geometry.node_ids))
+        projected_area_active_offsets[capacity + 1] = length(projected_area_active_indices) + 1
     end
     emitter_transfer =
         emitter_received_fraction === nothing ? nothing :
@@ -639,7 +652,7 @@ function _combine_sector_responses(
     incident_power_nir = zeros(Float64, length(node_ids))
     hits_per_node = copy(_hits_all_sectors(responses))
 
-    for i in 1:_sector_count(responses)
+    for i in eachindex(fluxes.par)
         pf = fluxes.par[i]
         nf = fluxes.nir[i]
         active_flux = (pf != 0.0) || (nf != 0.0)
@@ -1785,6 +1798,7 @@ mutable struct TurtleLightCacheEntry
     key::UInt64
     turtle::TurtleGrid
     responses_cache::SectorResponsesCache
+    sun_hits::Vector{Int}
     par_added_per_sector::Vector{Union{Nothing,Vector{Float64}}}
     nir_added_per_sector::Vector{Union{Nothing,Vector{Float64}}}
     extra_added_per_sector::Dict{String,Vector{Union{Nothing,Vector{Float64}}}}
@@ -2085,6 +2099,7 @@ function _plain_turtle_cache_entry_retained_bytes(entry::TurtleLightCacheEntry)
     bytes += _cache_vector_retained_bytes(entry.turtle.sectors)
     bytes += _CACHE_TURTLE_SECTOR_BYTES * length(entry.turtle.sectors)
     bytes += _sector_responses_host_bytes(responses)
+    bytes += _cache_vector_retained_bytes(entry.sun_hits)
     for values in (
         responses.emitter_incident_power_par,
         responses.emitter_incident_power_nir,
@@ -2129,6 +2144,7 @@ function _summarysize_turtle_cache_entry_retained_bytes(entry::TurtleLightCacheE
         responses.emitter_escaped_power_nir,
         responses.emitter_transfer,
         responses.scattering_topology,
+        entry.sun_hits,
         entry.scattering_graph,
         entry.par_added_per_sector,
         entry.nir_added_per_sector,
@@ -2145,13 +2161,17 @@ function _summarysize_turtle_cache_entry_retained_bytes(entry::TurtleLightCacheE
     return Base.summarysize(retained)
 end
 
-function _turtle_cache_entry_retained_bytes(entry::TurtleLightCacheEntry)
+function _uses_plain_cache_accounting(entry::TurtleLightCacheEntry)
     responses = entry.responses_cache
-    if responses.emitter_transfer === nothing &&
-       responses.scattering_topology === nothing &&
-       isempty(entry.extra_added_per_sector) &&
-       isempty(entry.extra_iterations_per_sector) &&
-       isempty(entry.extra_converged_per_sector)
+    return responses.emitter_transfer === nothing &&
+           responses.scattering_topology === nothing &&
+           isempty(entry.extra_added_per_sector) &&
+           isempty(entry.extra_iterations_per_sector) &&
+           isempty(entry.extra_converged_per_sector)
+end
+
+function _turtle_cache_entry_retained_bytes(entry::TurtleLightCacheEntry)
+    if _uses_plain_cache_accounting(entry)
         # The common no-emitter/no-scattering entry contains only vectors and
         # empty dictionaries. Count their storage directly instead of walking
         # the entire object graph with `summarysize`. The constants deliberately
@@ -2983,12 +3003,18 @@ function _build_turtle_cache_entry!(
 )
     prepared = cache.prepared
     prepared === nothing && error("Cannot build full-response cache entry without prepared interception data.")
-    responses = _build_sector_responses(prepared, cache.scene, cache.models, turtle, cache.options)
-    n = length(turtle.sectors)
+    fixed_turtle = TurtleGrid(filter(s -> s.source != :sun, turtle.sectors))
+    reserve_sun = !cache.options.all_in_turtle
+    responses = _build_sector_responses(
+        prepared, cache.scene, cache.models, fixed_turtle, cache.options;
+        reserve_sun=reserve_sun,
+    )
+    n = _sector_count(responses)
     entry = TurtleLightCacheEntry(
         key,
-        turtle,
+        fixed_turtle,
         responses,
+        reserve_sun ? zeros(Int, length(responses.node_ids)) : Int[],
         fill(nothing, n),
         fill(nothing, n),
         Dict{String,Vector{Union{Nothing,Vector{Float64}}}}(),
@@ -3002,6 +3028,7 @@ function _build_turtle_cache_entry!(
         0,
         0,
     )
+    _update_sun_response!(cache, entry, turtle)
     base_bytes = _turtle_cache_entry_retained_bytes(entry)
     entry.resident_bytes = base_bytes
     cache.mode == :partial && _evict_cache_entries!(cache, base_bytes)
@@ -3018,13 +3045,99 @@ function _build_turtle_cache_entry!(
     return _touch_cache_entry!(cache, entry)
 end
 
+function _update_sun_response!(
+    cache::LightSimulationCache,
+    entry::TurtleLightCacheEntry,
+    turtle::TurtleGrid,
+)
+    old_sun = findfirst(s -> s.source == :sun, entry.turtle.sectors)
+    new_sun = findfirst(s -> s.source == :sun, turtle.sectors)
+    unchanged = old_sun === nothing ? new_sun === nothing :
+                new_sun !== nothing &&
+                entry.turtle.sectors[old_sun].direction == turtle.sectors[new_sun].direction
+    if unchanged
+        entry.turtle = turtle
+        return false
+    end
+
+    responses = entry.responses_cache
+    geometry = responses.prepared.geometry
+    slot = _sector_count(responses)
+    areas = @view responses.dense.projected_area_by_sector[:, slot]
+    hits = _hits_all_sectors(responses)
+    new_hits = zeros(Int, length(hits))
+    visible_area = if new_sun !== nothing
+        projection = _prepared_direction_projection(
+            responses.prepared, turtle.sectors[new_sun].direction, cache.options,
+        )
+        projected_area = _visible_area_from_projection_dense(
+            projection, cache.options, geometry.plotbox,
+            responses.prepared.virtual_node_mask,
+            responses.prepared.node_transparency_by_index, geometry,
+        )
+        _accumulate_projection_hits!(new_hits, projection, geometry)
+        projected_area
+    else
+        zeros(Float64, length(areas))
+    end
+    # Finish projection before replacing the accepted direction, so a failed
+    # projection cannot leave the previous response partially invalidated.
+    @inbounds for i in eachindex(hits)
+        hits[i] += new_hits[i] - entry.sun_hits[i]
+        entry.sun_hits[i] = new_hits[i]
+    end
+    copyto!(areas, visible_area)
+    # Only the moving direction's unit scattering responses become stale.
+    entry.par_added_per_sector[slot] = nothing
+    entry.nir_added_per_sector[slot] = nothing
+    entry.par_iterations_per_sector[slot] = 0
+    entry.nir_iterations_per_sector[slot] = 0
+    entry.par_converged_per_sector[slot] = true
+    entry.nir_converged_per_sector[slot] = true
+    entry.turtle = turtle
+    return true
+end
+
 function _get_turtle_cache_entry!(
     cache::LightSimulationCache,
     turtle::TurtleGrid,
 )
     key = _turtle_cache_key(turtle, cache.options)
     if haskey(cache.entries, key)
-        return _touch_cache_entry!(cache, cache.entries[key])
+        entry = cache.entries[key]
+        old_turtle = entry.turtle
+        old_par_sun = last(entry.par_added_per_sector)
+        old_nir_sun = last(entry.nir_added_per_sector)
+        if _update_sun_response!(cache, entry, turtle)
+            # Invalidating a solar response releases its retained unit vectors.
+            # Geometry/index storage has fixed capacity, but sunrise can grow
+            # the turtle metadata from n sky sectors to n + 1 sectors. Measure
+            # only those changes, rather than walking the fixed graph/cache on
+            # every new sun position.
+            turtle_delta = if _uses_plain_cache_accounting(entry)
+                sizeof(turtle.sectors) - sizeof(old_turtle.sectors) +
+                _CACHE_TURTLE_SECTOR_BYTES * (length(turtle.sectors) - length(old_turtle.sectors))
+            else
+                Base.summarysize(turtle) - Base.summarysize(old_turtle)
+            end
+            released_bytes = (old_par_sun === nothing ? 0 : Base.summarysize(old_par_sun)) +
+                             (old_nir_sun === nothing ? 0 : Base.summarysize(old_nir_sun))
+            retained_bytes = entry.resident_bytes + turtle_delta - released_bytes
+            additional_bytes = max(retained_bytes - entry.resident_bytes, 0)
+            cache.mode == :partial &&
+                _evict_cache_entries!(cache, additional_bytes; protect_key=entry.key)
+            if _cache_can_store_bytes(cache, additional_bytes)
+                cache.resident_bytes += retained_bytes - entry.resident_bytes
+            else
+                # Complete this step transiently if even the current direction
+                # cannot fit. Never keep an entry above the hard memory cap.
+                delete!(cache.entries, entry.key)
+                cache.resident_bytes -= entry.resident_bytes
+                cache.mode = :topology_fallback
+            end
+            entry.resident_bytes = retained_bytes
+        end
+        return _touch_cache_entry!(cache, entry)
     end
     return _build_turtle_cache_entry!(cache, key, turtle)
 end

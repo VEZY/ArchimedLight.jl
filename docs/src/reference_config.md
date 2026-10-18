@@ -279,6 +279,15 @@ This is worthwhile when many time steps are simulated on the same scene.
 
 When this option is enabled, `run_light(sim, meteo)` and repeated `run_light(sim, row)` calls reuse unit directional responses across meteo rows. In the raster CPU path, that cache stores the first-order response and, when scattering is enabled, the scattered added-light response as well. The time-step results are then reconstructed by weighting those cached unit responses with the true directional fluxes of each row.
 
+With `all_in_turtle=false`, the diffuse directions and their unit responses stay
+cached when the explicit sun moves. Only the current solar direction is
+reprojected and its scattered response recomputed. The diffuse irradiance and
+its angular distribution are still updated for every row, including across
+days. One replaceable solar slot avoids retaining a new copy of the diffuse
+cache for each sun position. Changing the scene, optical models, or numerical
+options through `update_scene!`, `update_models!`, or `update_options!` rebuilds
+the cache.
+
 The main effect is therefore still on runtime, not on physics, but the optimization is now stronger than a simple first-order shortcut. It is especially useful for long series on an unchanged scene and for manual simulation loops where you run a few steps, pause, inspect or grow the scene, and then explicitly rebuild the cache when geometry or optics change.
 
 Large scenes are handled with a tiered policy. If the full-response cache is small enough, it stays in memory. If not, the runtime falls back to a bounded partial cache, and if even that is not appropriate it falls back to the prepared topology path instead of allocating an unbounded cache.

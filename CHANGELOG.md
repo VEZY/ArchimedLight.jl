@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Keep fixed diffuse directional responses and their scattering graph cached
+  when the explicit sun moves with `cache_radiation=true` and
+  `all_in_turtle=false`. Replace only the current solar response, including
+  across day/night transitions, while respecting the cache memory limit.
+
 ## 0.2.0
 
 ### Breaking changes
