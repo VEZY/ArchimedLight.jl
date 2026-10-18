@@ -2,8 +2,8 @@
 
 The light solver needs a scene description with four kinds of information:
 
-- an XY projection domain
-- geometry placed in that domain
+- an XY plot domain
+- geometry placed in the scene
 - per-component metadata used for model matching
 - stable node ids that let outputs be traced back to the original scene
 
@@ -14,7 +14,7 @@ Historically that information often comes from `.ops`, `.opf`, and `.gwa` files.
 Whatever the source format, the prepared `PlantGeom.SceneGeometry` used by the
 solver must be able to answer these questions:
 
-- what horizontal domain should be rasterized?
+- what is the horizontal plot footprint, and which tile repeats if toricity is enabled?
 - where is each geometric object located?
 - which functional group does each geometric component belong to?
 - which component type does each geometric component belong to?
@@ -42,7 +42,7 @@ end
 
 This creates a prepared `PlantGeom.SceneGeometry`. The important user-facing concepts are:
 
-- `domain`: the XY plot footprint used by projection and toricity
+- `domain`: the XY plot footprint used for ground placement and the repeating tile when toricity is enabled
 - `add_plant!`: imports or places one plant, and assigns its functional group and object id
 - `add_object!`: imports or places a non-plant MTG, `GeometryBasics` mesh, `.opf`, or `.gwa` object
 - `group`: the high-level model key, such as `"coffee"` or `"soil"`
@@ -81,9 +81,15 @@ If you already have a complete MTG, you can still use `PlantGeom.prepare_scene` 
 
 ## 1. Plot Domain
 
-The raster interception model needs an XY domain. The domain defines the minimum and maximum scene dimensions, which may be different from the bounds defined by the objects in the scene. For example, when we activate the toricity feature, it is common to define the scene as a voronoi tile with a single plant that represents the whole plot. The domain of the scene is then the tile footprint, which may be larger than the actual plant geometry, and is usually equal to the inter and intra-row spacing between plants.
+The scene has an XY plot domain, which can differ from the bounds of its objects.
+With toricity enabled, this domain defines the horizontal raster and the repeating
+tile. For example, a tile containing one representative plant commonly spans the
+inter-row and intra-row spacing.
 
-The domain is used internally to build the projected pixel tables.
+With `toricity=false`, each projection canvas is instead fitted to all scene
+geometry on a plane perpendicular to its light direction. Objects are not
+clipped to the plot domain during projection. This does not enlarge any ground
+mesh created from that domain.
 
 ### From Files
 

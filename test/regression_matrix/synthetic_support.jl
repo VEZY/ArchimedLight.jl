@@ -206,11 +206,10 @@ function _synthetic_exact_check(source_id::String, result)::NamedTuple
         pa = get(step.first_order.projected_area_per_node, 1, 0.0)
         q = get(step.budget.incident_energy.initial.par, 1, 0.0)
         toric = Bool(get(result.meta, "toricity", false))
-        # The row supplies an explicit west-facing sun. With a fixed [0, 1]
-        # plot, the edge plate projects completely outside the non-periodic
-        # domain; toricity wraps the complete 0.4 m² plate back into it.
-        target_pa = toric ? 0.4 : 0.0
-        target_q = toric ? 40.0 : 0.0
+        # The finite canvas covers the whole plate, even when its ground
+        # projection leaves [0, 1]. Toricity wraps it into the repeated tile.
+        target_pa = 0.4
+        target_q = 40.0
         ok = isapprox(pa, target_pa; atol=1e-5, rtol=1e-9) &&
             isapprox(q, target_q; atol=1e-5, rtol=1e-9)
         detail = ok ? "" : "toricity_wraparound toric=$(toric) projected=$(pa) q=$(q)"

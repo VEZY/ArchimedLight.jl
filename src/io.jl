@@ -440,7 +440,7 @@ julia> update_options!(
 julia> step = run_light(sim, first(meteo));
 
 julia> println(step)
-LightStepResult(PAR=291.777 kJ, NIR=316.092 kJ, sky=463.139 W m^-2 PAR / 501.734 W m^-2 NIR, sectors=1 [sky=1, sun=0], scattering=off)
+LightStepResult(PAR=1.266 MJ, NIR=1.372 MJ, sky=463.139 W m^-2 PAR / 501.734 W m^-2 NIR, sectors=1 [sky=1, sun=0], scattering=off)
 ```
 """
 function read_simulation(
