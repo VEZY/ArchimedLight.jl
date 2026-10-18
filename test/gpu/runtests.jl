@@ -316,8 +316,7 @@ end
                     emitter_prepared,
                     emitter_backend.config,
                 )
-                emitter_pixels =
-                    emitter_prepared.geometry.plotbox.nx * emitter_prepared.geometry.plotbox.ny
+                emitter_pixels = length(emitter_data.counts_dev)
                 @test length(emitter_data.nodes_dev) ==
                       emitter_pixels * emitter_backend.config.max_hits_per_pixel
                 emitter_metal = ArchimedLight.compute_first_order(

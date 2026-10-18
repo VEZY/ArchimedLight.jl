@@ -810,7 +810,7 @@ function _accumulate_dense_projection_first_order_and_scattering!(
     _accumulate_weighted_hits!(scattering_weighted_hits_by_node, projection, weight)
     directional_edges = empty!(scratch.directional_edges)
     active_flux = par_flux != 0.0 || nir_flux != 0.0
-    pixel_area = geometry.plotbox.pixel_area
+    pixel_area = _projection_pixel_area(options, geometry.plotbox)
     no_virtual_nodes = isempty(prepared.virtual_nodes)
     @inbounds for stack in values(projection.pixel_hits)
         n_hits = length(stack)
@@ -874,7 +874,7 @@ function _fill_dense_projection_area_hits_and_scattering!(
     weight = _scattering_direction_weight(sector)
     _accumulate_weighted_hits!(scattering_weighted_hits_by_node, projection, weight)
     directional_edges = empty!(scratch.directional_edges)
-    pixel_area = geometry.plotbox.pixel_area
+    pixel_area = _projection_pixel_area(options, geometry.plotbox)
     no_virtual_nodes = isempty(prepared.virtual_nodes)
     @inbounds for stack in values(projection.pixel_hits)
         n_hits = length(stack)

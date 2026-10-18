@@ -20,7 +20,7 @@ The model is surface-based:
 
 - leaves, stems, soil, sensors, and other objects are represented as triangle meshes
 - light propagates along a finite set of directions
-- visibility is computed by projecting the scene onto the plot
+- visibility is computed by projecting the scene onto a raster plane
 - first-order interception is computed using the visible projected area of each component and a pixel stack of hits along each direction
 - multiple scattering then redistributes a fraction of the intercepted energy at the component level, using the same pixel stack information
 
@@ -48,7 +48,7 @@ Step 2 builds the directional sky shown in the second panel. `compute_sky` and `
 
 Step 3 corresponds to the projection and ordered pixel stack panel. For each direction:
 
-- the mesh is projected onto the plot
+- the mesh is projected onto the horizontal tile for periodic scenes, or a fitted perpendicular plane for finite scenes
 - the projected area is rasterized into pixels
 - visible hits and lower hits are ordered along each pixel stack
 

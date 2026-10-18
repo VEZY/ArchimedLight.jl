@@ -96,7 +96,12 @@ end
     run0 = HelperModule._run_direct(scene, sky, HelperModule._synthetic_options(sectors=1, all_in_turtle=false, scattering=false, pixel_size=0.01, toricity=false))
     run1 = HelperModule._run_direct(scene, sky, HelperModule._synthetic_options(sectors=1, all_in_turtle=false, scattering=false, pixel_size=0.01, toricity=true))
 
-    @test get(HelperModule._incident_par_initial_energy(run1.budget), 1, 0.0) > get(HelperModule._incident_par_initial_energy(run0.budget), 1, 0.0)
+    # Finite projection covers the whole edge plate; periodic projection still
+    # wraps it into the tile. Neither path loses its illumination at the border.
+    for run in (run0, run1)
+        @test isapprox(get(run.first.projected_area_per_node, 1, 0.0), 0.4; atol=1e-6)
+        @test isapprox(get(HelperModule._incident_par_initial_energy(run.budget), 1, 0.0), 40.0; atol=1e-4)
+    end
 end
 
 @testitem "Synthetic case virtual_sensor_transparency" tags = [:synthetic, :fast, :virtual_sensor_transparency] setup = [HelperModule] begin

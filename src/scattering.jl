@@ -190,7 +190,8 @@ end
 
 ScatteringStackScratch() = ScatteringStackScratch(Int[], Dict{UInt64,Int}())
 
-# A horizontal raster overcounts oblique ray bundles by 1 / direction[3].
+# A square ground footprint overcounts oblique ray bundles by 1 / direction[3],
+# whether its raster is horizontal or perpendicular with pitches (p, p*sz).
 # Multiplying raw links AND all source hits by sz * dOmega recovers Lambertian
 # projected-area quadrature. The common 2pi in dOmega cancels in the ratio.
 @inline function _scattering_direction_weight(sector::TurtleSector)
@@ -799,7 +800,8 @@ function _pair_counts_for_scattering(scene::PlantGeom.SceneGeometry, models::Lig
 
     for sector in turtle.sectors
         projection =
-            _direction_projection_cached(geometry.vertices, geometry.faces, geometry.face2node, sector.direction, options, geometry.plotbox, cache_ctx)
+            _direction_projection_cached(geometry.vertices, geometry.faces, geometry.face2node, sector.direction, options, geometry.plotbox, cache_ctx;
+                projection_workspace=geometry.projection_workspace)
         _accumulate_scattering_counts!(
             edge_counts,
             weighted_hits,
@@ -1607,7 +1609,7 @@ function _rastergpu_accumulate_device_scattering_edges!(
     clear_kernel(data.dense_edge_counts_dev; ndrange=n_pairs)
     KernelAbstractions.synchronize(data.backend)
 
-    n_pixels = data.prepared.geometry.plotbox.nx * data.prepared.geometry.plotbox.ny
+    n_pixels = data.active_plotbox.nx * data.active_plotbox.ny
     if n_pixels > 0
         edge_kernel = _rastergpu_scattering_dense_counts_kernel!(data.backend, data.workgroupsize)
         edge_kernel(
