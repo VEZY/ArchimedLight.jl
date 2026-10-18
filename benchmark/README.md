@@ -23,3 +23,24 @@ Before changing shared benchmark cases, execute every applicable case once on
 both compared revisions. Loading the suite alone does not execute benchmark
 setup or the measured operations. Preserve identical forcing, geometry, and
 output-retention settings when comparing timings.
+
+## Moving explicit sun
+
+`moving_sun_cache.jl` measures repeated calls to the public `run_light` API on
+the pinned wheat scene with an added ground. It reports initial preparation,
+repeated identical hours, and twenty new solar positions separately, including
+allocations and retained cache storage. The forcing is synthetic and fixed so
+the comparison isolates solar geometry and cache reuse.
+
+From a Kaimon-controlled Julia session, run the same script against each loaded
+package revision:
+
+```julia
+include("/path/to/benchmark/moving_sun_cache.jl")
+MovingSunCacheBenchmark.run(; output="/tmp/moving-sun-main.toml", label="main")
+```
+
+Use the same Julia and dependency versions, and run the two measurements
+sequentially while other heavy calculations are idle. Compare the recorded
+checksums as well as timings; fresh-scene preparation is excluded from the
+changing-hour measurements.
