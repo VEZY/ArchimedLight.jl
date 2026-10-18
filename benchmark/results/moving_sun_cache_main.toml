@@ -1,0 +1,1925 @@
+active_project = "/private/tmp/archimedlight-cache-fixed-diffuse/Project.toml"
+archimedlight_path = "/private/tmp/archimedlight-cache-fixed-diffuse/src/ArchimedLight.jl"
+artifact_tree_hash = "0fe06e0ad6ecab2e7db5f97aff7d0ee11bb34555"
+cpu = "Apple M3 Max"
+git_revision = "c3764cdaaa58c568ceef0b58719a92fdf1e119ea"
+julia_version = "1.13.1"
+label = "main-c3764cd-matched-environment"
+manifest_sha256 = "29e03b1202654a28f98a50a101acd98480daea68d10c0cb90b27b66b53e2bcce"
+nodes = 1894
+plantgeom_version = "0.20.0"
+scene_path = "/Users/rvezy/.julia/artifacts/0fe06e0ad6ecab2e7db5f97aff7d0ee11bb34555/benchmark_scenes/wheat.ops"
+source_julia_sha256 = "9c2d2ee138d83e49eeede615a385a8a24cc75ffa334bc090e19a9ae520f68759"
+threads = 14
+triangles = 6462
+
+[[configurations]]
+name = "46_directions_10mm"
+
+    [configurations.cache_after_moving_sun]
+    cached_full_response_sector_count = 0
+    cached_sector_count = 987
+    cached_turtle_count = 21
+    component_metadata_bytes = 60752
+    component_metadata_count = 1894
+    estimated_entry_bytes = 727296
+    full_response_enabled = true
+    memory_limit_bytes = 536870912
+    mode = "partial"
+    node_metadata_bytes = 247757
+    node_metadata_count = 1894
+    resident_bytes = 32303542
+    summarysize_bytes = 40155912
+
+    [configurations.cache_after_same_hour]
+    cached_full_response_sector_count = 0
+    cached_sector_count = 47
+    cached_turtle_count = 1
+    component_metadata_bytes = 60752
+    component_metadata_count = 1894
+    estimated_entry_bytes = 727296
+    full_response_enabled = true
+    memory_limit_bytes = 536870912
+    mode = "partial"
+    node_metadata_bytes = 247757
+    node_metadata_count = 1894
+    resident_bytes = 1538270
+    summarysize_bytes = 6322656
+
+    [configurations.cache_after_setup]
+    cached_full_response_sector_count = 0
+    cached_sector_count = 47
+    cached_turtle_count = 1
+    component_metadata_bytes = 60752
+    component_metadata_count = 1894
+    estimated_entry_bytes = 727296
+    full_response_enabled = true
+    memory_limit_bytes = 536870912
+    mode = "partial"
+    node_metadata_bytes = 247757
+    node_metadata_count = 1894
+    resident_bytes = 1538270
+    summarysize_bytes = 6322656
+
+    [configurations.cold_setup_after_JIT]
+    allocated_bytes = 31355200
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 55.094584000000005
+
+        [configurations.cold_setup_after_JIT.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+
+    [[configurations.moving_sun]]
+    allocated_bytes = 23794400
+    gc_milliseconds = 0.0
+    hour = 12.083333333333334
+    milliseconds = 31.154375
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 0
+        cached_sector_count = 94
+        cached_turtle_count = 2
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 727296
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 3076452
+        summarysize_bytes = 8014278
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 411449.2091377242
+        absorbed_par_weighted_sum = 4.0440257096434593e8
+        incident_par_sum = 467729.5021652304
+        incident_par_weighted_sum = 4.5955690840177786e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 23796656
+    gc_milliseconds = 0.0
+    hour = 12.166666666666666
+    milliseconds = 31.69675
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 0
+        cached_sector_count = 141
+        cached_turtle_count = 3
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 727296
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 4614706
+        summarysize_bytes = 9705900
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 411546.92380771524
+        absorbed_par_weighted_sum = 4.041535317637048e8
+        incident_par_sum = 467847.13133004046
+        incident_par_weighted_sum = 4.5927425289716566e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 23794400
+    gc_milliseconds = 0.0
+    hour = 12.25
+    milliseconds = 31.425500000000003
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 0
+        cached_sector_count = 188
+        cached_turtle_count = 4
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 727296
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 6152912
+        summarysize_bytes = 11397522
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 411537.9655424868
+        absorbed_par_weighted_sum = 4.0395138878050905e8
+        incident_par_sum = 467837.7925821262
+        incident_par_weighted_sum = 4.59044526621432e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 23794400
+    gc_milliseconds = 0.0
+    hour = 12.333333333333334
+    milliseconds = 31.391375
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 0
+        cached_sector_count = 235
+        cached_turtle_count = 5
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 727296
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 7691134
+        summarysize_bytes = 13089144
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 411417.2387702858
+        absorbed_par_weighted_sum = 4.036932740676342e8
+        incident_par_sum = 467698.07022126287
+        incident_par_weighted_sum = 4.5875111767246664e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 23795008
+    gc_milliseconds = 0.0
+    hour = 12.416666666666666
+    milliseconds = 31.033209
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 0
+        cached_sector_count = 282
+        cached_turtle_count = 6
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 727296
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 9229436
+        summarysize_bytes = 14780766
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 411432.60756753513
+        absorbed_par_weighted_sum = 4.035993834822133e8
+        incident_par_sum = 467712.8574715437
+        incident_par_weighted_sum = 4.586443258044361e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 23795008
+    gc_milliseconds = 0.0
+    hour = 12.5
+    milliseconds = 31.447665999999998
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 0
+        cached_sector_count = 329
+        cached_turtle_count = 7
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 727296
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 10767706
+        summarysize_bytes = 16472388
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 411597.9422834229
+        absorbed_par_weighted_sum = 4.036361810176887e8
+        incident_par_sum = 467900.0201055987
+        incident_par_weighted_sum = 4.5868622621685475e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 23797264
+    gc_milliseconds = 8.417167
+    hour = 12.583333333333334
+    milliseconds = 39.300458000000006
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 0
+        cached_sector_count = 376
+        cached_turtle_count = 8
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 727296
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 12305992
+        summarysize_bytes = 18164010
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 411540.1273765955
+        absorbed_par_weighted_sum = 4.0321032405270845e8
+        incident_par_sum = 467840.90183953464
+        incident_par_weighted_sum = 4.5820254326712734e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 23795008
+    gc_milliseconds = 0.0
+    hour = 12.666666666666666
+    milliseconds = 30.567084
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 0
+        cached_sector_count = 423
+        cached_turtle_count = 9
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 727296
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 13844246
+        summarysize_bytes = 19855632
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 411826.2371141629
+        absorbed_par_weighted_sum = 4.035195941981562e8
+        incident_par_sum = 468160.32312281005
+        incident_par_weighted_sum = 4.5855378837411493e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 23795008
+    gc_milliseconds = 0.0
+    hour = 12.75
+    milliseconds = 31.862583
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 0
+        cached_sector_count = 470
+        cached_turtle_count = 10
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 727296
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 15382524
+        summarysize_bytes = 21547254
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 411806.71597080724
+        absorbed_par_weighted_sum = 4.031485418071247e8
+        incident_par_sum = 468147.0952435542
+        incident_par_weighted_sum = 4.5813265962815636e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 23796192
+    gc_milliseconds = 0.0
+    hour = 12.833333333333334
+    milliseconds = 30.677166
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 0
+        cached_sector_count = 517
+        cached_turtle_count = 11
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 727296
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 16920834
+        summarysize_bytes = 23239692
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 411940.5047660282
+        absorbed_par_weighted_sum = 4.032151000970874e8
+        incident_par_sum = 468293.8312166798
+        incident_par_weighted_sum = 4.582080000001488e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 23797264
+    gc_milliseconds = 0.0
+    hour = 12.916666666666666
+    milliseconds = 30.396791999999998
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 0
+        cached_sector_count = 564
+        cached_turtle_count = 12
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 727296
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 18459120
+        summarysize_bytes = 24931314
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 411562.7451485162
+        absorbed_par_weighted_sum = 4.0249007749813706e8
+        incident_par_sum = 467868.7548570801
+        incident_par_weighted_sum = 4.573843729561995e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 23795008
+    gc_milliseconds = 0.0
+    hour = 13.0
+    milliseconds = 30.8585
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 0
+        cached_sector_count = 611
+        cached_turtle_count = 13
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 727296
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 19997406
+        summarysize_bytes = 26622936
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 410995.55348053045
+        absorbed_par_weighted_sum = 4.0163449043093836e8
+        incident_par_sum = 467225.185514857
+        incident_par_weighted_sum = 4.5641231290189093e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 23795008
+    gc_milliseconds = 0.0
+    hour = 13.083333333333334
+    milliseconds = 30.779041
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 0
+        cached_sector_count = 658
+        cached_turtle_count = 14
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 727296
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 21535660
+        summarysize_bytes = 28314558
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 410909.7315605148
+        absorbed_par_weighted_sum = 4.013652536430041e8
+        incident_par_sum = 467127.0044570549
+        incident_par_weighted_sum = 4.5610642043825406e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 23795008
+    gc_milliseconds = 6.895208
+    hour = 13.166666666666666
+    milliseconds = 37.564625
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 0
+        cached_sector_count = 705
+        cached_turtle_count = 15
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 727296
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 23073946
+        summarysize_bytes = 30006180
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 410560.3035489356
+        absorbed_par_weighted_sum = 4.0061435027283716e8
+        incident_par_sum = 466733.72543334163
+        incident_par_weighted_sum = 4.552534849449287e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 23795008
+    gc_milliseconds = 0.0
+    hour = 13.25
+    milliseconds = 30.389625
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 0
+        cached_sector_count = 752
+        cached_turtle_count = 16
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 727296
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 24612184
+        summarysize_bytes = 31697802
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 410371.9201988489
+        absorbed_par_weighted_sum = 4.002654891825228e8
+        incident_par_sum = 466515.8556932163
+        incident_par_weighted_sum = 4.548565806223273e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 23795008
+    gc_milliseconds = 0.0
+    hour = 13.333333333333334
+    milliseconds = 31.548083
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 0
+        cached_sector_count = 799
+        cached_turtle_count = 17
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 727296
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 26150470
+        summarysize_bytes = 33389424
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 410291.7789107872
+        absorbed_par_weighted_sum = 3.998873638855846e8
+        incident_par_sum = 466425.7238349272
+        incident_par_weighted_sum = 4.5442699345982325e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 23795008
+    gc_milliseconds = 0.0
+    hour = 13.416666666666666
+    milliseconds = 30.968541
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 0
+        cached_sector_count = 846
+        cached_turtle_count = 18
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 727296
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 27688772
+        summarysize_bytes = 35081046
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 410087.8690895717
+        absorbed_par_weighted_sum = 3.991386305813383e8
+        incident_par_sum = 466204.1372777917
+        incident_par_weighted_sum = 4.5357674800556743e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 23797264
+    gc_milliseconds = 8.573583
+    hour = 13.5
+    milliseconds = 38.730833
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 0
+        cached_sector_count = 893
+        cached_turtle_count = 19
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 727296
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 29227034
+        summarysize_bytes = 36772668
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 409655.07835293625
+        absorbed_par_weighted_sum = 3.983775984655985e8
+        incident_par_sum = 465712.11639231053
+        incident_par_weighted_sum = 4.5271192220768946e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 23795008
+    gc_milliseconds = 6.885
+    hour = 13.583333333333334
+    milliseconds = 37.439042
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 0
+        cached_sector_count = 940
+        cached_turtle_count = 20
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 727296
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 30765288
+        summarysize_bytes = 38464290
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 409898.12248990644
+        absorbed_par_weighted_sum = 3.9827853426102483e8
+        incident_par_sum = 465991.8274542097
+        incident_par_weighted_sum = 4.525994671500238e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 23797264
+    gc_milliseconds = 8.255082999999999
+    hour = 13.666666666666666
+    milliseconds = 38.738209000000005
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 0
+        cached_sector_count = 987
+        cached_turtle_count = 21
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 727296
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 32303542
+        summarysize_bytes = 40155912
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 409779.5525274586
+        absorbed_par_weighted_sum = 3.97938452778318e8
+        incident_par_sum = 465855.37026123283
+        incident_par_weighted_sum = 4.5221306122919345e8
+        receivers = 1894
+
+    [configurations.moving_sun_summary]
+    median_allocated_bytes = 2.3795008e7
+    median_milliseconds = 31.4084375
+    minimum_milliseconds = 30.389625
+    p90_milliseconds = 38.7315706
+    samples = 20
+    total_gc_milliseconds = 39.026041
+
+    [configurations.options]
+    all_in_turtle = false
+    cache_radiation = true
+    nir_interception = false
+    pixel_size_m = 0.01
+    scattering = false
+    sectors = 46
+    toricity = false
+
+    [[configurations.same_hour]]
+    allocated_bytes = 1606320
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 1.02075
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1606320
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.7993330000000001
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1606320
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.7911250000000001
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1606320
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.8282079999999999
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1606320
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.930583
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1606320
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.795875
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1606320
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.766541
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1606320
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.7809159999999999
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1606320
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.79475
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1606320
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.78025
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1606320
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.8415
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1606320
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.795584
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1606320
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.796959
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1606320
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.811875
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1606320
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.7706670000000001
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1606320
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.794666
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1606320
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.759708
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1606320
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.7550410000000001
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1606320
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.800583
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1606320
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.769625
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 411438.3456646324
+        absorbed_par_weighted_sum = 4.0441161459189093e8
+        incident_par_sum = 467722.9056289887
+        incident_par_weighted_sum = 4.595672324395693e8
+        receivers = 1894
+
+    [configurations.same_hour_summary]
+    median_allocated_bytes = 1.60632e6
+    median_milliseconds = 0.795167
+    minimum_milliseconds = 0.7550410000000001
+    p90_milliseconds = 0.8504083000000002
+    samples = 20
+    total_gc_milliseconds = 0.0
+[[configurations]]
+name = "136_directions_5mm_scattering_toric"
+
+    [configurations.cache_after_moving_sun]
+    cached_full_response_sector_count = 2877
+    cached_sector_count = 2877
+    cached_turtle_count = 21
+    component_metadata_bytes = 60752
+    component_metadata_count = 1894
+    estimated_entry_bytes = 6242624
+    full_response_enabled = true
+    memory_limit_bytes = 536870912
+    mode = "partial"
+    node_metadata_bytes = 247757
+    node_metadata_count = 1894
+    resident_bytes = 367251318
+    summarysize_bytes = 369160834
+
+    [configurations.cache_after_same_hour]
+    cached_full_response_sector_count = 137
+    cached_sector_count = 137
+    cached_turtle_count = 1
+    component_metadata_bytes = 60752
+    component_metadata_count = 1894
+    estimated_entry_bytes = 6242624
+    full_response_enabled = true
+    memory_limit_bytes = 536870912
+    mode = "partial"
+    node_metadata_bytes = 247757
+    node_metadata_count = 1894
+    resident_bytes = 17488158
+    summarysize_bytes = 21989578
+
+    [configurations.cache_after_setup]
+    cached_full_response_sector_count = 137
+    cached_sector_count = 137
+    cached_turtle_count = 1
+    component_metadata_bytes = 60752
+    component_metadata_count = 1894
+    estimated_entry_bytes = 6242624
+    full_response_enabled = true
+    memory_limit_bytes = 536870912
+    mode = "partial"
+    node_metadata_bytes = 247757
+    node_metadata_count = 1894
+    resident_bytes = 17488158
+    summarysize_bytes = 21989578
+
+    [configurations.cold_setup_after_JIT]
+    allocated_bytes = 1011129120
+    gc_milliseconds = 180.112665
+    hour = 12.0
+    milliseconds = 1901.046
+
+        [configurations.cold_setup_after_JIT.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+
+    [[configurations.moving_sun]]
+    allocated_bytes = 1005410816
+    gc_milliseconds = 125.487085
+    hour = 12.083333333333334
+    milliseconds = 1833.704083
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 274
+        cached_sector_count = 274
+        cached_turtle_count = 2
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 6242624
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 34976316
+        summarysize_bytes = 39348100
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 406302.8370282926
+        absorbed_par_weighted_sum = 3.9679064858621275e8
+        incident_par_sum = 461993.03942725825
+        incident_par_weighted_sum = 4.5091331038020986e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 1005403744
+    gc_milliseconds = 173.646917
+    hour = 12.166666666666666
+    milliseconds = 1870.4633749999998
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 411
+        cached_sector_count = 411
+        cached_turtle_count = 3
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 6242624
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 52464474
+        summarysize_bytes = 56706622
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 406275.3613575023
+        absorbed_par_weighted_sum = 3.966094112327813e8
+        incident_par_sum = 461958.21973000455
+        incident_par_weighted_sum = 4.507072709521277e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 1005404464
+    gc_milliseconds = 176.446415
+    hour = 12.25
+    milliseconds = 1901.35075
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 548
+        cached_sector_count = 548
+        cached_turtle_count = 4
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 6242624
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 69952632
+        summarysize_bytes = 74065144
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 406428.1943219883
+        absorbed_par_weighted_sum = 3.965698179320367e8
+        incident_par_sum = 462129.86459843186
+        incident_par_weighted_sum = 4.506622358515911e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 1005421488
+    gc_milliseconds = 172.02658300000002
+    hour = 12.333333333333334
+    milliseconds = 1881.696875
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 685
+        cached_sector_count = 685
+        cached_turtle_count = 5
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 6242624
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 87440790
+        summarysize_bytes = 91423666
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 406431.61601384176
+        absorbed_par_weighted_sum = 3.963885256264287e8
+        incident_par_sum = 462132.658349571
+        incident_par_weighted_sum = 4.5045620541032296e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 1005412944
+    gc_milliseconds = 169.717418
+    hour = 12.416666666666666
+    milliseconds = 1877.8115
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 822
+        cached_sector_count = 822
+        cached_turtle_count = 6
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 6242624
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 104928948
+        summarysize_bytes = 108782188
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 406612.8226882066
+        absorbed_par_weighted_sum = 3.963232801610939e8
+        incident_par_sum = 462339.2334925091
+        incident_par_weighted_sum = 4.5038203304373723e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 1005430496
+    gc_milliseconds = 162.158334
+    hour = 12.5
+    milliseconds = 1858.511542
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 959
+        cached_sector_count = 959
+        cached_turtle_count = 7
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 6242624
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 122417106
+        summarysize_bytes = 126140710
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 406764.00947669393
+        absorbed_par_weighted_sum = 3.962712713876787e8
+        incident_par_sum = 462510.6996146709
+        incident_par_weighted_sum = 4.503229236639817e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 1005421184
+    gc_milliseconds = 179.107914
+    hour = 12.583333333333334
+    milliseconds = 1890.403708
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 1096
+        cached_sector_count = 1096
+        cached_turtle_count = 8
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 6242624
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 139905264
+        summarysize_bytes = 143499232
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 406874.072415413
+        absorbed_par_weighted_sum = 3.9614405773455435e8
+        incident_par_sum = 462636.5056138908
+        incident_par_weighted_sum = 4.5017843934082246e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 1003589360
+    gc_milliseconds = 169.374876
+    hour = 12.666666666666666
+    milliseconds = 1898.977208
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 1233
+        cached_sector_count = 1233
+        cached_turtle_count = 9
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 6242624
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 157393422
+        summarysize_bytes = 160857754
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 406980.50290331617
+        absorbed_par_weighted_sum = 3.959775619387796e8
+        incident_par_sum = 462759.7003109206
+        incident_par_weighted_sum = 4.499894618301877e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 1005417600
+    gc_milliseconds = 135.238835
+    hour = 12.75
+    milliseconds = 1851.592458
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 1370
+        cached_sector_count = 1370
+        cached_turtle_count = 10
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 6242624
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 174881580
+        summarysize_bytes = 178216276
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 406819.03344492696
+        absorbed_par_weighted_sum = 3.956345760042082e8
+        incident_par_sum = 462573.7846450381
+        incident_par_weighted_sum = 4.4959966338927895e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 1005421488
+    gc_milliseconds = 175.240957
+    hour = 12.833333333333334
+    milliseconds = 1903.1556659999999
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 1507
+        cached_sector_count = 1507
+        cached_turtle_count = 11
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 6242624
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 192369738
+        summarysize_bytes = 195575614
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 406832.18394570367
+        absorbed_par_weighted_sum = 3.9538187347250336e8
+        incident_par_sum = 462589.23431685223
+        incident_par_weighted_sum = 4.493125201894297e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 1005428336
+    gc_milliseconds = 169.089249
+    hour = 12.916666666666666
+    milliseconds = 1927.079583
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 1644
+        cached_sector_count = 1644
+        cached_turtle_count = 12
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 6242624
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 209857896
+        summarysize_bytes = 212934136
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 406630.67743356666
+        absorbed_par_weighted_sum = 3.948595128586784e8
+        incident_par_sum = 462362.1612259158
+        incident_par_weighted_sum = 4.487191409756187e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 1005413760
+    gc_milliseconds = 160.113041
+    hour = 13.0
+    milliseconds = 1875.5187090000002
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 1781
+        cached_sector_count = 1781
+        cached_turtle_count = 13
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 6242624
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 227346054
+        summarysize_bytes = 230292658
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 406193.8225539813
+        absorbed_par_weighted_sum = 3.941601319541501e8
+        incident_par_sum = 461865.07891117583
+        incident_par_weighted_sum = 4.4792458184807247e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 1003586192
+    gc_milliseconds = 177.254251
+    hour = 13.083333333333334
+    milliseconds = 1924.9575000000002
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 1918
+        cached_sector_count = 1918
+        cached_turtle_count = 14
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 6242624
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 244834212
+        summarysize_bytes = 247651180
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 406016.0019019996
+        absorbed_par_weighted_sum = 3.935521444536366e8
+        incident_par_sum = 461668.4151916169
+        incident_par_weighted_sum = 4.472340275144926e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 1005412768
+    gc_milliseconds = 129.440209
+    hour = 13.166666666666666
+    milliseconds = 1895.521958
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 2055
+        cached_sector_count = 2055
+        cached_turtle_count = 15
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 6242624
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 262322370
+        summarysize_bytes = 265009702
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 405690.60205422796
+        absorbed_par_weighted_sum = 3.929715292596494e8
+        incident_par_sum = 461296.66737543326
+        incident_par_weighted_sum = 4.4657409774161994e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 1005427488
+    gc_milliseconds = 159.447915
+    hour = 13.25
+    milliseconds = 1891.39975
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 2192
+        cached_sector_count = 2192
+        cached_turtle_count = 16
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 6242624
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 279810528
+        summarysize_bytes = 282368224
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 405690.52308785013
+        absorbed_par_weighted_sum = 3.925829021729209e8
+        incident_par_sum = 461300.33214194333
+        incident_par_weighted_sum = 4.4613255603342134e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 1005415488
+    gc_milliseconds = 165.06079000000003
+    hour = 13.333333333333334
+    milliseconds = 1919.312666
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 2329
+        cached_sector_count = 2329
+        cached_turtle_count = 17
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 6242624
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 297298686
+        summarysize_bytes = 299726746
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 405474.99671977
+        absorbed_par_weighted_sum = 3.9209373520359176e8
+        incident_par_sum = 461054.31084760063
+        incident_par_weighted_sum = 4.4557657483582145e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 1005407520
+    gc_milliseconds = 131.148541
+    hour = 13.416666666666666
+    milliseconds = 1888.26575
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 2466
+        cached_sector_count = 2466
+        cached_turtle_count = 18
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 6242624
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 314786844
+        summarysize_bytes = 317085268
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 405301.5683817135
+        absorbed_par_weighted_sum = 3.915163858197471e8
+        incident_par_sum = 460860.55025764724
+        incident_par_weighted_sum = 4.449206302357989e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 1005403440
+    gc_milliseconds = 172.84187500000002
+    hour = 13.5
+    milliseconds = 1897.928667
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 2603
+        cached_sector_count = 2603
+        cached_turtle_count = 19
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 6242624
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 332275002
+        summarysize_bytes = 334443790
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 405426.5190775792
+        absorbed_par_weighted_sum = 3.91221130118049e8
+        incident_par_sum = 461009.1394490582
+        incident_par_weighted_sum = 4.445854809287671e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 1005405968
+    gc_milliseconds = 165.677583
+    hour = 13.583333333333334
+    milliseconds = 1872.177833
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 2740
+        cached_sector_count = 2740
+        cached_turtle_count = 20
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 6242624
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 349763160
+        summarysize_bytes = 351802312
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 405398.16884653585
+        absorbed_par_weighted_sum = 3.910079137140568e8
+        incident_par_sum = 460974.56681983994
+        incident_par_weighted_sum = 4.443431727607446e8
+        receivers = 1894
+    [[configurations.moving_sun]]
+    allocated_bytes = 1005422320
+    gc_milliseconds = 177.75679
+    hour = 13.666666666666666
+    milliseconds = 1893.882792
+
+        [configurations.moving_sun.cache_after]
+        cached_full_response_sector_count = 2877
+        cached_sector_count = 2877
+        cached_turtle_count = 21
+        component_metadata_bytes = 60752
+        component_metadata_count = 1894
+        estimated_entry_bytes = 6242624
+        full_response_enabled = true
+        memory_limit_bytes = 536870912
+        mode = "partial"
+        node_metadata_bytes = 247757
+        node_metadata_count = 1894
+        resident_bytes = 367251318
+        summarysize_bytes = 369160834
+
+        [configurations.moving_sun.checksum]
+        absorbed_par_sum = 405427.32442959765
+        absorbed_par_weighted_sum = 3.907468781589489e8
+        incident_par_sum = 461009.3920779958
+        incident_par_weighted_sum = 4.4404678424229556e8
+        receivers = 1894
+
+    [configurations.moving_sun_summary]
+    median_allocated_bytes = 1.005413352e9
+    median_milliseconds = 1890.9017290000002
+    minimum_milliseconds = 1833.704083
+    p90_milliseconds = 1919.8771494
+    samples = 20
+    total_gc_milliseconds = 3246.275578
+
+    [configurations.options]
+    all_in_turtle = false
+    cache_radiation = true
+    nir_interception = false
+    pixel_size_m = 0.005
+    scattering = true
+    sectors = 136
+    toricity = true
+
+    [[configurations.same_hour]]
+    allocated_bytes = 1899824
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 1.0237910000000001
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1899824
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.958042
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1899824
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.9904160000000001
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1899824
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 1.022375
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1899824
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 1.031375
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1899824
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.9273750000000001
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1899824
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.904833
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1899824
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.927208
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1899824
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.917208
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1899824
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.9175
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1899824
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.935334
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1899824
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.9226660000000001
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1899824
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.914125
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1899824
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.8983329999999999
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1899824
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.896709
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1899824
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.904709
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1899824
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.903125
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1899824
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 0.931209
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1899824
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 1.101084
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+    [[configurations.same_hour]]
+    allocated_bytes = 1899824
+    gc_milliseconds = 0.0
+    hour = 12.0
+    milliseconds = 1.333292
+
+        [configurations.same_hour.checksum]
+        absorbed_par_sum = 406483.90302928694
+        absorbed_par_weighted_sum = 3.971476501940938e8
+        incident_par_sum = 462201.09895292285
+        incident_par_weighted_sum = 4.513189784214181e8
+        receivers = 1894
+
+    [configurations.same_hour_summary]
+    median_allocated_bytes = 1.899824e6
+    median_milliseconds = 0.9272915
+    minimum_milliseconds = 0.896709
+    p90_milliseconds = 1.0383459000000002
+    samples = 20
+    total_gc_milliseconds = 0.0
+
+[dependency_versions]
+AbstractTrees = "0.4.5"
+Adapt = "4.7.4"
+ArgCheck = "2.5.0"
+ArgTools = "1.1.2"
+ArnoldiMethod = "0.4.0"
+Artifacts = "1.11.0"
+Atomix = "1.6.0"
+Base64 = "1.11.0"
+CEnum = "0.5.0"
+CSV = "1.1.0"
+CodeTracking = "3.0.2"
+CodecInflate64 = "0.1.3"
+CodecZlib = "0.7.9"
+ColorSchemes = "3.31.0"
+ColorTypes = "0.12.4"
+ColorVectorSpace = "0.11.0"
+Colors = "0.13.3"
+CompilerCaching = "0.5.1"
+CompilerSupportLibraries_jll = "1.5.5+2"
+CoordinateTransformations = "0.6.4"
+Crayons = "4.2.0"
+DataAPI = "1.16.0"
+DataStrings = "1.1.0"
+DataStructures = "0.19.6"
+DataValueInterfaces = "1.0.0"
+Dates = "1.11.0"
+DelimitedFiles = "1.9.1"
+DocStringExtensions = "0.10.0"
+Downloads = "1.7.0"
+Durations = "1.4.1"
+EarCut_jll = "2.2.4+0"
+EnumX = "1.0.7"
+ExprTools = "0.1.11"
+EzXML = "1.2.3"
+FileWatching = "1.11.0"
+FixedPointNumbers = "0.8.6"
+Future = "1.11.0"
+GPUCompiler = "2.15.1"
+GPUToolbox = "3.4.1"
+GeometryBasics = "0.5.13"
+Graphs = "1.15.0"
+HTTP = "2.11.0"
+HashArrayMappedTries = "0.2.0"
+Highlights = "0.6.3"
+Hwloc_jll = "2.15.0+0"
+Inflate = "0.1.5"
+InputBuffers = "1.1.1"
+InteractiveUtils = "1.11.0"
+IrrationalConstants = "0.2.6"
+IteratorInterfaceExtensions = "1.0.0"
+JLLWrappers = "1.8.0"
+JSON = "1.11.0"
+JuliaSyntaxHighlighting = "1.12.0"
+KernelAbstractions = "0.10.1"
+KernelInterface = "0.4.1"
+LLVM = "10.2.1"
+LLVMExtra_jll = "0.0.53+0"
+LLVMOpenMP_jll = "23.1.1+0"
+LMDB = "3.0.1"
+LMDB_jll = "1.0.0+0"
+LaTeXStrings = "1.4.1"
+LibCURL = "1.0.0"
+LibCURL_jll = "8.18.0+1"
+LibGit2 = "1.11.0"
+LibGit2_jll = "1.9.1+0"
+LibSSH2_jll = "1.11.104+0"
+LibTracyClient_jll = "0.13.1+0"
+Libdl = "1.11.0"
+Libiconv_jll = "1.18.0+0"
+LinearAlgebra = "1.13.0"
+LogExpFunctions = "1.0.3"
+Logging = "1.11.0"
+MacroTools = "0.5.16"
+Markdown = "1.11.0"
+MetaGraphsNext = "0.8.0"
+Mmap = "1.11.0"
+MozillaCACerts_jll = "2026.8.13"
+MultiScaleTreeGraph = "0.16.0"
+MutableNamedTuples = "0.1.3"
+MyterialColors = "0.3.0"
+NetworkOptions = "1.3.0"
+OpenBLAS_jll = "0.3.30+0"
+OpenLibm_jll = "0.8.7+0"
+OpenSSL_jll = "3.5.6+0"
+OpenSpecFun_jll = "0.5.6+0"
+OrderedCollections = "2.0.3"
+PCRE2_jll = "10.46.0+0"
+Parameters = "0.13.1"
+Parsers = "3.0.0"
+Pkg = "1.13.0"
+PlantGeom = "0.20.0"
+PlantMeteo = "0.9.1"
+PooledArrays = "1.4.3"
+PrecompileTools = "1.3.4"
+Preferences = "1.6.1"
+PrettyTables = "3.5.0"
+Printf = "1.11.0"
+ProgressLogging = "0.1.6"
+Quaternions = "0.7.7"
+REPL = "1.11.0"
+Random = "1.11.0"
+Random123 = "1.7.1"
+RandomNumbers = "1.6.0"
+RealDot = "0.1.0"
+RecipesBase = "1.4.0"
+Reexport = "1.2.2"
+Requires = "1.3.1"
+Reseau = "1.6.0"
+Rotations = "1.7.1"
+SHA = "1.0.0"
+SLEEF_jll = "3.9.0+2"
+SPIRVIntrinsics = "1.4.0"
+SPIRV_LLVM_Backend_jll = "23.1.1+8"
+SPIRV_Tools_jll = "2025.4.0+0"
+ScopedValues = "1.6.2"
+Scratch = "1.3.0"
+SentinelArrays = "1.4.10"
+Serialization = "1.11.0"
+SimpleTraits = "0.9.6"
+Sockets = "1.11.0"
+SparseArrays = "1.13.0"
+SpecialFunctions = "2.9.0"
+StaticArrays = "1.9.23"
+StaticArraysCore = "1.4.4"
+Statistics = "1.11.5"
+StringEncodings = "0.3.7"
+StringManipulation = "0.6.1"
+StructUtils = "2.10.0"
+StyledStrings = "1.11.0"
+SuiteSparse_jll = "7.10.1+0"
+TOML = "1.0.3"
+TableOperations = "1.2.0"
+TableTraits = "1.0.1"
+Tables = "1.14.0"
+Tar = "1.10.0"
+TensorCore = "0.1.1"
+Term = "2.2.1"
+Test = "1.11.0"
+Tracy = "0.1.6"
+TranscodingStreams = "0.11.3"
+TreeSitter = "0.3.2"
+URIs = "1.7.1"
+UUIDs = "1.11.0"
+UnPack = "1.0.2"
+Unicode = "1.11.0"
+UnicodeFun = "0.4.1"
+Unitful = "1.29.0"
+UnsafeAtomics = "0.4.0"
+XLSX = "0.12.4"
+XML = "0.4.6"
+XML2_jll = "2.15.4+0"
+Xorg_libpciaccess_jll = "0.19.0+0"
+YAML = "0.4.17"
+ZipArchives = "2.6.1"
+Zlib_jll = "1.3.1+2"
+Zstd_jll = "1.5.7+1"
+libblastrampoline_jll = "5.15.0+0"
+nghttp2_jll = "1.67.1+0"
+p7zip_jll = "17.8.2+0"
+pocl_standalone_jll = "7.2.2+9"
+tree_sitter_gcn_jll = "0.1.0+0"
+tree_sitter_jll = "0.26.9+0"
+tree_sitter_julia_jll = "0.25.0+0"
+tree_sitter_llvm_jll = "1.1.0+0"
+tree_sitter_ptx_jll = "0.1.0+0"
+tree_sitter_spirv_jll = "0.1.0+0"
+
+[forcing]
+date = "2025-05-15"
+direct_fraction = 0.65
+duration_seconds = 60
+latitude_degrees = 43.61
+par_W_m2 = 270.0
+shortwave_W_m2 = 600.0

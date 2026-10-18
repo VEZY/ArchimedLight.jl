@@ -182,6 +182,20 @@ const SIMPLEPLANT = _load_fixture("simpleplant_16_notoric")
 const SKY_DIRECT = _load_fixture("sky_46_direct")
 const SYNTHETIC = _synthetic_fixture()
 
+function _moving_sun_fixture(; toricity=false, scattering=false)
+    options = _override_options(SIMPLEPLANT.options;
+        turtle_sectors=46, pixel_size=0.02, all_in_turtle=false,
+        cache_radiation=true, cache_pixel_table=false, store_node_metadata=false,
+        toricity, scattering,
+    )
+    sim = ArchimedLight.LightSimulation(SIMPLEPLANT.scene, SIMPLEPLANT.models; options)
+    skies = [ArchimedLight.SkyState(130.0 + 10i, 40.0 + 5i,
+        100.0, 50.0, 0.65, 0.35) for i in 0:4]
+    # Prepare the diffuse responses without visiting any timed sun direction.
+    ArchimedLight.run_light(sim, first(skies); step_duration_seconds=60.0)
+    return (; sim, skies=skies[2:end])
+end
+
 # The comparison script also runs against releases before owner aggregation.
 # New cases have no baseline there; common light-solver cases still compare.
 if isdefined(ArchimedLight, :CompiledComponentAggregation)
@@ -270,6 +284,21 @@ SUITE["Run light"]["series"]["simpleplant prepared cache manual loop"] =
         options = _override_options(SIMPLEPLANT.options; cache_radiation=true, scattering=false);
         cache = ArchimedLight.prepare_light_cache(scene, models, options)
     ) evals = 1
+
+# Fresh setup prevents later BenchmarkTools samples from hitting old sun entries.
+SUITE["Run light"]["series"]["simpleplant four moving suns"] =
+    @benchmarkable ArchimedLight.run_light(sim, skies; step_duration_seconds=60.0) setup = (
+        fixture = _moving_sun_fixture();
+        sim = fixture.sim;
+        skies = fixture.skies
+    ) evals = 1 samples = 3 seconds = 5
+
+SUITE["Run light"]["series"]["simpleplant four moving suns toric scattering"] =
+    @benchmarkable ArchimedLight.run_light(sim, skies; step_duration_seconds=60.0) setup = (
+        fixture = _moving_sun_fixture(; toricity=true, scattering=true);
+        sim = fixture.sim;
+        skies = fixture.skies
+    ) evals = 1 samples = 3 seconds = 5
 
 SUITE["Synthetic"] = BenchmarkGroup()
 SUITE["Synthetic"]["first order stacked plates"] =
