@@ -18,7 +18,7 @@ home = (
     name="ArchimedLight.jl",
     text="Light in three-dimensional plant scenes",
     tagline="Simulate sunlight, shade and scattering from individual organs to crop canopies.",
-    image="assets/archimedlight-logo.svg",
+    image="assets/archimedlight-logo.png",
     actions=[
         (text="Run your first simulation", link="getting_started.html", theme="brand"),
         (text="Explore the model", link="theory_pipeline.html", theme="alt"),
