@@ -1982,8 +1982,17 @@ function _build_light_node_metadata(
         "Unknown node_metadata_attributes: $(join(string.(missing_attributes), ", ")).",
     ))
 
+    # Keep the index local to this preparation, so topology and attribute
+    # updates never reuse stale MTG nodes. Geometry summaries are not MTG nodes.
+    wanted_node_ids = Set(node_ids)
+    mtg_nodes = Dict{Int,Any}()
+    MultiScaleTreeGraph.traverse!(scene.mtg) do node
+        nid = MultiScaleTreeGraph.node_id(node)
+        nid in wanted_node_ids && (mtg_nodes[nid] = node)
+        nothing
+    end
     for nid in node_ids
-        node = _scene_mtg_node(scene, nid)
+        node = get(mtg_nodes, nid, nothing)
         node === nothing && throw(ArgumentError("Geometric node id $nid is absent from the scene MTG."))
         geometry_index = geometry.node_index[nid]
         group = geometry.node_group_by_index[geometry_index]

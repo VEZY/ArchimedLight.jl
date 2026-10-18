@@ -538,8 +538,9 @@ function _component_rows_for_step(
             "object_id" => metadata.object_id[i],
             "item_id" => metadata.item_id[i],
             "component_id" => metadata.component_id[i],
-            "group" => metadata.group[i],
-            "type" => metadata.type[i],
+            # Empty labels denote absent metadata and must be exported as missing.
+            "group" => isempty(metadata.group[i]) ? missing : metadata.group[i],
+            "type" => isempty(metadata.type[i]) ? missing : metadata.type[i],
             "area" => _scene_area(scene, nid, 0.0),
             "barycentre_z" => barycenter[3],
             "sky_fraction" => get(sky_fraction, nid, 0.0),
