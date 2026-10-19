@@ -2,18 +2,16 @@
 CurrentModule = ArchimedLight
 ```
 
-# Welcome to ArchimedLight
+# Fast radiation transfer in 3D scenes
 
-ArchimedLight.jl computes light interception and scattering in three-dimensional
-plant scenes, from individual organs to crop canopies. Read an existing scene
+ArchimedLight.jl computes light interception and scattering in three-dimensional scenes, from individual organs or objects to crop canopies, using a fast radiation transfer model. Read an existing scene
 or build one in Julia, simulate its light environment, and inspect incident and
 absorbed radiation on each organ.
 
 ## Try it in your browser
 
-Move the sun over a wheat plant, then explore scattering, periodic plots,
-pixel resolution and sky sectors. Plant and ground share the same incident PAR
-scale (W m⁻²).
+Here's a live example of a wheat plant in a field, with incident PAR irradiance coloured on the plant and ground.
+**This example is not precomputed; it runs the simulations live in your browser** like it would in a real-world scenario. Move the sun over a wheat plant created using ArchiCrop (Braud et al. 2026), then explore scattering, periodic boundaries (`toricity=true`), pixel resolution (lower is better) and number of sky sectors (higher is better).
 
 ```@raw html
 <figure id="live-wheat" data-state="preview">
