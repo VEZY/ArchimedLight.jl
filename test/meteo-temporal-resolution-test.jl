@@ -234,3 +234,104 @@ end
     )
     @test any(contains("conflicting aliases for `sun_azimuth`"), coordinate_conflict.errors)
 end
+
+@testitem "Radiation timestamp conventions resolve the same untouched interval" tags=[:meteo, :fast, :temporal_resolution] begin
+    using Dates
+    AL = ArchimedLight
+    options = AL.LightOptions()
+    base = (; date=Date(2025, 5, 15), step_duration=3600.0,
+        latitude=43.610, RI_SW_f=200.0)
+    for (convention, stamp) in ((:start, Time(11)), (:end, Time(12)), (:center, Time(11, 30)))
+        row = merge(base, (; hour=stamp, radiation_timestamp=convention))
+        result = AL._resolve_meteo_step(row, options)
+        @test isempty(result.errors)
+        @test (result.step.date, result.step.start_hour, result.step.end_hour) ==
+            (base.date, 11.0, 12.0)
+        @test result.step.duration_seconds == 3600.0
+        @test result.step.ri_sw_f == row.RI_SW_f == 200.0
+        @test row.hour == stamp
+
+        datetime_row = merge(base, (; date=DateTime(base.date, stamp),
+            radiation_timestamp=convention))
+        datetime_result = AL._resolve_meteo_step(datetime_row, options)
+        @test isempty(datetime_result.errors)
+        @test (datetime_result.step.date, datetime_result.step.start_hour,
+            datetime_result.step.end_hour) == (base.date, 11.0, 12.0)
+    end
+    default = AL._resolved_meteo_step_or_error(merge(base, (; hour=Time(11))), options)
+    @test (default.start_hour, default.end_hour, default.solar_time_offset_hours) == (11.0, 12.0, 0.0)
+    authoritative = AL._resolved_meteo_step_or_error(
+        merge(base, (; hour=Time(12), hour_start=Time(10), radiation_timestamp=:end)), options)
+    @test (authoritative.start_hour, authoritative.end_hour) == (10.0, 11.0)
+    invalid = AL._resolve_meteo_step(
+        merge(base, (; hour=Time(12), radiation_timestamp=:instant)), options; row_index=7)
+    @test any(message -> occursin("radiation_timestamp", message) && occursin("7", message), invalid.errors)
+end
+
+@testitem "Radiation timestamps normalize the starting date across midnight" tags=[:meteo, :fast, :temporal_resolution] begin
+    using Dates
+    AL = ArchimedLight
+    options = AL.LightOptions()
+    base = (; date=Date(2025, 1, 1), hour=Time(0), step_duration=3600.0,
+        latitude=43.610, RI_SW_f=0.0)
+    ended = AL._resolved_meteo_step_or_error(merge(base, (; radiation_timestamp=:end)), options)
+    @test (ended.date, ended.start_hour, ended.end_hour) == (Date(2024, 12, 31), 23.0, 24.0)
+    centred = AL._resolved_meteo_step_or_error(merge(base, (; radiation_timestamp=:center)), options)
+    @test (centred.date, centred.start_hour, centred.end_hour) == (Date(2024, 12, 31), 23.5, 24.5)
+    @test base.date == Date(2025, 1, 1) && base.hour == Time(0)
+end
+
+@testitem "Radiation clocks resolve metadata with explicit column precedence" tags=[:meteo, :fast, :temporal_resolution] begin
+    using Dates
+    AL = ArchimedLight
+    options = AL.LightOptions()
+    row = (; date=Date(2025, 5, 15), hour=Time(12), step_duration=3600.0,
+        latitude=43.610, RI_SW_f=200.0)
+    metadata = (; radiation_timestamp=:end, longitude=3.878, utc_offset_hours=0.0)
+    table = AL.PlantMeteo.TimeStepTable([row], metadata)
+    resolved = AL._resolved_meteo_step_or_error(first(table), options)
+    @test (resolved.start_hour, resolved.end_hour) == (11.0, 12.0)
+    @test resolved.solar_time_offset_hours ≈ 3.878 / 15
+    @test first(table).RI_SW_f == 200.0
+
+    overridden = merge(row, (; radiation_timestamp=:center, longitude=0.0, utc_offset_hours=2.0))
+    override_table = AL.PlantMeteo.TimeStepTable([overridden], metadata)
+    override = AL._resolved_meteo_step_or_error(first(override_table), options)
+    @test (override.start_hour, override.end_hour, override.solar_time_offset_hours) == (11.5, 12.5, -2.0)
+
+    fractional = AL._resolved_meteo_step_or_error(
+        merge(row, (; longitude=82.5, utc_offset_hours=5.5)), options)
+    @test fractional.solar_time_offset_hours == 0.0
+    legacy = AL._resolve_meteo_step(merge(row, (; longitude=3.878)), options)
+    @test isempty(legacy.errors)
+    @test legacy.step.solar_time_offset_hours == 0.0
+    @test any(contains("utc_offset_hours"), legacy.warnings)
+    for timezone in ("UTC", "GMT", "Z")
+        utc = AL._resolved_meteo_step_or_error(merge(row, (; longitude=3.878, timezone)), options)
+        @test utc.solar_time_offset_hours ≈ 3.878 / 15
+    end
+    local_clock = AL._resolve_meteo_step(merge(row, (; longitude=3.878, timezone="Europe/Paris")), options)
+    @test any(contains("utc_offset_hours"), local_clock.errors)
+    cest = AL._resolved_meteo_step_or_error(
+        merge(row, (; longitude=3.878, timezone="Europe/Paris", utc_offset_hours=2.0)), options)
+    @test cest.solar_time_offset_hours ≈ 3.878 / 15 - 2
+end
+
+@testitem "Meteo chronology distinguishes repeated civil hours at the DST fall transition" tags=[:meteo, :fast, :temporal_resolution] begin
+    using Dates
+    AL = ArchimedLight
+    options = AL.LightOptions()
+    repeated = (; date=DateTime(2025, 10, 26, 2), step_duration=3600.0,
+        RI_SW_f=0.0, direct_fraction=0.5)
+    metadata = (; latitude=48.8566, longitude=2.3522, timezone="Europe/Paris")
+    rows = [merge(repeated, (; utc_offset_hours=2.0)),
+        merge(repeated, (; utc_offset_hours=1.0))]
+    table = AL.PlantMeteo.TimeStepTable(rows, metadata)
+    @test length(AL.prepare_meteo(table, options)) == 2
+    @test [row.date for row in table] == fill(DateTime(2025, 10, 26, 2), 2)
+    offsets = [AL._resolved_meteo_step_or_error(row, options).utc_offset_hours for row in table]
+    @test offsets == [2.0, 1.0]
+    # Equal civil times really do overlap if the UTC offset did not change.
+    overlap = AL.PlantMeteo.TimeStepTable([rows[1], rows[1]], metadata)
+    @test_throws "invalid overlapping meteo steps at row 2" AL.prepare_meteo(overlap, options)
+end

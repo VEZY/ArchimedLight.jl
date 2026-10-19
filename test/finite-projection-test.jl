@@ -176,3 +176,63 @@ end
         @test isapprox(step.sky_fraction[1], 1.0; atol=2e-6)
     end
 end
+
+@testitem "Raster storage preserves stable ties, duplicates and clipped counts" tags=[:core, :fast, :finite_projection] begin
+    AL = ArchimedLight
+    direction = (0.0, 0.0, 1.0)
+    # Rasterize the same triangle repeatedly, including an equal-depth duplicate
+    # from node 3. These hits participate in native scattering stack traversal.
+    surfaces = ((2, 1.0), (3, 2.0), (1, 2.0), (3, 2.0))
+    function rasterize(upper_hit, with_scratch, unit_scale; x=0.0, toricity=false)
+        hits = upper_hit ? AL.DenseUpperPixelHits(16) : AL.DensePixelHits(AL.SmallHitStack, 16)
+        node_hits = zeros(Int, 3)
+        mesh_area = zeros(3)
+        pixels_area = zeros(3)
+        scratch = AL.RasterScanlineScratch()
+        for (node, z) in surfaces
+            args = (hits, node_hits, mesh_area, pixels_area, node, node,
+                (x, 0.0, z), (x + 1.0, 0.0, z), (x, 1.0, z), direction,
+                0.0, 0.0, 0.25, 0.25, 0.0625, 4, 4, toricity,
+                upper_hit, unit_scale, AL.SmallHitStack)
+            if with_scratch
+                AL._project_triangle!(args..., scratch)
+            else
+                AL._project_triangle!(args...)
+            end
+        end
+        # Materialize sorted stacks before comparing different storage policies.
+        stacks = Dict{Int,Vector{AL.HitRecord}}()
+        for pixel in 1:16
+            stack = get(hits, pixel, nothing)
+            stack === nothing && continue
+            AL._sort_hit_stack!(stack)
+            stacks[pixel] = collect(stack)
+        end
+        return (; stacks, node_hits, mesh_area, pixels_area)
+    end
+
+    for with_scratch in (false, true), unit_scale in (1.0f0, 100.0f0)
+        all_hits = rasterize(false, with_scratch, unit_scale)
+        top_hits = rasterize(true, with_scratch, unit_scale)
+        @test length(all_hits.stacks) == length(top_hits.stacks) == 10
+        @test all(stack -> stack == [(2.0, 3), (2.0, 1), (2.0, 3), (1.0, 2)],
+            values(all_hits.stacks))
+        @test all(stack -> stack == [(2.0, 3)], values(top_hits.stacks))
+        @test all_hits.node_hits == top_hits.node_hits == [10, 10, 20]
+        @test all_hits.mesh_area == top_hits.mesh_area == [0.5, 0.5, 1.0]
+        @test all_hits.pixels_area == top_hits.pixels_area == [0.625, 0.625, 1.25]
+    end
+
+    # The part outside a finite plot is discarded, while the periodic plot wraps
+    # it. Area-ratio denominators still count the complete projected triangle.
+    for upper_hit in (false, true), with_scratch in (false, true)
+        finite = rasterize(upper_hit, with_scratch, 1.0f0; x=0.75)
+        periodic = rasterize(upper_hit, with_scratch, 1.0f0; x=0.75, toricity=true)
+        @test length(finite.stacks) == 4
+        @test length(periodic.stacks) == 10
+        @test finite.node_hits == [4, 4, 8]
+        @test periodic.node_hits == [10, 10, 20]
+        @test finite.mesh_area == periodic.mesh_area == [0.5, 0.5, 1.0]
+        @test finite.pixels_area == periodic.pixels_area == [0.625, 0.625, 1.25]
+    end
+end

@@ -111,10 +111,35 @@ struct PerpendicularProjectionWorkspace
 end
 
 function PerpendicularProjectionWorkspace(vertices, faces)
-    used = sort!(unique!([Int(i) for face in faces for i in face]))
-    lo = reduce((a, b) -> min.(a, b), (vertices[i] for i in used))
-    hi = reduce((a, b) -> max.(a, b), (vertices[i] for i in used))
-    center = StaticArrays.SVector{3,Float64}((lo + hi) / 2)
+    # Enumerate used vertices in index order without sorting or temporary
+    # broadcast/reduction containers; this also keeps the constructor portable
+    # to the browser compiler. Preserve the input coordinate arithmetic.
+    mask = zeros(Bool, length(vertices))
+    n_used = 0
+    for face in faces, index in face
+        i = Int(index)
+        if !mask[i]
+            mask[i] = true
+            n_used += 1
+        end
+    end
+    used = Vector{Int}(undef, n_used)
+    cursor = 0
+    for i in eachindex(mask)
+        if mask[i]
+            used[cursor += 1] = i
+        end
+    end
+    xlo, ylo, zlo = vertices[used[1]]
+    xhi, yhi, zhi = xlo, ylo, zlo
+    for i in used
+        x, y, z = vertices[i]
+        xlo = min(xlo, x); xhi = max(xhi, x)
+        ylo = min(ylo, y); yhi = max(yhi, y)
+        zlo = min(zlo, z); zhi = max(zhi, z)
+    end
+    center = StaticArrays.SVector{3,Float64}((xlo + xhi) / 2,
+        (ylo + yhi) / 2, (zlo + zhi) / 2)
     return PerpendicularProjectionWorkspace(
         fill(zero(StaticArrays.SVector{3,Float64}), length(vertices)), used, center,
     )
@@ -2056,18 +2081,18 @@ function _perpendicular_projection_frame!(workspace, vertices, direction, pixel_
     # hits in the historical ground projector. Keep that zero-hit behavior.
     dz == 0 && return nothing
     a = inv(1 + abs(dz))
-    u = StaticArrays.SVector(1 - dx * dx * a, -dx * dy * a, -dx * sign(dz))
-    v = StaticArrays.SVector(-dx * dy * a, 1 - dy * dy * a, -dy * sign(dz))
+    u = StaticArrays.SVector{3,Float64}(1 - dx * dx * a, -dx * dy * a, -dx * sign(dz))
+    v = StaticArrays.SVector{3,Float64}(-dx * dy * a, 1 - dy * dy * a, -dy * sign(dz))
     h = hypot(dx, dy)
     if h > eps(Float64)
-        u = StaticArrays.SVector(-dy / h, dx / h, 0.0)
-        v = StaticArrays.SVector(-dz * dx / h, -dz * dy / h, h)
+        u = StaticArrays.SVector{3,Float64}(-dy / h, dx / h, 0.0)
+        v = StaticArrays.SVector{3,Float64}(-dz * dx / h, -dz * dy / h, h)
     end
     xmin = ymin = Inf
     xmax = ymax = -Inf
     @inbounds for i in workspace.used
         p = vertices[i] - workspace.center
-        q = StaticArrays.SVector(dot(p, u), dot(p, v), dot(p, d))
+        q = StaticArrays.SVector{3,Float64}(dot(p, u), dot(p, v), dot(p, d))
         workspace.vertices[i] = q
         xmin = min(xmin, q[1]); xmax = max(xmax, q[1])
         ymin = min(ymin, q[2]); ymax = max(ymax, q[2])
@@ -2080,7 +2105,7 @@ function _perpendicular_projection_frame!(workspace, vertices, direction, pixel_
     box = (origin_x=ix * px, origin_y=iy * py, xdim=nx * px, ydim=ny * py,
         nx=nx, ny=ny, pix_x=px, pix_y=py, pixel_area=px * py)
     return (;vertices=workspace.vertices, plotbox=box,
-        direction=StaticArrays.SVector(0.0, 0.0, 1.0), area_scale=inv(abs(dz)))
+        direction=StaticArrays.SVector{3,Float64}(0.0, 0.0, 1.0), area_scale=inv(abs(dz)))
 end
 
 function _projection_raster_inputs(vertices, faces, direction, options, plotbox, workspace=nothing)
@@ -2203,8 +2228,8 @@ function _project_triangle!(
     ny::Int,
     toricity::Bool,
     upper_hit::Bool,
-    stack_type::Type,
-)
+    stack_type::Type{S},
+) where {S}
     _project_triangle!(
         pixel_hits,
         node_hits,
@@ -2251,92 +2276,12 @@ function _project_triangle!(
     toricity::Bool,
     upper_hit::Bool,
     unit_scale::Float32,
-    stack_type::Type,
-)
-    u = unit_scale > 0.0f0 ? unit_scale : 1.0f0
-    ox = Float32(origin_x) * u
-    oy = Float32(origin_y) * u
-    pxs = Float32(x_pix) * u
-    pys = Float32(y_pix) * u
-    dirx = Float32(direction[1])
-    diry = Float32(direction[2])
-    dirz = Float32(direction[3])
-    dirz == 0.0f0 && return
-
-    projected1, pix1 = _project_vertex_to_ground_pixel(p1, dirx, diry, dirz, ox, oy, pxs, pys, u)
-    projected2, pix2 = _project_vertex_to_ground_pixel(p2, dirx, diry, dirz, ox, oy, pxs, pys, u)
-    projected3, pix3 = _project_vertex_to_ground_pixel(p3, dirx, diry, dirz, ox, oy, pxs, pys, u)
-
-    iMin = min(floor(Int, pix1[1]), floor(Int, pix2[1]), floor(Int, pix3[1]))
-    iMax = max(ceil(Int, pix1[1]), ceil(Int, pix2[1]), ceil(Int, pix3[1]))
-    jMin = min(floor(Int, pix1[2]), floor(Int, pix2[2]), floor(Int, pix3[2]))
-    jMax = max(ceil(Int, pix1[2]), ceil(Int, pix2[2]), ceil(Int, pix3[2]))
-    kMin = min(floor(Int, pix1[3]), floor(Int, pix2[3]), floor(Int, pix3[3]))
-    kMax = max(ceil(Int, pix1[3]), ceil(Int, pix2[3]), ceil(Int, pix3[3]))
-
-    iLength = (iMax - iMin) + 1
-    iLength <= 0 && return
-
-    minY = fill(jMax, iLength)
-    maxY = fill(jMin, iLength)
-
-    _get_border_pixels(pix1, pix2, iMin, minY, maxY)
-    _get_border_pixels(pix2, pix3, iMin, minY, maxY)
-    _get_border_pixels(pix3, pix1, iMin, minY, maxY)
-
-    normal = _compute_normal((pix1, pix2, pix3))
-    slopeX_f32, slopeY_f32 =
-        if abs(normal[3]) > 1e-5
-            (Float32(normal[1] / normal[3]), Float32(normal[2] / normal[3]))
-        else
-            # Java fallback uses signed direction.z when normal.z is almost zero.
-            dz = Float32(direction[3])
-            (dz * Float32(normal[1]), dz * Float32(normal[2]))
-        end
-
-    z0 = Float32(pix1[3])
-    z0 += slopeX_f32 * (Float32(pix1[1]) - Float32(iMin))
-    z0 += slopeY_f32 * (Float32(pix1[2]) - Float32(jMin))
-
-    tri_proj_area = _triangle_area_xy(projected1, projected2, projected3)
-    nb_hits = 0
-    node_hit_count = node_hits[node_idx]
-    @inbounds for i in iMin:(iMax-1)
-        ni = i - iMin
-        zi = z0 - slopeX_f32 * Float32(ni)
-        ymin_i = minY[ni+1]
-        ymax_i = maxY[ni+1]
-
-        for j in ymin_i:(ymax_i-1)
-            nj = j - jMin
-            zpix = zi - slopeY_f32 * Float32(nj)
-            zpix = clamp(zpix, Float32(kMin), Float32(kMax))
-            nb_hits += 1
-
-            ii, jj =
-                if toricity
-                    (_wrap_index(i, nx), _wrap_index(j, ny))
-                else
-                    (i, j)
-                end
-
-            if toricity || ((0 <= ii < nx) && (0 <= jj < ny))
-                idx = ii + 1 + jj * nx
-                zpix_f32 = Float64(zpix / u)
-                hit = (zpix_f32, stack_node)
-                if upper_hit
-                    _append_upper_hit!(pixel_hits, idx, hit, stack_type)
-                else
-                    _append_hit!(pixel_hits, idx, hit, stack_type)
-                end
-                node_hit_count += 1
-            end
-        end
-    end
-
-    node_hits[node_idx] = node_hit_count
-    projected_mesh_area[node_idx] += tri_proj_area
-    projected_pixels_area[node_idx] += nb_hits * pixel_area
+    stack_type::Type{S},
+) where {S}
+    return _project_triangle!(pixel_hits, node_hits, projected_mesh_area,
+        projected_pixels_area, stack_node, node_idx, p1, p2, p3, direction,
+        origin_x, origin_y, x_pix, y_pix, pixel_area, nx, ny, toricity,
+        upper_hit, unit_scale, stack_type, RasterScanlineScratch())
 end
 
 @inline function _scanline_bounds!(scratch::RasterScanlineScratch, iLength::Int, jMin::Int, jMax::Int)
@@ -2368,9 +2313,43 @@ function _project_triangle!(
     toricity::Bool,
     upper_hit::Bool,
     unit_scale::Float32,
-    stack_type::Type,
+    stack_type::Type{S},
     scratch::RasterScanlineScratch,
-)
+) where {S}
+    write_hit! = (storage, idx, hit) -> upper_hit ?
+        _append_upper_hit!(storage, idx, hit, S) :
+        _append_hit!(storage, idx, hit, S)
+    return _rasterize_triangle!(write_hit!, pixel_hits, node_hits,
+        projected_mesh_area, projected_pixels_area, stack_node, node_idx,
+        p1, p2, p3, direction, origin_x, origin_y, x_pix, y_pix, pixel_area,
+        nx, ny, toricity, unit_scale, scratch)
+end
+
+# Storage is an independent policy: native and browser callers share every
+# projection, scanline, depth and area calculation below.
+function _rasterize_triangle!(
+    write_hit!::F,
+    pixel_hits,
+    node_hits::Vector{Int},
+    projected_mesh_area::Vector{Float64},
+    projected_pixels_area::Vector{Float64},
+    stack_node::Int,
+    node_idx::Int,
+    p1,
+    p2,
+    p3,
+    direction,
+    origin_x::Float64,
+    origin_y::Float64,
+    x_pix::Float64,
+    y_pix::Float64,
+    pixel_area::Float64,
+    nx::Int,
+    ny::Int,
+    toricity::Bool,
+    unit_scale::Float32,
+    scratch::RasterScanlineScratch,
+) where {F}
     u = unit_scale > 0.0f0 ? unit_scale : 1.0f0
     ox = Float32(origin_x) * u
     oy = Float32(origin_y) * u
@@ -2440,11 +2419,7 @@ function _project_triangle!(
                 idx = ii + 1 + jj * nx
                 zpix_f32 = Float64(zpix / u)
                 hit = (zpix_f32, stack_node)
-                if upper_hit
-                    _append_upper_hit!(pixel_hits, idx, hit, stack_type)
-                else
-                    _append_hit!(pixel_hits, idx, hit, stack_type)
-                end
+                write_hit!(pixel_hits, idx, hit)
                 node_hit_count += 1
             end
         end
@@ -3882,8 +3857,8 @@ function _accumulate_direction_projection!(
     toricity::Bool,
     use_upper_hit::Bool,
     unit_scale::Float32,
-    stack_type::Type,
-)
+    stack_type::Type{S},
+) where {S}
     origin_x = plotbox.origin_x
     origin_y = plotbox.origin_y
     pix_x = plotbox.pix_x
@@ -3933,8 +3908,8 @@ function _accumulate_direction_projection_prepared!(
     toricity::Bool,
     use_upper_hit::Bool,
     unit_scale::Float32,
-    stack_type::Type,
-)
+    stack_type::Type{S},
+) where {S}
     origin_x = plotbox.origin_x
     origin_y = plotbox.origin_y
     pix_x = plotbox.pix_x

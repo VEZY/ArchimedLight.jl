@@ -1936,20 +1936,41 @@ function _propagate_scattering_one_band_dense_only(
     dense = _dense_scattering_graph(graph)
     static = dense.static
     initial, coeff = _dense_scattering_band_arrays(graph, initial_power_per_node, coeff_by_node, default_coeff)
+    return _propagate_scattering_arrays(
+        initial, dense.all_hits, coeff, static.to_idx, static.from_idx, static.counts,
+        options.scattering_stop_ratio, options.scattering_max_iter,
+    )
+end
+
+# Array-only numerical core shared by native orchestration and browser WASM.
+# Keep the native reduction and edge iteration order for convergence parity.
+function _propagate_scattering_arrays(
+    initial::Vector{Float64},
+    all_hits::Vector{Float64},
+    coeff::Vector{Float64},
+    to_idx::Vector{Int},
+    from_idx::Vector{Int},
+    counts::Vector{Float64},
+    stop_ratio::Float64,
+    max_iter::Int,
+)
+    n_nodes = length(initial)
+    n_nodes == 0 && return Float64[], 0, true
+
     current = copy(initial)
     next = zeros(Float64, n_nodes)
     added = zeros(Float64, n_nodes)
     hit_energy = zeros(Float64, n_nodes)
     ref = sum(initial)
-    thr = options.scattering_stop_ratio * max(ref, eps(Float64))
+    thr = stop_ratio * max(ref, eps(Float64))
     iterations = 0
 
     converged = false
-    for it in 1:options.scattering_max_iter
+    for it in 1:max_iter
         iterations = it
 
         @inbounds for i in 1:n_nodes
-            nh = dense.all_hits[i]
+            nh = all_hits[i]
             if nh > 0
                 hit_energy[i] = current[i] * coeff[i] / nh / 2.0
             else
@@ -1958,8 +1979,8 @@ function _propagate_scattering_one_band_dense_only(
         end
 
         fill!(next, 0.0)
-        @inbounds for edge_idx in eachindex(static.counts)
-            next[static.to_idx[edge_idx]] += static.counts[edge_idx] * hit_energy[static.from_idx[edge_idx]]
+        @inbounds for edge_idx in eachindex(counts)
+            next[to_idx[edge_idx]] += counts[edge_idx] * hit_energy[from_idx[edge_idx]]
         end
 
         total_next = sum(next)
