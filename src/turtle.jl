@@ -252,14 +252,20 @@ end
 
 function _java_turtle_incoming(n::Int)
     get!(_TURTLE_DIR_CACHE, n) do
-        n == 6 && return _java_turtle_incoming_n6_logged()
-        # Keep n=16 on the exact Java-logged vectors: one near-axis direction has
-        # a sign-sensitive Float32 x component that affects toric border pixels.
-        n == 16 && return _java_turtle_incoming_n16_logged()
-        order = _java_turtle_order(n)
-        order < 0 && error("Unsupported Java turtle sector count: $n. Allowed values: 1, 6, 16, 46, 136, 406.")
-        up = _java_turtle_upward_points(order)
-        [_normalize3_java(u) for u in up]
+        dirs = if n == 6
+            _java_turtle_incoming_n6_logged()
+        elseif n == 16
+            _java_turtle_incoming_n16_logged()
+        else
+            order = _java_turtle_order(n)
+            order < 0 && error("Unsupported Java turtle sector count: $n. Allowed values: 1, 6, 16, 46, 136, 406.")
+            [_normalize3_java(u) for u in _java_turtle_upward_points(order)]
+        end
+        # The first vertex is the exact zenith. Float32 cos(pi/2) leaves a
+        # horizontal residue that can lose a whole row at toric raster borders.
+        # Keep the original vectors only in the explicit Java compatibility path.
+        dirs[1] = StaticArrays.SVector{3,Float64}(0.0, 0.0, 1.0)
+        dirs
     end
 end
 

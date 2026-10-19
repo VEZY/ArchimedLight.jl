@@ -1,12 +1,20 @@
 # Decode vendored geometry and forcing inputs. No light results are loaded.
-using GeometryBasics, JSON3
+using GeometryBasics, JSON3, ArchimedLight
 browser_input_path = joinpath(@__DIR__, "inputs", "input_data.json")
 browser_input_json = JSON3.read(read(browser_input_path, String))
 browser_vertices_flat = Float64.(browser_input_json.vertices)
 browser_faces_flat = Int32.(browser_input_json.faces)
 browser_face_nodes = Int32.(browser_input_json.nodes)
 browser_areas = Float64.(browser_input_json.areas)
-browser_directions_flat = Float64.(browser_input_json.directions)
+# Geometry/weather stay immutable; regenerate the directional quadrature from
+# the current native implementation so fixes also reach browser rebuilds.
+browser_directions_flat = let
+    sky = ArchimedLight.SkyState(0.0, 90.0, 0.0, 0.0, 0.0, 1.0)
+    Float64[coordinate for n in (16, 46, 136)
+        for sector in ArchimedLight.build_turtle(
+            ArchimedLight.LightOptions(; turtle_sectors=n, all_in_turtle=true), sky).sectors
+        for coordinate in sector.direction]
+end
 browser_weather_flat = Float64.(browser_input_json.weather)
 browser_weather_columns = (browser_weather_flat[1:3:end],
     browser_weather_flat[2:3:end], browser_weather_flat[3:3:end])
@@ -20,6 +28,11 @@ browser_params = Float64.(browser_input_json.params)
 @assert length(browser_params) == 58 + 3length(browser_areas)
 @assert all(1 <= i <= length(browser_vertices_flat) ÷ 3 for i in browser_faces_flat)
 @assert all(1 <= i <= length(browser_areas) for i in browser_face_nodes)
+# Node's fresh-native check must transport the same generated directions as
+# the exported page; retained artifact checks keep their matching input data.
+browser_directions_path = joinpath(@__DIR__, "build", "directions.json")
+mkpath(dirname(browser_directions_path))
+JSON3.write(browser_directions_path, browser_directions_flat)
 # Repeat vertices per triangle: scalar colours never interpolate between organs.
 browser_mesh_vertices = Point3f[Point3f(browser_vertices_flat[3i-2],
     browser_vertices_flat[3i-1], browser_vertices_flat[3i]) for i in browser_faces_flat]

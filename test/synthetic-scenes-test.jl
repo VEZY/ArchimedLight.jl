@@ -65,6 +65,76 @@ end
     @test isapprox(get(HelperModule._incident_par_initial_flux(run.budget), 1, 0.0), 100.0; atol=1e-10, rtol=1e-10)
 end
 
+@testitem "Synthetic case coarse toric energy conservation" tags = [:synthetic, :fast, :projection, :toric_energy_conservation] setup = [HelperModule] begin
+    scene = HelperModule._synthetic_horizontal_scene([
+        (x0=0.0, x1=0.5, y0=0.0, y1=1.0, z=1.0, group="upper", type="plate", object_id=1),
+        (x0=0.0, x1=1.0, y0=0.0, y1=1.0, z=0.1, group="lower", type="plate", object_id=2),
+        (x0=0.0, x1=1.0, y0=0.0, y1=1.0, z=0.0, group="soil", type="plate", object_id=-1),
+    ])
+    models = HelperModule._default_synthetic_models()
+    sky = ArchimedLight.SkyState(180.0, 90.0, 100.0, 0.0, 1.0, 0.0)
+
+    for sectors in (1, 6, 16, 46, 136, 406)
+        options = ArchimedLight.LightOptions(; turtle_sectors=sectors, all_in_turtle=true)
+        turtle = ArchimedLight.build_turtle(options, sky)
+        logged = ArchimedLight.build_turtle(
+            ArchimedLight.LightOptions(options; java_logged_turtle_dirs=true), sky,
+        )
+        @test first(turtle.sectors).direction == HelperModule.SVector(0.0, 0.0, 1.0)
+        legacy_zenith = sectors == 1 ? HelperModule.SVector(0.0, 0.0, 1.0) :
+            HelperModule.SVector(3.82137093032941e-15, 4.371138828673793e-8, 1.0)
+        @test first(logged.sectors).direction == legacy_zenith
+        @test [s.direction for s in turtle.sectors[2:end]] == [s.direction for s in logged.sectors[2:end]]
+    end
+
+    # The opaque upper half intercepts 50 J and the full lower plate catches
+    # the remaining 50 J. At 15% scattering, 85 J are initially absorbed.
+    # This oracle does not depend on stored reference files or raster counts.
+    for sectors in (6, 16, 46), pixel_size in (0.05, 0.4), area_ratio in (false, true), scattering in (false, true)
+        @testset "sectors=$sectors pixel=$pixel_size area_ratio=$area_ratio scattering=$scattering" begin
+            options = ArchimedLight.LightOptions(
+                HelperModule._synthetic_options(
+                    sectors=sectors, all_in_turtle=true, toricity=true,
+                    pixel_size=pixel_size, scattering=scattering,
+                );
+                area_ratio=area_ratio,
+            )
+            sim = ArchimedLight.LightSimulation(scene, models; options=options)
+            step = ArchimedLight.run_light(sim, sky; step_duration_seconds=1.0)
+            budget = step.budget
+            for (node_id, expected_flux) in ((1, 100.0), (2, 50.0), (3, 0.0))
+                @test isapprox(
+                    get(budget.incident_flux.initial.par, node_id, 0.0),
+                    expected_flux;
+                    atol=1e-5, rtol=1e-7,
+                )
+            end
+            @test isapprox(sum(values(budget.incident_energy.initial.par)), 100.0; atol=1e-5, rtol=1e-7)
+            @test isapprox(sum(values(budget.absorbed_energy.initial.par)), 85.0; atol=1e-5, rtol=1e-7)
+            # Repeated scattering can raise cumulative incident energy above
+            # 100 J; a passive scene must still absorb at most the supplied 100 J.
+            absorbed_total = sum(values(budget.absorbed_energy.total.par))
+            @test 85.0 - 1e-5 <= absorbed_total <= 100.0 + 1e-5
+        end
+    end
+
+    # A full horizontal periodic plate also receives exactly 100 J when the
+    # sun is oblique, both with an explicit beam and after turtle redistribution.
+    full_plate = HelperModule._synthetic_horizontal_scene([
+        (x0=0.0, x1=1.0, y0=0.0, y1=1.0, z=1.0, group="plate", type="plate", object_id=1),
+    ])
+    oblique_sky = ArchimedLight.SkyState(135.0, 35.0, 100.0, 0.0, 1.0, 0.0)
+    for all_in_turtle in (false, true)
+        options = HelperModule._synthetic_options(
+            sectors=16, all_in_turtle=all_in_turtle, toricity=true, pixel_size=0.05,
+        )
+        sim = ArchimedLight.LightSimulation(full_plate, models; options=options)
+        budget = ArchimedLight.run_light(sim, oblique_sky; step_duration_seconds=1.0).budget
+        @test isapprox(sum(values(budget.incident_energy.initial.par)), 100.0; atol=1e-5, rtol=1e-7)
+        @test isapprox(sum(values(budget.absorbed_energy.initial.par)), 85.0; atol=1e-5, rtol=1e-7)
+    end
+end
+
 @testitem "Synthetic case stacked_scattering" tags = [:synthetic, :fast, :stacked_scattering] setup = [HelperModule] begin
     scene = HelperModule._synthetic_horizontal_scene([
         (x0=0.0, x1=1.0, y0=0.0, y1=1.0, z=1.0, group="upper", type="plate", object_id=1),

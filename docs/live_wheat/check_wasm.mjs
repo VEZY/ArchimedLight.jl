@@ -6,7 +6,8 @@ import {fileURLToPath} from 'node:url';
 const dir = path.dirname(fileURLToPath(import.meta.url));
 // Rebuilds must check fresh public-run_light output; a clean checkout can still
 // verify the committed artifact against its matching retained references.
-const referenceDirectory = process.argv.includes('--current-native') ? 'build' : 'fixtures';
+const currentNative = process.argv.includes('--current-native');
+const referenceDirectory = currentNative ? 'build' : 'fixtures';
 const readJSON = name => JSON.parse(fs.readFileSync(path.join(dir, name === 'input_data.json' ? 'inputs' : referenceDirectory, name), 'utf8'));
 const bytes = fs.readFileSync(path.join(dir, '../src/assets/live-wheat/light.wasm'));
 // Bonito's static export stores the Uint8 Wasm vector in its MessagePack
@@ -44,6 +45,14 @@ for (const name of ['make_data', 'configure', 'solve', 'get_par', 'new_f64', 'se
     if (typeof k[name] !== 'function') throw new Error('Missing Wasm export: ' + name);
 }
 const input = readJSON('input_data.json');
+// Browser rebuilds use the current native turtle, while a clean checkout's
+// committed artifact retains the directions matching its retained references.
+const directionSource = currentNative ? 'build/directions.json' : 'inputs/input_data.json';
+if (currentNative) input.directions = readJSON('directions.json');
+if (!Array.isArray(input.directions) || input.directions.length !== 3 * (16 + 46 + 136)
+    || !input.directions.every(Number.isFinite)) {
+    throw new Error('Expected finite native 16-, 46-, and 136-sector directions from ' + directionSource);
+}
 const receiverCount = input.areas.length;
 function f64(values) {
     const vector = k.new_f64(values.length);
@@ -134,7 +143,7 @@ for (let i = 0; i < transitionRefs.length; i++) {
 const noonReference = refs.find(ref => ref.hour === 12);
 if (!noonReference) throw new Error('Missing default noon reference');
 transition_checks.push(checkReference(noonReference, 'restore default noon', configure(defaults)));
-const report = {engine: process.version, reference_directory: referenceDirectory, initialization_milliseconds,
+const report = {engine: process.version, reference_directory: referenceDirectory, direction_source: directionSource, initialization_milliseconds,
     imports: moduleImports, wasm_bytes: bytes.length, receivers: receiverCount, tolerance,
     checks, configured_checks, transition_checks};
 fs.mkdirSync(path.join(dir, 'build'), {recursive: true});
