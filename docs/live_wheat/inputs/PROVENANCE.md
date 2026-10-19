@@ -27,9 +27,16 @@ The weather is a 24-hour slice for **15 May 2025** from Open-Meteo's historical
 archive fetched with PlantMeteo, at latitude 43.610°, longitude 3.878°
 (Montpellier). The source annual CSV has 8,760 rows and SHA-256
 `a2b146cb531bcc4cd905a3ee25bb5bb40fa6d574514306be632c40fbaf1b44d2`.
-These are weather estimates, not an instrumented crop experiment. The browser
-interpolates them into centred one-minute snapshots, without claiming minute
-observations or a new daily energy budget.
+These are weather estimates, not an instrumented crop experiment. The original
+request used PlantMeteo's default UTC timezone. Open-Meteo radiation timestamps
+mark the end of the preceding hourly mean, as specified in the
+[historical API documentation](https://open-meteo.com/en/docs/historical-weather-api).
+The browser interpolates radiation components normalized by native hourly
+extraterrestrial irradiance, then restores the instantaneous irradiance using
+Montpellier's longitude and solar elevation. The snapshots are rounded to the
+minute, without claiming minute observations or exact hourly energy conservation.
+The demo omits diffuse twilight after the solar centre sets; its clock is UTC
+(Montpellier civil time is UTC+2 on this date).
 
 ## Seven-buffer contract
 
@@ -39,8 +46,9 @@ observations or a new daily energy budget.
 - `areas`: represented receiver surface area in m² (1,894 values).
 - `directions`: native 16, 46 and 136 diffuse turtle direction sets, in that
   order (594 XYZ values). These are geometric directions, not irradiance.
-- `weather`: 24 triples `[SW, PAR, direct_SW]` in W m⁻² at interval centres
-  00:30 through 23:30 (72 values).
+- `weather`: 24 triples `[SW, PAR, direct_SW]` in W m⁻² at UTC interval ends
+  00:00 through 23:00, representing the preceding hour (72 values). Their
+  centres are 23:30 on the preceding day through 22:30 on the selected day.
 - `params`: active raster box, latitude and day of year; seven raster boxes
   for the resolution choices; receiver scattering coefficients,
   transparencies and ground mask (5,740 values). The exact one-based layout

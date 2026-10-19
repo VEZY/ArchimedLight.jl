@@ -9,21 +9,19 @@ WGLMakie.activate!()
 @assert length(browser_vertex_nodes) == length(WGLMakie.GeometryBasics.coordinates(browser_mesh))
 @assert all(0 <= i < length(browser_initial_par) for i in browser_vertex_nodes)
 browser_vertex_par = Float32[browser_initial_par[Int(i) + 1] for i in browser_vertex_nodes]
-browser_points = WGLMakie.GeometryBasics.coordinates(browser_mesh)
-browser_xbounds = extrema(p[1] for p in browser_points)
-browser_ybounds = extrema(p[2] for p in browser_points)
 
 # One native WGLMakie mesh and thermal scale for plant AND ground.
 # Its scalar vertex_color buffer changes after each Wasm solve; geometry stays fixed.
 browser_figure = WGLMakie.Figure(size=(1000, 490), fontsize=19, backgroundcolor=:white)
 WGLMakie.Label(browser_figure[0, 1], "Wheat light interception";
     fontsize=25, tellwidth=false)
-browser_axis = WGLMakie.Axis3(browser_figure[1, 1]; aspect=:data, viewmode=:fitzoom,
-    azimuth=-pi/4, elevation=pi/5, xlabel="x (m)", ylabel="y (m)", zlabel="z (m)",
-    limits=(browser_xbounds, browser_ybounds, (-0.01, 1.1)))
+# LScene's Camera3D exports WGLMakie's browser orbit controls. Axis3's
+# interactions require Julia callbacks and cannot rotate/zoom this static page.
+browser_axis = WGLMakie.LScene(browser_figure[1, 1]; show_axis=true)
 browser_plot = WGLMakie.mesh!(browser_axis, browser_mesh;
     color=browser_vertex_par, colormap=:thermal, colorrange=(0.0, 600.0),
     shading=WGLMakie.NoShading)
+WGLMakie.update_cam!(browser_axis.scene, -pi/4, pi/5)
 WGLMakie.Colorbar(browser_figure[2, 1], browser_plot;
     vertical=false, label="Incident PAR (W m⁻²)")
 
@@ -125,7 +123,7 @@ browser_app = Bonito.App(; title="Wheat light interception") do session
     status = Bonito.DOM.div("Loading…"; id="light-status",
         style="min-height: 1.5em; color: #475569; margin: 10px 0 2px;")
     sliders = Bonito.DOM.div(
-        Bonito.DOM.label("Hour"), hour_slider, hour_label,
+        Bonito.DOM.label("Hour (UTC)"), hour_slider, hour_label,
         Bonito.DOM.label("Resolution"), resolution_slider, resolution_label;
         style="display: grid; grid-template-columns: 100px minmax(180px, 1fr) 75px; align-items: center; column-gap: 18px; row-gap: 10px;")
     options = Bonito.DOM.div(
@@ -136,6 +134,8 @@ browser_app = Bonito.App(; title="Wheat light interception") do session
     page = Bonito.DOM.main(
         sliders, options, status,
         browser_figure,
+        Bonito.DOM.p("Drag to rotate · scroll or pinch to zoom · right-drag to pan. Coordinates in metres.";
+            style="color: #475569; font-size: 13px; margin: 8px 0;"),
         Bonito.DOM.p("15 May 2025 · interpolated Montpellier weather · fixed wheat architecture";
             style="color: #64748b; font-size: 13px; margin: 8px 0;");
         style="font: 16px system-ui, sans-serif; max-width: 1040px; margin: auto; padding: 16px;")

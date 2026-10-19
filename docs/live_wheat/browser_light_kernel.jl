@@ -9,14 +9,15 @@ struct BrowserLightData
     face_nodes::Vector{Int}
     areas::Vector{Float64}
     directions::Vector{ArchimedLight.StaticArrays.SVector{3,Float64}}
-    weather::Vector{Float64}
+    weather::NTuple{3,Vector{Float64}}
     params::Vector{Float64}
     workspace::ArchimedLight.PerpendicularProjectionWorkspace
 end
 
 # Wire format: flat XYZ vertices/directions; flat one-based triangle vertex
 # indices; dense one-based node indices; areas in m². The weather buffer contains
-# 24 triples [SW, PAR, direct_SW], each W m⁻², at interval centres 00:30...23:30.
+# 24 triples [SW, PAR, direct_SW], each W m⁻², at UTC interval ends 00:00...23:00
+# (means of the preceding hour, not instantaneous values).
 # params = [origin_x, origin_y, pix_x, pix_y, pixel_area, nx, ny, latitude_deg, doy].
 # Geometry is decoded once after WebAssembly instantiation, not on slider moves.
 function browser_make_data(vertices::Vector{Float64}, triangles::Vector{Int32},
@@ -41,7 +42,15 @@ function browser_make_data(vertices::Vector{Float64}, triangles::Vector{Int32},
         j = 3i - 2
         dd[i] = ArchimedLight.StaticArrays.SVector{3,Float64}(directions[j], directions[j + 1], directions[j + 2])
     end
-    return BrowserLightData(vv, ff, nn, areas, dd, weather, params,
+    ww = (Vector{Float64}(undef, length(weather) ÷ 3),
+        Vector{Float64}(undef, length(weather) ÷ 3),
+        Vector{Float64}(undef, length(weather) ÷ 3))
+    @inbounds for i in eachindex(ww[1])
+        for k in 1:3
+            ww[k][i] = weather[3i - 3 + k]
+        end
+    end
+    return BrowserLightData(vv, ff, nn, areas, dd, ww, params,
         ArchimedLight.PerpendicularProjectionWorkspace(vv, ff))
 end
 

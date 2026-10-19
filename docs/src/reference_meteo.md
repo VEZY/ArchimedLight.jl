@@ -165,6 +165,66 @@ directly, then the interval is no longer carried by the forcing object itself.
 You instead provide the step duration explicitly later on, for example in
 `run_light(sim, sky; step_duration_seconds=1800.0)`.
 
+### Start, End, and Centre Timestamps
+
+A `DateTime`-valued `date`, or a separate `hour` column, identifies the start
+of the radiation interval by default. Set `radiation_timestamp` when a source
+labels its radiation averages differently:
+
+| `radiation_timestamp` | Interval for a timestamp `t` and duration `Δt` |
+|:--|:--|
+| `:start` (default) | `[t, t + Δt]` |
+| `:end` | `[t - Δt, t]` |
+| `:center` | `[t - Δt/2, t + Δt/2]` |
+
+Declare it in a column or in table metadata; a nonmissing column value takes
+precedence. Strings such as `"end"` are also accepted for file metadata.
+An explicit `hour_start` takes precedence over this timestamp convention.
+The `:end` and `:center` cases require a positive `duration` or
+`step_duration`. Intervals crossing midnight retain their duration and use the
+appropriate calendar date internally.
+
+For example, Open-Meteo labels its hourly radiation with the **end** of the
+averaging interval: radiation timestamped 19:00 represents 18:00–19:00.
+Its other variables, such as air temperature, can describe the instantaneous
+19:00 state. Declare the radiation convention without shifting the original
+table or its temperature observations. See the
+[Open-Meteo variable definitions](https://open-meteo.com/en/docs/historical-weather-api).
+
+```julia
+meteo = PlantMeteo.TimeStepTable(
+    [(
+        date=DateTime(2025, 5, 15, 19), duration=Hour(1),
+        T=21.3, Ri_SW_f=41.0, Ri_SW_f_direct=16.0, Ri_SW_f_diffuse=25.0,
+    )],
+    (latitude=43.61, longitude=3.878, timezone="UTC", radiation_timestamp=:end),
+)
+```
+
+The resolved radiation interval is 18:00–19:00; `meteo.date` and `meteo.T`
+remain unchanged. ArchimedLight does not infer this convention from a filename
+or an API name. Choose it explicitly when preparing imported radiation.
+
+### Snapshots Between Radiation Averages
+
+For regularly spaced hourly inputs, [`interpolate_radiation`](@ref) prepares
+instantaneous forcing with the same solar-aware interpolation used by the
+browser demo:
+
+```julia
+forcing = interpolate_radiation(hourly_sw, hourly_par, hourly_direct_sw, 18.5;
+    latitude=43.61, longitude=3.878, date=Date(2025, 5, 15),
+    utc_offset_hours=0, first_timestamp=0, interval_hours=1,
+    radiation_timestamp=:end)
+row = (; date=Date(2025, 5, 15), step_duration=60.0, forcing...)
+step = run_light(simulation, row)
+```
+
+The vectors contain horizontal irradiance means in W m⁻². The returned sun
+coordinates already account for the declared clock and longitude. This smooth
+snapshot reconstruction omits diffuse twilight and does not conserve each
+hourly integral exactly; use the original interval means for energy budgets.
+
 ## 2. Site Metadata
 
 Some radiative reconstructions need site metadata, especially latitude.
@@ -192,6 +252,45 @@ meteo = PlantMeteo.TimeStepTable(
 
 If you build a [`SkyState`](@ref) directly, you do not need latitude because the
 sun direction is already prescribed.
+
+### Civil Clock Time and Solar Time
+
+When ArchimedLight reconstructs the sun, historical inputs without a declared
+clock retain the Java convention: hours are local mean solar time, and the
+astronomical calculation applies the equation of time. To use civil clock
+timestamps, provide longitude and their UTC offset:
+
+| Field | Meaning |
+|:--|:--|
+| `longitude` | Degrees east, in `[-180, 180]`; west is negative |
+| `utc_offset_hours` | Civil time minus UTC, in `[-14, 14]`; fractional offsets are accepted |
+| `timezone="UTC"`, `"GMT"`, or `"Z"` | Shorthand for a zero UTC offset |
+
+These fields can be columns or metadata, with nonmissing columns taking
+precedence. The conversion is
+`mean_solar_hour = clock_hour - utc_offset_hours + longitude / 15`.
+The equation of time is then applied once by the solar model. Dates are
+normalized when this conversion crosses midnight.
+
+For example, `(longitude=3.878, timezone="UTC")` describes UTC observations
+at Montpellier. Local observations in May can instead use
+`(longitude=3.878, timezone="Europe/Paris", utc_offset_hours=2.0)`.
+Named timezones require an explicit numeric offset; ArchimedLight does not
+resolve daylight saving time from a timezone database. For a series spanning
+an offset change, provide the correct `utc_offset_hours` in each row.
+Sequence validation compares the resolved intervals in UTC, so repeated local
+hours at the end of daylight saving time remain distinct. The original table
+and `meteo_range` selections continue to use the supplied civil timestamps.
+
+A declared civil clock requires longitude for astronomical calculations.
+Longitude alone preserves historical solar-time behavior and produces a
+warning explaining that it was not applied. A UTC timezone combined with a
+nonzero offset is an input conflict. These convention checks remain enabled
+when physical boundary checks are disabled.
+
+With explicit sun coordinates and no usable astronomical interval, no civil
+clock conversion is needed. Prescribing a [`SkyState`](@ref) directly is also
+an option when another solar-position model has already prepared the forcing.
 
 ## 3. Radiative Inputs
 

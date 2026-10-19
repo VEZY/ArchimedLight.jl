@@ -44,22 +44,12 @@ function browser_native_options(case; AL=ArchimedLight)
 end
 
 function browser_native_meteo(selected_hour; AL=ArchimedLight)
-    # Interpolate only the input weather. Solar position, daylight clipping,
-    # diffuse partition and all light calculations go through public run_light.
-    h = round(Float64(selected_hour) * 60.0) / 60.0
-    wi = clamp(floor(Int, h - 0.5) + 1, 1, 23)
-    w = clamp(h - (wi - 0.5), 0.0, 1.0)
-    j = 3wi - 2
-    interpolate(k) = (1.0 - w) * browser_weather_flat[j + k] +
-        w * browser_weather_flat[j + k + 3]
-    sw, par, direct_sw = interpolate(0), interpolate(1), interpolate(2)
+    # Same corrected instantaneous forcing, independently rasterized/solved by
+    # public run_light. Explicit sun coordinates keep UTC out of the solar clock.
+    forcing = browser_weather_snapshot(browser_weather_columns, browser_params,
+        Float64(selected_hour))
     date = AL.Dates.Date(2025, 1, 1) + AL.Dates.Day(Int(browser_params[9]) - 1)
-    centre = AL.Dates.DateTime(date) + AL.Dates.Minute(round(Int, h * 60.0))
-    (; date, latitude=browser_params[8],
-        hour_start=AL.Dates.Time(centre - AL.Dates.Second(30)),
-        hour_end=AL.Dates.Time(centre + AL.Dates.Second(30)), step_duration=60.0,
-        RI_SW_f=sw, RI_PAR_f=par, RI_NIR_f=0.0,
-        direct_fraction=sw > 0.0 ? clamp(direct_sw / sw, 0.0, 1.0) : 0.0)
+    (; date, step_duration=60.0, forcing...)
 end
 
 function browser_native_par(simulation, hour; AL=ArchimedLight)
@@ -137,4 +127,44 @@ function browser_verify_kernel()
     return (; native_reference, configuration_reference)
 end
 
+function browser_verify_weather()
+    hours = collect(0:1440) ./ 60
+    snapshots = [browser_weather_snapshot(browser_weather_columns, browser_params, h) for h in hours]
+    day = filter(s -> s.sun_elevation > 0.0, snapshots)
+    night = filter(s -> s.sun_elevation <= 0.0, snapshots)
+    # Independent FAO-56 orbital approximation and NOAA geometric UTC times
+    # for this fixed date/site: https://gml.noaa.gov/grad/solcalc/solareqns.PDF
+    toa = 0.0820 * 1e6 / 60 * (1.0 + 0.033cos(2pi * browser_params[9] / 365))
+    dni = [s.RI_SW_f * s.direct_fraction / sind(s.sun_elevation) for s in day]
+    first_day = hours[findfirst(s -> s.sun_elevation > 0.0, snapshots)]
+    last_day = hours[findlast(s -> s.sun_elevation > 0.0, snapshots)]
+    noon = hours[argmax(getproperty.(snapshots, :sun_elevation))]
+    evening = [s for (h, s) in zip(hours, snapshots) if h > 12.0 && 0.0 < s.sun_elevation < 5.0]
+    @testset "Wheat weather: physical and UTC contracts" begin
+        @test all(s -> all(isfinite, values(s)), snapshots)
+        @test all(s -> s.RI_SW_f >= 0.0 && s.RI_PAR_f >= 0.0 && 0.0 <= s.direct_fraction <= 1.0, snapshots)
+        @test all(s -> s.RI_SW_f == s.RI_PAR_f == s.direct_fraction == 0.0, night)
+        @test all(s -> isapprox(s.RI_PAR_f, 0.48s.RI_SW_f; atol=1e-10, rtol=1e-12), snapshots)
+        @test maximum(dni) <= 1.01toa
+        @test abs(noon - (11 + 40.6 / 60)) <= 4 / 60
+        @test abs(first_day - (4 + 25.4 / 60)) <= 4 / 60
+        @test abs(last_day - (18 + 55.7 / 60)) <= 4 / 60
+        @test issorted(getproperty.(evening, :RI_SW_f); rev=true)
+        @test issorted(getproperty.(evening, :RI_PAR_f); rev=true)
+        @test browser_weather_snapshot(browser_weather_columns, browser_params, 19 + 10 / 60).RI_PAR_f == 0.0
+        # A mean stamped 12:00 UTC belongs to [11:00,12:00], centred at 11:30.
+        impulse = (zeros(24), zeros(24), zeros(24))
+        impulse[1][13], impulse[2][13], impulse[3][13] = 100.0, 48.0, 50.0
+        @test browser_weather_snapshot(impulse, browser_params, 11.5).RI_SW_f > 0.0
+        @test browser_weather_snapshot(impulse, browser_params, 10.5).RI_SW_f == 0.0
+        @test browser_weather_snapshot(impulse, browser_params, 12.5).RI_SW_f == 0.0
+    end
+    output = joinpath(@__DIR__, "build")
+    mkpath(output)
+    JSON3.write(joinpath(output, "weather_physics_verification.json"),
+        (; samples=length(hours), maximum_dni_w_m2=maximum(dni),
+            toa_normal_w_m2=toa, sunrise_utc=first_day, solar_noon_utc=noon, sunset_utc=last_day))
+end
+
+browser_verify_weather()
 browser_verify_kernel()

@@ -434,10 +434,10 @@ function _directional_flux_substeps(
     end
 
     latitude_rad = deg2rad(resolved.latitude_deg)
-    date = resolved.date
-    doy = Dates.dayofyear(date)
-    start_h = resolved.start_hour
-    end_h = resolved.end_hour
+    solar = _meteo_solar_interval(resolved)
+    date = solar.date
+    start_h = solar.start_hour
+    end_h = solar.end_hour
 
     global_from_input = resolved.radiation_source != :clearness
 
@@ -446,7 +446,7 @@ function _directional_flux_substeps(
         if clearness_provided
             resolved.clearness
         else
-            _clearness_from_global_wm2(sky.ri_sw_f, latitude_rad, doy, start_h, end_h)
+            _clearness_from_global_wm2(sky.ri_sw_f, latitude_rad, date, start_h, end_h)
         end
 
     timestep_h = _cfg_radiation_timestep_hours(options)

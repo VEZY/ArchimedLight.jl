@@ -1361,8 +1361,12 @@ end
 function _resolved_datetime_interval_local(step::ResolvedMeteoStep)
     step.start_hour !== nothing && step.end_hour !== nothing || return nothing
     base = Dates.DateTime(something(step.date, Dates.Date(2000, 1, 1)))
-    start = base + Dates.Millisecond(round(Int, step.start_hour * 3_600_000))
-    stop = base + Dates.Millisecond(round(Int, step.end_hour * 3_600_000))
+    # Chronology uses UTC so repeated civil hours at the end of daylight saving
+    # time remain distinct. Raw timestamps and meteo_range stay in civil time.
+    start = base + Dates.Millisecond(round(Int,
+        (step.start_hour - step.utc_offset_hours) * 3_600_000))
+    stop = base + Dates.Millisecond(round(Int,
+        (step.end_hour - step.utc_offset_hours) * 3_600_000))
     return start, stop
 end
 

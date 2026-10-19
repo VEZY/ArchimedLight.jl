@@ -8,6 +8,8 @@ browser_face_nodes = Int32.(browser_input_json.nodes)
 browser_areas = Float64.(browser_input_json.areas)
 browser_directions_flat = Float64.(browser_input_json.directions)
 browser_weather_flat = Float64.(browser_input_json.weather)
+browser_weather_columns = (browser_weather_flat[1:3:end],
+    browser_weather_flat[2:3:end], browser_weather_flat[3:3:end])
 browser_params = Float64.(browser_input_json.params)
 @assert length(browser_vertices_flat) % 3 == 0
 @assert length(browser_faces_flat) == 3length(browser_face_nodes)

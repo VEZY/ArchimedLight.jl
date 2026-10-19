@@ -103,7 +103,7 @@ function checkReference(ref, name, setup_milliseconds = 0) {
 const defaults = {resolution_index: 2, sectors: 46, toricity: false, scattering: false};
 const defaultSetup = configure(defaults);
 const refs = readJSON('native_reference.json');
-if (refs.length !== 9) throw new Error('Expected the original nine-hour default references');
+if (refs.length !== 11) throw new Error('Expected eleven default references, including sunset and 19:10 UTC');
 const checks = refs.map((ref, i) => checkReference(ref, 'default hour ' + ref.hour, i === 0 ? defaultSetup : 0));
 const configurationRefs = readJSON('configuration_reference.json');
 if (!Array.isArray(configurationRefs) || configurationRefs.length !== 41) {

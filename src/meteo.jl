@@ -49,6 +49,8 @@ struct ResolvedMeteoStep
     date::Union{Nothing,Dates.Date}
     start_hour::Union{Nothing,Float64}
     end_hour::Union{Nothing,Float64}
+    solar_time_offset_hours::Float64
+    utc_offset_hours::Float64
     ri_sw_f::Float64
     ri_par_f::Float64
     ri_nir_f::Float64
@@ -350,6 +352,102 @@ function _meteo_resolve_explicit_duration(row, names)
     return nothing, nothing, reasons
 end
 
+function _meteo_convention_value(row, row_names, metadata, metadata_names, name::Symbol)
+    for (container, names) in ((row, row_names), (metadata, metadata_names))
+        name in names || continue
+        value = getproperty(container, name)
+        value === nothing && continue
+        value === missing && continue
+        value isa AbstractString && isempty(strip(value)) && continue
+        return value
+    end
+    return nothing
+end
+
+function _meteo_radiation_timestamp!(errors, row, row_names, row_index, sources)
+    metadata = _meteo_metadata(row)
+    raw = _meteo_convention_value(row, row_names, metadata,
+        propertynames(metadata), :radiation_timestamp)
+    raw === nothing && return :start
+    sources[:radiation_timestamp] = :radiation_timestamp
+    timestamp = Symbol(lowercase(strip(string(raw))))
+    if timestamp ∉ (:start, :end, :center)
+        push!(errors, "$(_meteo_row_label(row_index)) has invalid `radiation_timestamp`=$(repr(raw)); expected :start, :end, or :center.")
+        return :start
+    end
+    return timestamp
+end
+
+function _meteo_resolve_solar_offset!(errors, warnings, row, row_names,
+    metadata, metadata_names, row_index, sources; needs_astronomy::Bool)
+    longitude_raw = _meteo_convention_value(row, row_names, metadata,
+        metadata_names, :longitude)
+    offset_raw = _meteo_convention_value(row, row_names, metadata,
+        metadata_names, :utc_offset_hours)
+    timezone_raw = _meteo_convention_value(row, row_names, metadata,
+        metadata_names, :timezone)
+    longitude = nothing
+    offset = nothing
+    for (name, raw) in ((:longitude, longitude_raw), (:utc_offset_hours, offset_raw))
+        raw === nothing && continue
+        sources[name] = name
+        value, reason = _meteo_parse_number(raw)
+        lo, hi = name == :longitude ? (-180.0, 180.0) : (-14.0, 14.0)
+        if value === nothing || !(lo <= value <= hi)
+            detail = value === nothing ? reason : "outside [$(lo), $(hi)]"
+            push!(errors, "$(_meteo_row_label(row_index)) has invalid `$(name)`=$(repr(raw)): $(detail).")
+        elseif name == :longitude
+            longitude = value
+        else
+            offset = value
+        end
+    end
+    utc_timezone = false
+    if timezone_raw !== nothing
+        sources[:timezone] = :timezone
+        if !(timezone_raw isa AbstractString || timezone_raw isa Symbol)
+            push!(errors, "$(_meteo_row_label(row_index)) needs a string `timezone`, got $(repr(timezone_raw)).")
+        else
+            utc_timezone = uppercase(strip(string(timezone_raw))) in ("UTC", "GMT", "Z")
+            if utc_timezone
+                if offset !== nothing && offset != 0.0
+                    push!(errors, "$(_meteo_row_label(row_index)) has conflicting `timezone`=$(repr(timezone_raw)) and `utc_offset_hours`=$(repr(offset)); UTC requires zero offset.")
+                end
+                offset = 0.0
+                offset_raw === nothing && (sources[:utc_offset_hours] = :timezone)
+            elseif offset === nothing
+                push!(errors, "$(_meteo_row_label(row_index)) needs explicit numeric `utc_offset_hours` for named `timezone`=$(repr(timezone_raw)); supply the offset for this date, including daylight saving time.")
+            end
+        end
+    end
+    clock_declared = timezone_raw !== nothing || offset_raw !== nothing
+    if !clock_declared
+        if longitude !== nothing
+            push!(warnings, "$(_meteo_row_label(row_index)) has `longitude` but no declared clock convention; longitude is not applied and historical solar-time behavior is retained. Set `timezone=\"UTC\"` or `utc_offset_hours` to use civil clock time.")
+        end
+        sources[:solar_time_offset_hours] = :legacy_solar_time
+        sources[:utc_offset_hours] = :legacy_solar_time
+        return (; solar_time_offset_hours=0.0, utc_offset_hours=0.0)
+    end
+    if longitude === nothing
+        needs_astronomy && push!(errors, "$(_meteo_row_label(row_index)) needs finite `longitude` when a civil clock is declared for astronomical calculations.")
+        return (; solar_time_offset_hours=0.0, utc_offset_hours=something(offset, 0.0))
+    end
+    offset === nothing && return (; solar_time_offset_hours=0.0, utc_offset_hours=0.0)
+    sources[:solar_time_offset_hours] = :derived_from_longitude_and_utc_offset
+    return (; solar_time_offset_hours=_solar_time_offset_hours(longitude, offset),
+        utc_offset_hours=offset)
+end
+
+function _meteo_solar_interval(step)
+    start_hour = step.start_hour + step.solar_time_offset_hours
+    end_hour = step.end_hour + step.solar_time_offset_hours
+    day_offset = floor(Int, start_hour / 24.0)
+    return (; date=step.date + Dates.Day(day_offset),
+        start_hour=start_hour - 24.0day_offset,
+        end_hour=end_hour - 24.0day_offset)
+end
+
 function _meteo_resolve_temporal!(
     errors::Vector{String},
     row,
@@ -364,6 +462,21 @@ function _meteo_resolve_temporal!(
         _meteo_resolve_end_time(row, row_names)
     duration_seconds, duration_source, duration_reasons =
         _meteo_resolve_explicit_duration(row, row_names)
+
+    timestamp = _meteo_radiation_timestamp!(errors, row, row_names, row_index, sources)
+    if timestamp != :start && start_source != :hour_start && start_hour !== nothing
+        if duration_seconds === nothing
+            push!(errors, "$(_meteo_row_label(row_index)) needs positive `duration`/`step_duration` with `radiation_timestamp=$(repr(timestamp))`.")
+        else
+            start_hour -= duration_seconds / 3600.0 * (timestamp == :end ? 1.0 : 0.5)
+            if date !== nothing
+                day_offset = floor(Int, start_hour / 24.0)
+                date += Dates.Day(day_offset)
+                start_hour -= 24.0day_offset
+                explicit_end_hour === nothing || (explicit_end_hour -= 24.0day_offset)
+            end
+        end
+    end
 
     end_before_start =
         start_hour !== nothing && explicit_end_hour !== nothing &&
@@ -590,12 +703,13 @@ function _meteo_resolve_clearness_radiation!(
         return nothing
     end
     try
+        solar = _meteo_solar_interval(temporal)
         return _global_wm2_from_clearness(
             clearness,
             deg2rad(latitude),
-            Dates.dayofyear(temporal.date),
-            temporal.start_hour,
-            temporal.end_hour,
+            solar.date,
+            solar.start_hour,
+            solar.end_hour,
         )
     catch err
         push!(
@@ -650,6 +764,10 @@ function _resolve_meteo_step(
 
     temporal = _meteo_resolve_temporal!(errors, row, row_index, sources, row_names)
     duration_seconds = temporal.duration_seconds
+    clock = _meteo_resolve_solar_offset!(errors, warnings, row, row_names,
+        metadata, metadata_names, row_index, sources;
+        needs_astronomy=latitude !== nothing && _meteo_has_solar_interval(temporal))
+    temporal = merge(temporal, clock)
 
     if check_boundaries
         _meteo_check_nonnegative!(errors, row_index, :Ri_SW_f, sw)
@@ -946,6 +1064,8 @@ function _resolve_meteo_step(
             temporal.date,
             temporal.start_hour,
             temporal.end_hour,
+            clock.solar_time_offset_hours,
+            clock.utc_offset_hours,
             sw,
             par,
             nir,

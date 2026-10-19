@@ -26,6 +26,18 @@ mutable struct BrowserLightConfigState
     scattering_ready::Bool
 end
 
+# Scene-specific buffer/clock adapter; all interpolation and solar equations
+# are shared with the normal native meteorological path.
+function browser_weather_snapshot(weather, params, selected_hour::Float64)
+    h = round(selected_hour * 60.0) / 60.0
+    date = ArchimedLight.Dates.Date(2025, 1, 1) +
+        ArchimedLight.Dates.Day(Int(params[9]) - 1)
+    return ArchimedLight.interpolate_radiation(weather[1], weather[2], weather[3], h;
+        latitude=params[8], longitude=3.878, date,
+        utc_offset_hours=0.0, first_timestamp=0.0, interval_hours=1.0,
+        radiation_timestamp=:end)
+end
+
 function browser_make_configured(vertices::Vector{Float64}, triangles::Vector{Int32},
     face_nodes::Vector{Int32}, areas::Vector{Float64},
     directions::Vector{Float64}, weather::Vector{Float64}, params::Vector{Float64})
@@ -123,33 +135,14 @@ end
 function browser_solve_configured(state::BrowserLightConfigState,
     selected_hour::Float64)
     data = state.data
-    # Same one-minute, true-sun snapshot and interval-centred input interpolation
-    # as 01_live_light.jl and the original browser prototype.
-    h = round(selected_hour * 60.0) / 60.0
-    wi = clamp(floor(Int, h - 0.5) + 1, 1, 23)
-    w = clamp(h - (wi - 0.5), 0.0, 1.0)
-    j = 3wi - 2
-    sw = (1.0 - w) * data.weather[j] + w * data.weather[j + 3]
-    par = (1.0 - w) * data.weather[j + 1] + w * data.weather[j + 4]
-    direct_sw = (1.0 - w) * data.weather[j + 2] + w * data.weather[j + 5]
-    direct_fraction = sw > 0.0 ? clamp(direct_sw / sw, 0.0, 1.0) : 0.0
+    forcing = browser_weather_snapshot(data.weather, data.params, selected_hour)
+    par, direct_fraction = forcing.RI_PAR_f, forcing.direct_fraction
     diffuse_fraction = 1.0 - direct_fraction
     n = length(data.areas)
     incident_power = zeros(Float64, n)
-    latitude_rad = deg2rad(data.params[8])
-    doy = Int(data.params[9])
-    rise, set = ArchimedLight._java_sunrise_sunset_hours(latitude_rad, doy)
-    start_h = h - 1.0 / 120.0
-    stop_h = h + 1.0 / 120.0
-    daylight_start = max(start_h, rise)
-    daylight_stop = min(stop_h, set)
-    daylight_duration = max(daylight_stop - daylight_start, 0.0)
-    daylight_duration <= 0.0 && return incident_power
-    par *= clamp(daylight_duration / (stop_h - start_h), 0.0, 1.0)
     par <= 0.0 && return incident_power
-    sun_hour = direct_fraction > 0.0 ? (daylight_start + daylight_stop) / 2.0 : h
-    az, el = ArchimedLight._java_sun_position_deg(doy, latitude_rad, sun_hour)
-    sun = ArchimedLight._sun_direction(az, el)
+    el = forcing.sun_elevation
+    sun = ArchimedLight._sun_direction(forcing.sun_azimuth, el)
 
     sectors = Int(state.sectors)
     offset = state.direction_offset

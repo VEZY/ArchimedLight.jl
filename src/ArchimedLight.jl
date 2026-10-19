@@ -66,6 +66,7 @@ export read_options
 export read_simulation
 export read_meteo
 export prepare_meteo
+export interpolate_radiation
 export cache_summary
 export update_scene!
 export update_models!

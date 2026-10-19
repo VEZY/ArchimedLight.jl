@@ -10,9 +10,9 @@ results. Other documentation examples still run their normal Julia calculations.
 
 The Docs workflow rebuilds the demo from source before publishing changes on
 `main`, a pushed release tag, or a manual Docs run. It calls the reusable
-`RebuildWheatDemo.yml` workflow with Julia 1.13.1, compares 54 cases to freshly
+`RebuildWheatDemo.yml` workflow with Julia 1.13.1, compares 56 cases to freshly
 computed public `run_light` results, compiles WebAssembly, exports Bonito HTML,
-then runs all 54 browser
+then runs all 56 browser
 numerical checks. A failed rebuild blocks that documentation deployment.
 
 Relevant pull requests also run the source rebuild as a separate check.
@@ -76,7 +76,7 @@ node check_wasm.mjs
 ```
 
 It first checks that the HTML embeds exactly the adjacent `light.wasm`, then
-compares all 1,894 receivers in nine baseline hour cases, 41 configured
+compares all 1,894 receivers in eleven baseline hour cases, 41 configured
 cases, and four configuration transitions. These retained references come
 from independent public native ArchimedLight runs, rather than the Wasm
 kernel itself. After rebuilding, use `node check_wasm.mjs --current-native` to
@@ -97,11 +97,11 @@ The fixed architecture is ArchimedLight's benchmark wheat with an unspecified
 cultivar; **it is not the Neodur canopy**. It has 6,462 triangles and 1,894
 receivers, including one 60 × 30 ground. Both plant and ground show incident
 PAR on the same 0–600 W/m² thermal scale. The day is 15 May 2025, with 24 hourly
-Montpellier weather estimates interpolated to a centred one-minute snapshot.
+Montpellier weather estimates interpolated to a snapshot rounded to the minute.
 These are archived weather estimates, not in-plot observations. See
 `inputs/PROVENANCE.md` for hashes, source URLs, units and limitations.
 
-The controls choose 05:00–21:00 in five-minute steps, scattering, toricity,
+The controls choose 05:00–21:00 UTC in five-minute steps, scattering, toricity,
 5–40 mm light-pixel resolution, and 16/46/136 diffuse sectors. The direct sun
 retains its true direction (`all_in_turtle=false`). Hour changes retain the
 fixed diffuse geometry; option changes rebuild necessary caches inside Wasm.
@@ -119,6 +119,20 @@ projection frame and horizontal-ground-footprint normalization; toric scenes
 retain ground projection and wrapping. Browser hit buffers grow geometrically
 because WasmTarget 0.5.3's `push!` overlay reallocates and copies a whole vector
 on every insertion. This storage policy does not duplicate the raster equations.
+
+Open-Meteo radiation is a mean over the hour preceding its UTC timestamp.
+The demo calls the shared native `interpolate_radiation` with those interval
+centres and Montpellier's longitude (3.878° E). It interpolates each component divided
+by the native extraterrestrial hourly irradiance, then multiplies by the
+instantaneous extraterrestrial irradiance. This keeps direct normal irradiance
+bounded as the sun reaches the horizon, without capping receiver values.
+This smooth visualization does not exactly conserve each hourly energy total
+and omits diffuse twilight after the solar centre sets. Montpellier civil time
+on this date is UTC+2.
+
+The exported `LScene` uses WGLMakie's native browser camera: drag to rotate,
+scroll or pinch to zoom, and right-drag to pan. Moving the camera changes only
+the view; it does not recompute light.
 
 `wasmtarget_julia_113.jl` supplies the `external_linkage=false` keyword required
 by Julia 1.13.1 to the loaded WasmTarget 0.5.3 collector method. It changes no
