@@ -36,14 +36,14 @@ jobs:
       - name: Compile from source and export the browser demo
         run: julia --startup-file=no --project=docs/live_wheat docs/live_wheat/build.jl
       - name: Verify the rebuilt browser calculations
-        run: node docs/live_wheat/check_wasm.mjs
+        run: node docs/live_wheat/check_wasm.mjs --current-native
       - name: Prepare the verified artifact and its build provenance
         run: |
           mkdir -p "$RUNNER_TEMP/wheat-demo/docs/src/assets/live-wheat"
           mkdir -p "$RUNNER_TEMP/wheat-demo/docs/live_wheat/build"
           cp docs/src/assets/live-wheat/index.html docs/src/assets/live-wheat/light.wasm "$RUNNER_TEMP/wheat-demo/docs/src/assets/live-wheat/"
           cp docs/live_wheat/artifact_receipt.json docs/live_wheat/Manifest.toml "$RUNNER_TEMP/wheat-demo/docs/live_wheat/"
-          cp docs/live_wheat/build/wasm_verification.json "$RUNNER_TEMP/wheat-demo/docs/live_wheat/build/"
+          cp docs/live_wheat/build/*.json "$RUNNER_TEMP/wheat-demo/docs/live_wheat/build/"
       - name: Retain verified assets, resolved dependencies and numerical checks
         uses: actions/upload-artifact@v7
         with:

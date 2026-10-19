@@ -10,8 +10,9 @@ results. Other documentation examples still run their normal Julia calculations.
 
 The Docs workflow rebuilds the demo from source before publishing changes on
 `main`, a pushed release tag, or a manual Docs run. It calls the reusable
-`RebuildWheatDemo.yml` workflow with Julia 1.13.1, verifies native reference
-cases, compiles WebAssembly, exports Bonito HTML, then runs all 54 browser
+`RebuildWheatDemo.yml` workflow with Julia 1.13.1, compares 54 cases to freshly
+computed public `run_light` results, compiles WebAssembly, exports Bonito HTML,
+then runs all 54 browser
 numerical checks. A failed rebuild blocks that documentation deployment.
 
 Relevant pull requests also run the source rebuild as a separate check.
@@ -47,9 +48,10 @@ The direct build dependencies are pinned, including WasmTarget 0.5.3,
 Bonito 5.2.0 and WGLMakie 0.13.15. ArchimedLight is the repository at `../..`.
 There are no paths to conference files or other development checkouts.
 `prepare_scene.jl` decodes the vendored immutable input buffers and expands
-vertices per triangle. `verify_kernel.jl` compares native kernel execution
-with 41 retained independent public `run_light` reference cases before the
-compiler runs. The emitted numerical module must have no imports.
+vertices per triangle. `verify_kernel.jl` reconstructs the native scene, models
+and weather from these inputs and compares the browser kernel with the current
+public `run_light` before compilation. It writes fresh references to `build/`.
+The emitted numerical module must have no imports.
 
 The output HTML is written directly to `../src/assets/live-wheat/index.html`,
 and the emitted module to the adjacent checked-in `light.wasm`.
@@ -63,7 +65,7 @@ This is a version-pinned rebuild recipe, rather than a fully locked build:
 there is no committed `Manifest.toml` for transitive dependencies, and native
 ArchimedLight helpers come from the current repository checkout. Each rebuild
 records and archives its resolved dependency graph. Numerical equivalence is
-checked against retained native references; byte-identical output across
+checked against the current native implementation; byte-identical output across
 different machines or toolchain resolutions is not guaranteed.
 
 A **clean checkout** can execute the complete Wasm numerical parity suite
@@ -77,8 +79,9 @@ It first checks that the HTML embeds exactly the adjacent `light.wasm`, then
 compares all 1,894 receivers in nine baseline hour cases, 41 configured
 cases, and four configuration transitions. These retained references come
 from independent public native ArchimedLight runs, rather than the Wasm
-kernel itself. Original validation across these cases found a maximum error
-of 7.33e-12 W/m². Re-run the suite for the current checkout when rebuilding.
+kernel itself. After rebuilding, use `node check_wasm.mjs --current-native` to
+compare the emitted module to the fresh `build/` references. The CI rebuild
+always uses this mode, so old fixtures cannot conceal a native algorithm change.
 
 For frontend re-export, `include("reexport.jl")` reuses the checked-in
 `../src/assets/live-wheat/light.wasm`; it does not recompile the numerical code.
@@ -106,13 +109,16 @@ Scattering follows native per-sector unit responses with a 0.01 relative
 stopping rule and 20-iteration limit. This is an opaque, PAR-only numerical
 specialization for this mesh, not compilation of the full native orchestration.
 
-`browser_light_kernel.jl` provides input decoding and shared numerical helpers;
+`browser_light_kernel.jl` provides input decoding and storage adapters;
 `browser_options_kernel.jl` controls invalidation, actual sun/sky calculations
-and first-order rasterization; `browser_scattering_kernel.jl` provides opaque
-hit stacks and iterative Lambertian PAR scattering. Native ArchimedLight
-projection, scanline, normal, area, solar-position and sky-brightness helpers
-are compiled into the module. Concrete raster storage avoids runtime Type
-arguments unsupported by the compiler.
+and first-order responses; `browser_scattering_kernel.jl` provides opaque
+hit stacks and exchange-cache assembly. Both native and browser callers use
+the same triangle rasterizer, diffuse-weight formula and array-based scattering
+propagation in `src/`. Non-toric scenes also use the same perpendicular
+projection frame and horizontal-ground-footprint normalization; toric scenes
+retain ground projection and wrapping. Browser hit buffers grow geometrically
+because WasmTarget 0.5.3's `push!` overlay reallocates and copies a whole vector
+on every insertion. This storage policy does not duplicate the raster equations.
 
 `wasmtarget_julia_113.jl` supplies the `external_linkage=false` keyword required
 by Julia 1.13.1 to the loaded WasmTarget 0.5.3 collector method. It changes no
@@ -120,9 +126,10 @@ package file or light equation, and has no runtime role. Reassess this narrow
 build-time adapter before changing the pinned Julia/compiler pair.
 
 The timing line separates calculation from option setup, excluding rendering.
-Browser execution was slower than native Julia in the original local checks
-(native kernel ~0.53 ms; warmed browser ~1–3 ms); this is not a cross-machine
-or cross-browser benchmark.
+The native verifier records medians of five warmed single evaluations for both
+the kernel and public `run_light`. The Node report records option setup and
+each solve separately. Browser timings depend on the engine and machine;
+comparisons across a projection change also include the changed geometry work.
 
 ## Landing-page handshake
 

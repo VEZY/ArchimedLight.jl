@@ -39,121 +39,22 @@ function browser_make_configured(vertices::Vector{Float64}, triangles::Vector{In
         Vector{Vector{Float64}}(), empty_cache, false)
 end
 
-# Native _project_triangle! arithmetic with a concrete upper-hit storage path.
-# The only extension over the original prototype is the native modular wrapping
-# of pixel coordinates when toricity is enabled. Area-ratio correction retains
-# ALL projected pixels, including those outside the plot when toricity is off.
-function browser_project_configured_triangle!(pixel_hits::ArchimedLight.DenseUpperPixelHits,
-    node_hits::Vector{Int}, projected_mesh_area::Vector{Float64},
-    projected_pixels_area::Vector{Float64}, node_idx::Int,
-    p1, p2, p3, direction, params::Vector{Float64},
-    scratch::ArchimedLight.RasterScanlineScratch, toricity::Bool)
-    u = 1.0f0
-    ox = Float32(params[1]) * u
-    oy = Float32(params[2]) * u
-    pxs = Float32(params[3]) * u
-    pys = Float32(params[4]) * u
-    pixel_area = params[5]
-    nx = Int(params[6])
-    ny = Int(params[7])
-    dirx = Float32(direction[1])
-    diry = Float32(direction[2])
-    dirz = Float32(direction[3])
-    dirz == 0.0f0 && return nothing
-
-    projected1, pix1 = ArchimedLight._project_vertex_to_ground_pixel(p1, dirx, diry, dirz, ox, oy, pxs, pys, u)
-    projected2, pix2 = ArchimedLight._project_vertex_to_ground_pixel(p2, dirx, diry, dirz, ox, oy, pxs, pys, u)
-    projected3, pix3 = ArchimedLight._project_vertex_to_ground_pixel(p3, dirx, diry, dirz, ox, oy, pxs, pys, u)
-
-    iMin = min(floor(Int, pix1[1]), floor(Int, pix2[1]), floor(Int, pix3[1]))
-    iMax = max(ceil(Int, pix1[1]), ceil(Int, pix2[1]), ceil(Int, pix3[1]))
-    jMin = min(floor(Int, pix1[2]), floor(Int, pix2[2]), floor(Int, pix3[2]))
-    jMax = max(ceil(Int, pix1[2]), ceil(Int, pix2[2]), ceil(Int, pix3[2]))
-    kMin = min(floor(Int, pix1[3]), floor(Int, pix2[3]), floor(Int, pix3[3]))
-    kMax = max(ceil(Int, pix1[3]), ceil(Int, pix2[3]), ceil(Int, pix3[3]))
-
-    iLength = (iMax - iMin) + 1
-    iLength <= 0 && return nothing
-    minY, maxY = ArchimedLight._scanline_bounds!(scratch, iLength, jMin, jMax)
-    ArchimedLight._get_border_pixels(pix1, pix2, iMin, minY, maxY)
-    ArchimedLight._get_border_pixels(pix2, pix3, iMin, minY, maxY)
-    ArchimedLight._get_border_pixels(pix3, pix1, iMin, minY, maxY)
-
-    normal = ArchimedLight._compute_normal((pix1, pix2, pix3))
-    slopeX_f32, slopeY_f32 =
-        if abs(normal[3]) > 1e-5
-            (Float32(normal[1] / normal[3]), Float32(normal[2] / normal[3]))
-        else
-            dz = Float32(direction[3])
-            (dz * Float32(normal[1]), dz * Float32(normal[2]))
-        end
-    z0 = Float32(pix1[3])
-    z0 += slopeX_f32 * (Float32(pix1[1]) - Float32(iMin))
-    z0 += slopeY_f32 * (Float32(pix1[2]) - Float32(jMin))
-    tri_proj_area = ArchimedLight._triangle_area_xy(projected1, projected2, projected3)
-    nb_hits = 0
-    node_hit_count = node_hits[node_idx]
-    @inbounds for i in iMin:(iMax - 1)
-        ni = i - iMin
-        zi = z0 - slopeX_f32 * Float32(ni)
-        ymin_i = minY[ni + 1]
-        ymax_i = maxY[ni + 1]
-        for j in ymin_i:(ymax_i - 1)
-            nj = j - jMin
-            zpix = zi - slopeY_f32 * Float32(nj)
-            zpix = clamp(zpix, Float32(kMin), Float32(kMax))
-            nb_hits += 1
-            ii = toricity ? ArchimedLight._wrap_index(i, nx) : i
-            jj = toricity ? ArchimedLight._wrap_index(j, ny) : j
-            if toricity || ((0 <= ii < nx) && (0 <= jj < ny))
-                idx = ii + 1 + jj * nx
-                height = Float64(zpix / u)
-                if pixel_hits.nodes[idx] == 0
-                    pixel_hits.heights[idx] = height
-                    pixel_hits.nodes[idx] = node_idx
-                    # This specialization scans nodes directly; occupied is unused.
-                    # Avoid push!: WasmGC currently copies a vector on each append.
-                elseif height > pixel_hits.heights[idx]
-                    pixel_hits.heights[idx] = height
-                    pixel_hits.nodes[idx] = node_idx
-                end
-                node_hit_count += 1
-            end
-        end
-    end
-    node_hits[node_idx] = node_hit_count
-    projected_mesh_area[node_idx] += tri_proj_area
-    projected_pixels_area[node_idx] += nb_hits * pixel_area
-    return nothing
-end
-
-
 function browser_directional_area_configured(data::BrowserLightData, direction,
-    toricity::Bool)
-    n = length(data.areas)
-    p = data.params
-    nx = Int(p[6])
-    ny = Int(p[7])
-    pixel_hits = ArchimedLight.DenseUpperPixelHits(nx * ny)
-    node_hits = zeros(Int, n)
-    projected_mesh_area = zeros(Float64, n)
-    projected_pixels_area = zeros(Float64, n)
-    scratch = ArchimedLight.RasterScanlineScratch()
-    @inbounds for i in eachindex(data.triangles)
-        f = data.triangles[i]
-        node = data.face_nodes[i]
-        browser_project_configured_triangle!(pixel_hits, node_hits,
-            projected_mesh_area, projected_pixels_area, node,
-            data.vertices[f[1]], data.vertices[f[2]], data.vertices[f[3]],
-            direction, p, scratch, toricity)
-    end
-    visible_area = zeros(Float64, n)
+    toricity::Bool, pixel_size::Float64)
+    frame = browser_projection(data, direction, toricity, pixel_size)
+    box = frame.plotbox
+    pixel_hits = ArchimedLight.DenseUpperPixelHits(box.nx * box.ny)
+    _, mesh_area, pixels_area = browser_rasterize!(browser_append_upper!,
+        pixel_hits, data, frame, toricity)
+    # Native non-toric irradiance is expressed per horizontal ground footprint.
+    pixel_area = toricity ? box.pixel_area : pixel_size^2
+    visible_area = zeros(Float64, length(data.areas))
     @inbounds for i in eachindex(pixel_hits.nodes)
         node = pixel_hits.nodes[i]
         if node != 0
-            raster_area = projected_pixels_area[node]
-            ratio = raster_area > 0.0 ? projected_mesh_area[node] / raster_area : 1.0
-            visible_area[node] += p[5] * ratio
+            raster_area = pixels_area[node]
+            ratio = raster_area > 0.0 ? mesh_area[node] / raster_area : 1.0
+            visible_area[node] += pixel_area * ratio
         end
     end
     return visible_area
@@ -189,7 +90,7 @@ function browser_configure!(state::BrowserLightConfigState,
         prepared_now = !state.scattering_ready
         if prepared_now
             state.scattering_cache = browser_prepare_scattering(state.data,
-                periodic, state.direction_offset, Int(s))
+                periodic, state.direction_offset, Int(s), browser_pixel_size(r))
             state.scattering_ready = true
         end
         if prepared_now || changed || !was_scattering
@@ -210,7 +111,7 @@ function browser_configure!(state::BrowserLightConfigState,
         @inbounds for k in 1:Int(s)
             direction = state.data.directions[state.direction_offset + k]
             responses[k] = browser_directional_area_configured(state.data,
-                direction, periodic)
+                direction, periodic, browser_pixel_size(r))
         end
         state.fixed_sky_areas = responses
     elseif was_scattering && state.scattering_ready
@@ -257,11 +158,7 @@ function browser_solve_configured(state::BrowserLightConfigState,
     @inbounds for k in 1:sectors
         d = data.directions[offset + k]
         direction = ArchimedLight.StaticArrays.SVector{3,Float64}(d)
-        elevation = asin(clamp(d[3], -1.0, 1.0))
-        soc = ArchimedLight._soc_fraction_hourly(diffuse_fraction, 1.0, elevation)
-        brightness = soc * ArchimedLight._brightness_norm_soc(elevation) +
-            (1.0 - soc) * ArchimedLight._brightness_norm_clear(direction, sun)
-        weight = brightness * max(d[3], 0.0)
+        weight = ArchimedLight._diffuse_raw_weight_java_like(diffuse_fraction, direction, sun)
         weights[k] = weight
         total_weight += weight
     end
@@ -281,7 +178,7 @@ function browser_solve_configured(state::BrowserLightConfigState,
         # The sun changes within a day, so this projection is NEVER a fixed
         # direction cache or interpolated/precomputed hourly response.
         visible_area = browser_directional_area_configured(data,
-            (sun[1], sun[2], sun[3]), state.toricity)
+            sun, state.toricity, browser_pixel_size(state.resolution_index))
         if state.scattering
             visible_area = browser_scattering_unit_response(data,
                 state.scattering_cache, visible_area)

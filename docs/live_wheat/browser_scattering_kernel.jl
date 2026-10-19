@@ -2,11 +2,9 @@
 # WebAssembly together with browser_light_kernel.jl. All projections, transfer
 # counts and iterative radiation calculations run in the browser.
 #
-# Provenance: ArchimedLight/src/interception.jl, scratch-buffer _project_triangle!
-# and _visible_area_from_projection_dense; ArchimedLight/src/scattering.jl,
-# _accumulate_scattering_counts_dense_no_virtual! and
-# _propagate_scattering_one_band_dense_only. This scene has opaque surfaces,
-# no virtual sensors or emitters, and no NIR interception.
+# The rasterizer and propagation loop come directly from ArchimedLight. This
+# adapter assembles opaque per-pixel stacks and the sparse exchange cache;
+# the scene has no virtual sensors, emitters, or NIR interception.
 
 struct BrowserScatteringCache
     weighted_hits::Vector{Float64}
@@ -16,8 +14,7 @@ struct BrowserScatteringCache
     fixed_sky_areas::Vector{Vector{Float64}}
 end
 
-# Concrete storage avoids the dynamic Dict/Type-valued scene orchestration that
-# the current WasmTarget compiler cannot lower. Each raster pixel owns a linked
+# Each raster pixel owns a linked
 # list sorted by descending depth. Insertion after equal depths preserves native
 # stable ordering, including every same-node duplicate hit.
 # WasmTarget's current Vector push! overlay copies its entire backing array.
@@ -80,79 +77,9 @@ function browser_scattering_append!(stacks::BrowserScatteringStackBuffer,
     return nothing
 end
 
-# Native raster arithmetic, with unit_scale=1f0 and upper_hit=false fixed.
-# Only the hit-storage specialization differs from the native implementation.
-function browser_scattering_triangle!(stacks::BrowserScatteringStackBuffer,
-    node_hits::Vector{Int}, projected_mesh_area::Vector{Float64},
-    projected_pixels_area::Vector{Float64}, node::Int,
-    p1, p2, p3, direction, params::Vector{Float64}, toricity::Bool,
-    scratch::ArchimedLight.RasterScanlineScratch)
-    u = 1.0f0
-    ox = Float32(params[1]) * u
-    oy = Float32(params[2]) * u
-    pxs = Float32(params[3]) * u
-    pys = Float32(params[4]) * u
-    pixel_area = params[5]
-    nx = Int(params[6])
-    ny = Int(params[7])
-    dirx = Float32(direction[1])
-    diry = Float32(direction[2])
-    dirz = Float32(direction[3])
-    dirz == 0.0f0 && return nothing
-
-    projected1, pix1 = ArchimedLight._project_vertex_to_ground_pixel(p1, dirx, diry, dirz, ox, oy, pxs, pys, u)
-    projected2, pix2 = ArchimedLight._project_vertex_to_ground_pixel(p2, dirx, diry, dirz, ox, oy, pxs, pys, u)
-    projected3, pix3 = ArchimedLight._project_vertex_to_ground_pixel(p3, dirx, diry, dirz, ox, oy, pxs, pys, u)
-    iMin = min(floor(Int, pix1[1]), floor(Int, pix2[1]), floor(Int, pix3[1]))
-    iMax = max(ceil(Int, pix1[1]), ceil(Int, pix2[1]), ceil(Int, pix3[1]))
-    jMin = min(floor(Int, pix1[2]), floor(Int, pix2[2]), floor(Int, pix3[2]))
-    jMax = max(ceil(Int, pix1[2]), ceil(Int, pix2[2]), ceil(Int, pix3[2]))
-    kMin = min(floor(Int, pix1[3]), floor(Int, pix2[3]), floor(Int, pix3[3]))
-    kMax = max(ceil(Int, pix1[3]), ceil(Int, pix2[3]), ceil(Int, pix3[3]))
-    iLength = (iMax - iMin) + 1
-    iLength <= 0 && return nothing
-    minY, maxY = ArchimedLight._scanline_bounds!(scratch, iLength, jMin, jMax)
-    ArchimedLight._get_border_pixels(pix1, pix2, iMin, minY, maxY)
-    ArchimedLight._get_border_pixels(pix2, pix3, iMin, minY, maxY)
-    ArchimedLight._get_border_pixels(pix3, pix1, iMin, minY, maxY)
-    normal = ArchimedLight._compute_normal((pix1, pix2, pix3))
-    slopeX_f32, slopeY_f32 =
-        if abs(normal[3]) > 1e-5
-            (Float32(normal[1] / normal[3]), Float32(normal[2] / normal[3]))
-        else
-            dz = Float32(direction[3])
-            (dz * Float32(normal[1]), dz * Float32(normal[2]))
-        end
-    z0 = Float32(pix1[3])
-    z0 += slopeX_f32 * (Float32(pix1[1]) - Float32(iMin))
-    z0 += slopeY_f32 * (Float32(pix1[2]) - Float32(jMin))
-    tri_proj_area = ArchimedLight._triangle_area_xy(projected1, projected2, projected3)
-    nb_hits = 0
-    node_hit_count = node_hits[node]
-    @inbounds for i in iMin:(iMax - 1)
-        ni = i - iMin
-        zi = z0 - slopeX_f32 * Float32(ni)
-        ymin_i = minY[ni + 1]
-        ymax_i = maxY[ni + 1]
-        for j in ymin_i:(ymax_i - 1)
-            nj = j - jMin
-            zpix = zi - slopeY_f32 * Float32(nj)
-            zpix = clamp(zpix, Float32(kMin), Float32(kMax))
-            nb_hits += 1
-            ii, jj = toricity ?
-                (ArchimedLight._wrap_index(i, nx), ArchimedLight._wrap_index(j, ny)) : (i, j)
-            if toricity || ((0 <= ii < nx) && (0 <= jj < ny))
-                idx = ii + 1 + jj * nx
-                browser_scattering_append!(stacks, idx, Float64(zpix / u), node)
-                node_hit_count += 1
-            end
-        end
-    end
-    node_hits[node] = node_hit_count
-    projected_mesh_area[node] += tri_proj_area
-    projected_pixels_area[node] += nb_hits * pixel_area
-    return nothing
-end
+@inline browser_scattering_append_hit!(stacks::BrowserScatteringStackBuffer,
+    pixel::Int, hit::ArchimedLight.HitRecord) =
+    browser_scattering_append!(stacks, pixel, hit[1], hit[2])
 
 # Sparse adjacency accumulation uses the same explicit-capacity policy. Ground
 # identities stay separate, while absent pavement-pavement edges consume no space.
@@ -228,21 +155,15 @@ function browser_scattering_edge_arrays(edges::BrowserScatteringEdgeBuffer)
 end
 
 function browser_scattering_direction(data::BrowserLightData, direction,
-    toricity::Bool)
+    toricity::Bool, pixel_size::Float64)
     n = length(data.areas)
     p = data.params
-    stacks = browser_scattering_stack_buffer(Int(p[6]) * Int(p[7]))
-    node_hits = zeros(Int, n)
-    projected_mesh_area = zeros(Float64, n)
-    projected_pixels_area = zeros(Float64, n)
-    scratch = ArchimedLight.RasterScanlineScratch()
-    @inbounds for i in eachindex(data.triangles)
-        f = data.triangles[i]
-        browser_scattering_triangle!(stacks, node_hits,
-            projected_mesh_area, projected_pixels_area, data.face_nodes[i],
-            data.vertices[f[1]], data.vertices[f[2]], data.vertices[f[3]],
-            direction, p, toricity, scratch)
-    end
+    frame = browser_projection(data, direction, toricity, pixel_size)
+    box = frame.plotbox
+    stacks = browser_scattering_stack_buffer(box.nx * box.ny)
+    node_hits, projected_mesh_area, projected_pixels_area =
+        browser_rasterize!(browser_scattering_append_hit!, stacks, data, frame, toricity)
+    pixel_area = toricity ? box.pixel_area : pixel_size^2
     visible_area = zeros(Float64, n)
     edges = browser_scattering_edge_buffer(n)
     @inbounds for head in stacks.heads
@@ -250,7 +171,7 @@ function browser_scattering_direction(data::BrowserLightData, direction,
             node = stacks.nodes[head]
             raster_area = projected_pixels_area[node]
             ratio = raster_area > 0.0 ? projected_mesh_area[node] / raster_area : 1.0
-            visible_area[node] += p[5] * ratio
+            visible_area[node] += pixel_area * ratio
             current = head
             following = stacks.next[current]
             while following != 0
@@ -272,7 +193,7 @@ function browser_scattering_direction(data::BrowserLightData, direction,
 end
 
 function browser_prepare_scattering(data::BrowserLightData, toricity::Bool,
-    offset::Int, sectors::Int)
+    offset::Int, sectors::Int, pixel_size::Float64)
     n = length(data.areas)
     weighted_hits = zeros(Float64, n)
     edges = browser_scattering_edge_buffer(n)
@@ -280,7 +201,7 @@ function browser_prepare_scattering(data::BrowserLightData, toricity::Bool,
     @inbounds for k in 1:sectors
         direction = data.directions[offset + k]
         area, hits, to, from, directional_counts =
-            browser_scattering_direction(data, direction, toricity)
+            browser_scattering_direction(data, direction, toricity, pixel_size)
         sky_areas[k] = area
         # Native turtle quadrature: direction[3] * sector.weight, with 1/n
         # weights. The explicit sun has zero scattering-topology weight.
@@ -305,34 +226,13 @@ end
 function browser_scattering_added_power(data::BrowserLightData,
     cache::BrowserScatteringCache, initial_power::Vector{Float64})
     n = length(initial_power)
-    current = copy(initial_power)
-    next = zeros(Float64, n)
-    added = zeros(Float64, n)
-    hit_energy = zeros(Float64, n)
-    reference = 0.0
+    coeff = Vector{Float64}(undef, n)
     @inbounds for i in 1:n
-        reference += current[i]
+        coeff[i] = data.params[58 + i]
     end
-    threshold = 0.01 * max(reference, eps(Float64))
-    for iteration in 1:20
-        @inbounds for i in 1:n
-            hits = cache.weighted_hits[i]
-            hit_energy[i] = hits > 0.0 ?
-                current[i] * data.params[58 + i] / hits / 2.0 : 0.0
-        end
-        fill!(next, 0.0)
-        @inbounds for edge in eachindex(cache.counts)
-            next[cache.edge_to[edge]] += cache.counts[edge] *
-                hit_energy[cache.edge_from[edge]]
-        end
-        total_next = 0.0
-        @inbounds for i in 1:n
-            total_next += next[i]
-            added[i] += next[i]
-        end
-        current, next = next, current
-        total_next < threshold && break
-    end
+    added, _, _ = ArchimedLight._propagate_scattering_arrays(initial_power,
+        cache.weighted_hits, coeff, cache.edge_to, cache.edge_from, cache.counts,
+        0.01, 20)
     return added
 end
 

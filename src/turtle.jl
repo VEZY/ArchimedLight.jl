@@ -348,6 +348,19 @@ function _brightness_norm_clear(dir_up, sun_up)
     brightness
 end
 
+# Unnormalized horizontal-plane diffuse weight, independent of scene containers.
+@inline function _diffuse_raw_weight_java_like(diffuse_fraction::Float64, sec_up, sun_up)
+    elev = asin(clamp(sec_up[3], -1.0, 1.0))
+    coeff_soc = _soc_fraction_hourly(diffuse_fraction, 1.0, elev)
+    coeff_clear = 1.0 - coeff_soc
+    b_soc = _brightness_norm_soc(elev)
+    b_clear = _brightness_norm_clear(sec_up, sun_up)
+    b = coeff_soc * b_soc + coeff_clear * b_clear
+
+    # Horizontal-plane conversion as in Java (multiply by cos(zenith)).
+    return b * max(sec_up[3], 0.0)
+end
+
 function _diffuse_weights_java_like(sky::SkyState, turtle::TurtleGrid, sky_ids::Vector{Int}, options::LightOptions)
     n = length(sky_ids)
     n == 0 && return Float64[]
@@ -356,17 +369,7 @@ function _diffuse_weights_java_like(sky::SkyState, turtle::TurtleGrid, sky_ids::
     raw = zeros(Float64, n)
     total = 0.0
     for (k, i) in enumerate(sky_ids)
-        sec_up = turtle.sectors[i].direction
-        elev = asin(clamp(sec_up[3], -1.0, 1.0))
-        coeff_soc = _soc_fraction_hourly(sky.diffuse_fraction, 1.0, elev)
-        coeff_clear = 1.0 - coeff_soc
-        b_soc = _brightness_norm_soc(elev)
-        b_clear = _brightness_norm_clear(sec_up, sun_up)
-        b = coeff_soc * b_soc + coeff_clear * b_clear
-
-        # horizontal-plane conversion as in Java (multiply by cos(zenith))
-        coeff = max(turtle.sectors[i].direction[3], 0.0)
-        raw[k] = b * coeff
+        raw[k] = _diffuse_raw_weight_java_like(sky.diffuse_fraction, turtle.sectors[i].direction, sun_up)
         total += raw[k]
     end
 

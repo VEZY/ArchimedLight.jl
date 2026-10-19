@@ -4,7 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 const dir = path.dirname(fileURLToPath(import.meta.url));
-const readJSON = name => JSON.parse(fs.readFileSync(path.join(dir, name === 'input_data.json' ? 'inputs' : 'fixtures', name), 'utf8'));
+// Rebuilds must check fresh public-run_light output; a clean checkout can still
+// verify the committed artifact against its matching retained references.
+const referenceDirectory = process.argv.includes('--current-native') ? 'build' : 'fixtures';
+const readJSON = name => JSON.parse(fs.readFileSync(path.join(dir, name === 'input_data.json' ? 'inputs' : referenceDirectory, name), 'utf8'));
 const bytes = fs.readFileSync(path.join(dir, '../src/assets/live-wheat/light.wasm'));
 // Bonito's static export stores the Uint8 Wasm vector in its MessagePack
 // session, nested in a base64 JavaScript source. Inspect data without executing
@@ -115,9 +118,11 @@ for (const ref of configurationRefs) {
         toricity: ref.toricity, scattering: ref.scattering,
         julia_kernel_ms: ref.julia_kernel_ms, julia_run_light_ms: ref.julia_run_light_ms});
 }
-// Revisit the first and last configurations, then restore the defaults: this
+// Revisit a daytime scattering configuration, then restore the defaults: this
 // exercises cache invalidation on the same state instead of fresh scene copies.
-const transitionRefs = [configurationRefs[0], configurationRefs.at(-1), configurationRefs[0]];
+const daytimeScattering = configurationRefs.findLast(ref => ref.scattering && ref.hour < 20);
+if (!daytimeScattering) throw new Error('Missing daytime scattering reference');
+const transitionRefs = [configurationRefs[0], daytimeScattering, configurationRefs[0]];
 const transition_checks = [];
 for (let i = 0; i < transitionRefs.length; i++) {
     const ref = transitionRefs[i];
@@ -129,7 +134,7 @@ for (let i = 0; i < transitionRefs.length; i++) {
 const noonReference = refs.find(ref => ref.hour === 12);
 if (!noonReference) throw new Error('Missing default noon reference');
 transition_checks.push(checkReference(noonReference, 'restore default noon', configure(defaults)));
-const report = {engine: process.version, initialization_milliseconds,
+const report = {engine: process.version, reference_directory: referenceDirectory, initialization_milliseconds,
     imports: moduleImports, wasm_bytes: bytes.length, receivers: receiverCount, tolerance,
     checks, configured_checks, transition_checks};
 fs.mkdirSync(path.join(dir, 'build'), {recursive: true});

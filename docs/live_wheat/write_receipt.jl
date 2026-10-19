@@ -33,6 +33,10 @@ browser_receipt = Dict("operation" => browser_build_mode,
     "build_dependencies" => Dict("Bonito" => string(Base.pkgversion(Bonito)),
         "WGLMakie" => string(Base.pkgversion(WGLMakie)),
         "WasmTarget" => isdefined(@__MODULE__, :WasmTarget) ? string(Base.pkgversion(WasmTarget)) : nothing),
+    "loaded_native_dependencies" => isdefined(@__MODULE__, :ArchimedLight) ?
+        Dict(string(name) => string(Base.pkgversion(getfield(ArchimedLight, name)))
+        for name in (:StaticArrays, :GeometryBasics, :KernelAbstractions,
+            :PlantGeom, :PlantMeteo, :MultiScaleTreeGraph)) : nothing,
     "manifest_file" => isnothing(browser_manifest_path) ? nothing : basename(browser_manifest_path),
     "manifest_sha256" => isnothing(browser_manifest_path) ? nothing : bytes2hex(sha256(read(browser_manifest_path))),
     "native_sources" => Dict(relpath(file, browser_source_root) => bytes2hex(sha256(read(file)))
