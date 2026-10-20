@@ -1,8 +1,15 @@
 [deps]
 ArchimedLight = "ca362a0f-208d-4994-8e0e-d922fd0d438a"
+Artifacts = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
+Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
+PlantGeom = "5edaa67e-25db-4eb9-bf81-05d793b2238d"
 PlantMeteo = "4630fe09-e0fb-4da5-a846-781cb73437b6"
 
 [sources]
 ArchimedLight = {path = "../.."}
+
+[compat]
+PlantGeom = "0.20"
+PlantMeteo = "0.9"

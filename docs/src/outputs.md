@@ -10,7 +10,8 @@ This page documents those three layers and then explains the ARCHIMED-style CSV 
 
 ## 1. In-Memory Outputs: `LightBudget`
 
-The core output of `run_light` for one meteo row is:
+The core output of `run_light` for one meteo row is shown below. This example
+uses 1 cm pixels for a quick demonstration and also requests sky visibility.
 
 ```@example outputs
 using ArchimedLight
@@ -18,8 +19,7 @@ using ArchimedLight
 repo_root = normpath(joinpath(dirname(pathof(ArchimedLight)), ".."))
 config = joinpath(repo_root, "example_2", "config.yml")
 sim, meteo = read_simulation(config)
-sky_options = LightOptions(sim.options; include_sky_fraction=true)
-sim = LightSimulation(sim.scene, sim.models; options=sky_options)
+update_options!(sim, LightOptions(sim.options; pixel_size=0.01, include_sky_fraction=true))
 row = first(meteo)
 step = run_light(sim, row)
 budget = step.budget;
@@ -219,6 +219,7 @@ The default mappings are:
 | `:absorbed_nir_initial_flux` | `Ra_NIR_0_f` |
 | `:absorbed_par_flux` | `Ra_PAR_f` |
 | `:absorbed_nir_flux` | `Ra_NIR_f` |
+| `:absorbed_shortwave_flux` | `Ra_SW_f` (`Ra_PAR_f + Ra_NIR_f`) |
 | `:absorbed_par_initial_energy` | `Ra_PAR_0_q` |
 | `:absorbed_nir_initial_energy` | `Ra_NIR_0_q` |
 | `:absorbed_par_energy` | `Ra_PAR_q` |
@@ -235,17 +236,30 @@ The meaning follows the historical ARCHIMED naming:
 - `_f`: irradiance-like quantity in `W m^-2`
 - `_q`: energy per component and per step in `J`
 
-You can also rename attached attributes for downstream packages. For example,
-PlantBiophysics can use `Ra_SW_f` as an alias for absorbed NIR:
+Shortwave radiation is the sum of its PAR and NIR wavebands. In particular,
+`Ra_SW_f` is **not** an alias for `Ra_NIR_f`. The typed component and
+source-owner tables derive it as
+
+```math
+Ra\_SW\_f = Ra\_PAR\_f + Ra\_NIR\_f.
+```
+
+The table also derives `aPPFD` from absorbed PAR using the requested
+PAR-energy-to-photon conversion factor:
 
 ```@example outputs
-attach_light_step!(
-    sim.scene,
-    step;
-    fields=[:area, :absorbed_par_flux, :absorbed_nir_flux, :sky_fraction],
-    names=Dict(:absorbed_nir_flux => :Ra_SW_f),
-);
+owner_light = component_values(step; level=:source_owner)
+all(isapprox.(
+    owner_light.Ra_SW_f,
+    owner_light.Ra_PAR_f .+ owner_light.Ra_NIR_f,
+))
 ```
+
+If a downstream package reads attributes attached to the scene, attach the PAR
+and NIR values under distinct names. Request `:absorbed_shortwave_flux` to
+attach their sum as `Ra_SW_f`. The historical
+`Dict(:absorbed_nir_flux => :Ra_SW_f)` mapping remains accepted and now
+produces the same PAR+NIR sum, with a deprecation warning.
 
 ## 4. Disk Outputs: Exported Scenes
 

@@ -1,0 +1,165 @@
+# Landing-page wheat demo
+
+This directory maintains the static interactive artifact in
+`../src/assets/live-wheat/index.html`. Normal documentation builds copy that
+checked-in HTML, Wasm module and `preview.png`; they do not install WasmTarget,
+compile WebAssembly, start a Julia server, or precompute the demo's light
+results. Other documentation examples still run their normal Julia calculations.
+
+## Automatic rebuilds
+
+The Docs workflow rebuilds the demo from source before publishing changes on
+`main`, a pushed release tag, or a manual Docs run. It calls the reusable
+`RebuildWheatDemo.yml` workflow with Julia 1.13.1, compares 56 cases to freshly
+computed public `run_light` results, compiles WebAssembly, exports Bonito HTML,
+then runs all 56 browser
+numerical checks. A failed rebuild blocks that documentation deployment.
+
+Relevant pull requests also run the source rebuild as a separate check.
+Their documentation previews keep using the committed demo. Ordinary local
+documentation builds do the same. The rebuild workflow can also be started
+manually on a chosen revision; that standalone run produces an artifact
+without publishing documentation or committing generated files.
+
+The `wheat-browser-demo` Actions artifact retains the generated HTML, Wasm,
+receipt, resolved `Manifest.toml` and numerical report for 90 days. The receipt
+records the source revision, native and build-source hashes, Julia/compiler
+versions and manifest hash. The documentation job downloads only the rebuilt
+HTML and Wasm for publication, leaving the repository and release tag intact.
+
+Documenter builds the documentation site with Bonito.DocumenterBonito.
+Bonito also exports this demo's
+self-contained HTML using `NoConnection`; WGLMakie renders its retained mesh.
+The light kernels execute in a browser worker as Julia-compiled WebAssembly.
+JavaScript transports controls and scalar colour buffers, without implementing
+light equations. The HTML embeds the Wasm and seven geometry/forcing buffers.
+It never fetches `fixtures/` or any hourly light result.
+
+## Rebuild
+
+Use a Kaimon-controlled **Julia 1.13.1** session opened on this directory.
+Instantiate this separate project through Kaimon, then run:
+
+```julia
+include("build.jl")
+```
+
+The direct build dependencies are pinned, including WasmTarget 0.5.3,
+Bonito 5.2.0 and WGLMakie 0.13.15. ArchimedLight is the repository at `../..`.
+There are no paths to conference files or other development checkouts.
+`prepare_scene.jl` decodes the vendored immutable input buffers and expands
+vertices per triangle. `verify_kernel.jl` reconstructs the native scene, models
+and weather from these inputs and compares the browser kernel with the current
+public `run_light` before compilation. It writes fresh references to `build/`.
+The emitted numerical module must have no imports.
+
+The output HTML is written directly to `../src/assets/live-wheat/index.html`,
+and the emitted module to the adjacent checked-in `light.wasm`.
+`artifact_receipt.json` records source/artifact hashes and whether the module
+was recompiled or reused. The initial integration reused the independently
+verified module and Bonito export, adding the maintained CSS/readiness shell.
+Later presentation edits are recorded in the receipt; they do not imply a new
+compiler run or change the numerical module.
+
+This is a version-pinned rebuild recipe, rather than a fully locked build:
+there is no committed `Manifest.toml` for transitive dependencies, and native
+ArchimedLight helpers come from the current repository checkout. Each rebuild
+records and archives its resolved dependency graph. Numerical equivalence is
+checked against the current native implementation; byte-identical output across
+different machines or toolchain resolutions is not guaranteed.
+
+A **clean checkout** can execute the complete Wasm numerical parity suite
+without Julia (WasmGC support required; tested with Node 24.10):
+
+```sh
+node check_wasm.mjs
+```
+
+It first checks that the HTML embeds exactly the adjacent `light.wasm`, then
+compares all 1,894 receivers in eleven baseline hour cases, 41 configured
+cases, and four configuration transitions. These retained references come
+from independent public native ArchimedLight runs, rather than the Wasm
+kernel itself. After rebuilding, use `node check_wasm.mjs --current-native` to
+compare the emitted module to the fresh `build/` references. The CI rebuild
+always uses this mode, so old fixtures cannot conceal a native algorithm change.
+
+For frontend re-export, `include("reexport.jl")` reuses the checked-in
+`../src/assets/live-wheat/light.wasm`; it does not recompile the numerical code.
+Both export routes append the same `shell.css` and `ready_bridge.js` through
+`attach_shell.jl`. They contain presentation/readiness logic only. Keep this
+plain-JavaScript lifecycle bridge as the sole handshake implementation.
+Serve the documentation or `../src/assets/live-wheat/` through a static HTTP
+server to inspect the page. No Julia service is needed at runtime.
+
+## Numerical scope and provenance
+
+The fixed architecture is ArchimedLight's benchmark wheat with an unspecified
+cultivar; **it is not the Neodur canopy**. It has 6,462 triangles and 1,894
+receivers, including one 60 × 30 ground. Both plant and ground show incident
+PAR on the same 0–600 W/m² thermal scale. The day is 15 May 2025, with 24 hourly
+Montpellier weather estimates interpolated to a snapshot rounded to the minute.
+These are archived weather estimates, not in-plot observations. See
+`inputs/PROVENANCE.md` for hashes, source URLs, units and limitations.
+
+The controls choose 05:00–21:00 UTC in five-minute steps, scattering, toricity,
+5–40 mm light-pixel resolution, and 16/46/136 diffuse sectors. The direct sun
+retains its true direction (`all_in_turtle=false`). Hour changes retain the
+fixed diffuse geometry; option changes rebuild necessary caches inside Wasm.
+Scattering follows native per-sector unit responses with a 0.01 relative
+stopping rule and 20-iteration limit. This is an opaque, PAR-only numerical
+specialization for this mesh, not compilation of the full native orchestration.
+
+`browser_light_kernel.jl` provides input decoding and storage adapters;
+`browser_options_kernel.jl` controls invalidation, actual sun/sky calculations
+and first-order responses; `browser_scattering_kernel.jl` provides opaque
+hit stacks and exchange-cache assembly. Both native and browser callers use
+the same triangle rasterizer, diffuse-weight formula and array-based scattering
+propagation in `src/`. Non-toric scenes also use the same perpendicular
+projection frame and horizontal-ground-footprint normalization; toric scenes
+retain ground projection and wrapping. Browser hit buffers grow geometrically
+because WasmTarget 0.5.3's `push!` overlay reallocates and copies a whole vector
+on every insertion. This storage policy does not duplicate the raster equations.
+
+Open-Meteo radiation is a mean over the hour preceding its UTC timestamp.
+The demo calls the shared native `interpolate_radiation` with those interval
+centres and Montpellier's longitude (3.878° E). It interpolates each component divided
+by the native extraterrestrial hourly irradiance, then multiplies by the
+instantaneous extraterrestrial irradiance. This keeps direct normal irradiance
+bounded as the sun reaches the horizon, without capping receiver values.
+This smooth visualization does not exactly conserve each hourly energy total
+and omits diffuse twilight after the solar centre sets. Montpellier civil time
+on this date is UTC+2.
+
+The exported `LScene` uses WGLMakie's native browser camera: drag to rotate,
+scroll or pinch to zoom, and right-drag to pan. Moving the camera changes only
+the view; it does not recompute light.
+
+`wasmtarget_julia_113.jl` supplies the `external_linkage=false` keyword required
+by Julia 1.13.1 to the loaded WasmTarget 0.5.3 collector method. It changes no
+package file or light equation, and has no runtime role. Reassess this narrow
+build-time adapter before changing the pinned Julia/compiler pair.
+
+The timing line separates calculation from option setup, excluding rendering.
+The native verifier records medians of five warmed single evaluations for both
+the kernel and public `run_light`. The Node report records option setup and
+each solve separately. Browser timings depend on the engine and machine;
+comparisons across a projection change also include the changed geometry work.
+
+## Landing-page handshake
+
+The parent initially displays `preview.png` and creates the iframe near the
+viewport. Keep the loading iframe rendered at its real width (opacity or
+visibility is suitable; `display:none` prevents correct initialization).
+The bridge waits until WGL exposes the mesh and the first successful Wasm
+result has updated its colour buffer, then waits two animation frames and
+completes submitted WebGL work.
+It then posts `{type: "archimedlight:wheat-ready", height, hour, milliseconds}`
+to the same-origin parent, which can replace its preview.
+
+A same-origin parent can request status with
+`{type: "archimedlight:wheat-status"}`; once ready, the iframe resends readiness.
+The iframe accepts this request only from `window.parent` at `location.origin`.
+It posts `archimedlight:wheat-error` on initialization/calculation failures and
+`archimedlight:wheat-resize` after ready when content height changes. The
+parent must also verify both message source and origin. A plain iframe load
+event is not evidence that the numerical calculation or rendered scene is ready.

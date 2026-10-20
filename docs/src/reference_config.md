@@ -170,19 +170,41 @@ radiation. The equivalent Julia constructor keyword is
 
 ### `pixel_size`
 
-Requested pixel size in centimetres in the YAML file.
-Internally, `LightOptions.pixel_size` stores the value in meters.
+Requested horizontal-ground raster spacing in centimetres in the YAML file.
+Internally, `LightOptions.pixel_size` stores the value in metres: for example,
+`pixel_size: 1` in YAML corresponds to `LightOptions(pixel_size=0.01)`.
 
-This parameter controls the horizontal sampling density of the projected pixel tables:
+The name, units, and ground-resolution meaning are the same for both toricity
+settings. The projection grid is constructed as follows:
+
+| Setting | Projection and pixel spacing |
+|:--|:--|
+| `toricity=true` | A horizontal grid covers the repeating plot tile. An integer number of cells is fitted to the plot dimensions, so actual x and y widths can differ slightly from `pixel_size`. |
+| `toricity=false` | A perpendicular plane is fitted to the complete scene for each light direction. Pixels back-project to squares of side `pixel_size` on horizontal ground; the squares rotate with light azimuth. |
+
+For a finite scene and an upward direction with vertical component `s_z`, the
+internal perpendicular-plane pixel pitches are `pixel_size` and
+`pixel_size * s_z`. This preserves ground resolution at low sun; using the same
+spacing on both perpendicular axes would instead stretch the ground footprint.
+There is no additional sampling option to configure.
+
+This parameter controls the sampling density of the projected pixel tables:
 
 - smaller pixels -> more rays and finer spatial resolution
 - larger pixels -> fewer rays and faster runs
 
-The current runtime validates `0 < pixel_size <= 0.5` meters after conversion.
+The current runtime validates `0 < pixel_size <= 0.5` metres after conversion.
 
-This parameter is one of the main numerical controls in the whole model because first-order interception is computed by rasterizing projected geometry onto a regular horizontal grid. `pixel_size` therefore sets the spatial resolution of that projection.
+This parameter is one of the main numerical controls in the whole model because first-order interception is computed by rasterizing projected geometry. `pixel_size` therefore sets the spatial resolution of that projection.
 
 Smaller pixels produce a finer approximation of canopy geometry. They resolve small gaps better, distinguish nearby components more clearly, and generally reduce discretization artefacts, but they also increase the number of pixels and the size of the hit tables the solver has to manage. Larger pixels make runs cheaper, but they can merge nearby organs into the same projected cell and smooth out the structure of the canopy.
+
+Finite-scene canvases automatically cover the geometry, including elevated
+objects whose ground projections would lie outside the plot. Preserving the
+same ground resolution can still require many pixels at low light elevations.
+Finer spatial resolution does not remove errors from a coarse sky-sector grid,
+and raster alignment can make individual errors vary non-monotonically with
+`pixel_size`.
 
 ### `area_ratio`
 
@@ -194,6 +216,10 @@ See [First-Order Interception](theory_interception.md) for the geometric reason 
 The point of `area_ratio` is to acknowledge that the area covered by hit pixels is only an approximation of the true projected mesh area. After rasterization, the solver can compare those two quantities and use their ratio as a correction factor. When `area_ratio` is enabled, this correction is applied node by node; when it is disabled, the raw rasterized area is used as-is.
 
 In practice, leaving this on usually makes the result less sensitive to pixelization artefacts and more consistent with the underlying geometry, which is why it is the normal setting for ARCHIMED-style parity. Turning it off is mainly useful if you explicitly want to inspect the uncorrected raster behavior or reproduce a simplified approximation.
+
+The correction is evaluated in the projection plane. Finite-scene areas are then
+converted to the horizontal-equivalent convention used with the supplied
+horizontal irradiances; component fluxes still use the original mesh area.
 
 ### `scattering`
 
@@ -253,6 +279,15 @@ This is worthwhile when many time steps are simulated on the same scene.
 
 When this option is enabled, `run_light(sim, meteo)` and repeated `run_light(sim, row)` calls reuse unit directional responses across meteo rows. In the raster CPU path, that cache stores the first-order response and, when scattering is enabled, the scattered added-light response as well. The time-step results are then reconstructed by weighting those cached unit responses with the true directional fluxes of each row.
 
+With `all_in_turtle=false`, the diffuse directions and their unit responses stay
+cached when the explicit sun moves. Only the current solar direction is
+reprojected and its scattered response recomputed. The diffuse irradiance and
+its angular distribution are still updated for every row, including across
+days. One replaceable solar slot avoids retaining a new copy of the diffuse
+cache for each sun position. Changing the scene, optical models, or numerical
+options through `update_scene!`, `update_models!`, or `update_options!` rebuilds
+the cache.
+
 The main effect is therefore still on runtime, not on physics, but the optimization is now stronger than a simple first-order shortcut. It is especially useful for long series on an unchanged scene and for manual simulation loops where you run a few steps, pause, inspect or grow the scene, and then explicitly rebuild the cache when geometry or optics change.
 
 Large scenes are handled with a tiered policy. If the full-response cache is small enough, it stays in memory. If not, the runtime falls back to a bounded partial cache, and if even that is not appropriate it falls back to the prepared topology path instead of allocating an unbounded cache.
@@ -287,14 +322,27 @@ This option should not change the physical result. Its role is purely practical:
 
 Enable the periodic wrapping of the plot in the horizontal plane.
 
-- `false`: the plot is treated as isolated
-- `true`: rays leaving one horizontal edge re-enter on the opposite edge
+- `false`: a finite scene, with a fitted perpendicular projection canvas for each direction
+- `true`: projected pixels leaving one horizontal edge wrap to the opposite edge
 
 This is how ARCHIMED represents repeated orchard or crop patterns with a finite representative tile.
 
 When it is enabled, the plot is treated as one tile of an infinite periodic repetition in the horizontal plane. Rays leaving one side of the plot re-enter from the opposite side, so the canopy no longer has true horizontal borders in the radiative sense.
 
-That can be very appropriate for repeated crop rows or orchard motifs, because it removes edge effects that would otherwise be artefacts of simulating only one finite tile. But it would be the wrong choice for an isolated plant or a genuinely finite experimental plot, because then those edge losses are part of the situation being modeled. In other words, `toricity` changes the geometry that the solver "sees", not merely the efficiency of the calculation.
+That can be appropriate for repeated crop rows or orchard motifs, because it
+represents neighboring copies of the same tile. An isolated plant or finite
+experimental plot instead needs `toricity=false` to remove those periodic
+neighbors. Its projection canvas is fitted to all scene geometry separately
+for each direction, so a tight XY domain no longer clips the illumination of
+upper plant parts. This automatic canvas changes the sampling bounds only: it
+does not enlarge the soil, add neighbors, or change component surface areas.
+See [Scene Files And Semantics](reference_scene.md) for the physical plot-domain
+inputs.
+
+!!! compat "Finite-scene projection"
+    Non-toric results can differ from versions that clipped projections to the
+    horizontal plot window. Periodic projection retains its horizontal tile and
+    wrapping behavior. The existing `pixel_size` name and units apply to both.
 
 For reference, we call this option "toricity" because it effectively turns the horizontal plane into a torus. The vertical dimension remains unchanged, so the plot is still finite in height, but the horizontal plane wraps around on itself like a donut:
 
@@ -378,7 +426,7 @@ When this flag is `true`, that validation is skipped and the rows are kept in th
 ### `pixel_hit_stack_mode`
 
 Internal raster-storage option controlling how per-pixel hit stacks are stored.
-Supported values are:
+ARCHIMED configuration files use these portable text values:
 
 - `auto`
 - `small`
@@ -387,6 +435,21 @@ Supported values are:
 This option is purely about implementation strategy inside the raster code. It selects how per-pixel hit stacks are stored in memory, which can matter for performance or for low-level debugging, but it is not intended to represent any physical assumption.
 
 For most users, `auto` is the correct setting and should be left alone. The other modes are mainly there when you are investigating performance behavior or trying to isolate an implementation-level discrepancy in the interception code. They are not meant to change the semantics of the model.
+
+`read_options` parses the text once into the typed `PixelHitStackPolicy`; the
+raster runtime never branches on strings. When constructing options directly in
+Julia, use the typed values instead:
+
+```julia
+LightOptions(pixel_hit_stack_mode=AutoPixelHitStack)   # default
+LightOptions(pixel_hit_stack_mode=SmallPixelHitStack)  # compact inline stacks
+LightOptions(pixel_hit_stack_mode=VectorPixelHitStack) # historical vectors
+```
+
+Passing `"auto"`, `"small"`, or `"vector"` (or the corresponding symbols) directly
+to `LightOptions` remains supported with a deprecation warning. Use the typed
+values shown above in Julia code. Configuration files continue to use strings
+as their stable serialized representation.
 
 ### `debug`, `log_debug`, `debug_drop_leading_hit`
 
@@ -446,4 +509,4 @@ options = LightOptions(
 )
 ```
 
-The parameters are the same, you can see the full list in the documentation for [LightOptions](@ref).
+The parameters are the same; see the full list in [`LightOptions`](@ref).

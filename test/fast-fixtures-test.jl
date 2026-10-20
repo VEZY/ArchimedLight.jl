@@ -63,7 +63,10 @@ end
     series = ArchimedLight.run_light_series(fixture.scene, fixture.models, fixture.meteo, fixture.options)
     step = first(series)
 
-    expected_csv = joinpath(case_root, "expected", "component_values.csv")
+    # Finite-projection goldens use the supplied inputs and production CPU path.
+    # Independent analytical checks live in finite-projection-test.jl; expected/
+    # remains the historical clipped-ground reference.
+    expected_csv = joinpath(case_root, "expected_perpendicular", "component_values.csv")
     expected_rows = collect(Tables.rowtable(CSV.File(expected_csv; delim=';', normalizenames=false)))
     observed_map = _source_topology_area_q(fixture.scene, fixture.models, fixture.options, step)
 
@@ -77,7 +80,7 @@ end
     end
 
     fig = _render_ri_par_f_figure(fixture.scene, fixture.models, fixture.options, step; title="simpleplant_16_notoric | Ri_PAR_f")
-    ref_png = joinpath(case_root, "expected", "ri_par_f_step0.png")
+    ref_png = joinpath(case_root, "expected_perpendicular", "ri_par_f_step0.png")
     @test_reference relpath(ref_png, @__DIR__) fig by = ReferenceTests.psnr_equality(35)
 end
 

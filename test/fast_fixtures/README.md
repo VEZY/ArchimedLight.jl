@@ -14,3 +14,5 @@ Cases:
 - `sky_46_direct`: sky-only stages, 46 sectors, `all_in_turtle=false`.
 - `simpleplant_16_notoric`: one simple plant, 16 sectors, toricity disabled.
 - `simpleplant_16_toric`: one simple plant, 16 sectors, toricity enabled.
+- `scattering_plates`: one-step release cases with one or two plates, scattering
+  enabled, numeric references, and image comparisons in the regular suite.

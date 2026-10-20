@@ -32,12 +32,16 @@ than relying on the `cache` field or cache object layout.
 
 File-based run:
 
+The checked example uses 1 cm pixels for a quick demonstration. Omit the
+`update_options!` call to use the bundled coffee configuration's 1 mm pixels.
+
 ```@example api_file_workflow
 using ArchimedLight
 
 repo_root = normpath(joinpath(dirname(pathof(ArchimedLight)), ".."))
 config = joinpath(repo_root, "example_2", "config.yml")
 sim, meteo = read_simulation(config)
+update_options!(sim, LightOptions(sim.options; pixel_size=0.01))
 step = run_light(sim, first(meteo))
 series = run_light(sim, meteo);
 ```
@@ -209,6 +213,80 @@ cache entries. The cache object itself is an implementation detail; use
 current lightweight metadata snapshot independently of the radiation-response
 cache budget.
 
+## Backend Selection
+
+The default backend is the CPU raster path:
+
+```julia
+step = run_light_step(scene, models, row, options; interception_backend=:raster_cpu)
+```
+
+The native KernelAbstractions raster backend keeps the same public pipeline while
+running projection, visibility-stack, area-reduction, and scattering-topology
+kernels on the selected device:
+
+```julia
+using CUDA
+using KernelAbstractions
+
+dev = KernelAbstractions.get_backend(CUDA.CuArray(zeros(Float32, 1)))
+ib = RasterGPUBackend(
+    backend=dev,
+    max_hits_per_pixel=128,
+    tile_size=1,
+    tile_face_capacity=128,
+    edge_accumulation=:auto,
+)
+sb = RasterGPUScatteringBackend(ib)
+
+step = run_light_step(
+    scene,
+    models,
+    row,
+    options;
+    interception_backend=ib,
+    scattering_backend=sb,
+)
+```
+
+GPU packages are intentionally not hard dependencies of ArchimedLight. Load
+Metal, CUDA, oneAPI, or AMDGPU in the calling environment and pass the
+corresponding KernelAbstractions backend. The symbol `:raster_gpu` selects the
+same implementation with the KernelAbstractions CPU backend and is useful for
+portable validation.
+
+Full-stack projections keep up to `max_hits_per_pixel=32` hits per projected
+pixel by default. Dense scenes can raise that value explicitly, with
+proportionally larger device buffers. `edge_accumulation=:auto` selects dense
+atomics when the backend supports them and the dense edge matrix fits; otherwise
+it uses counted sparse keys with host reduction.
+
+### Optional Metal validation
+
+Metal.jl remains outside the main package dependencies. The dedicated GPU test
+environment requires Metal 1.10.3 or newer, the first registered release with
+the atomic support needed by the RasterGPU kernels:
+
+```sh
+julia --project=test/gpu -e 'using Pkg; Pkg.instantiate()'
+ARCHIMEDLIGHT_TEST_METAL=required julia --project=test/gpu test/gpu/runtests.jl
+```
+
+The RasterGPU atomic kernels use `:monotonic` ordering. They need working
+Metal/KernelAbstractions atomics, but do not require acquire/release semantics.
+Metal.jl reports that capability only when the active toolchain provides MSL 4.1
+or newer; installing Metal.jl 1.10.3 does not by itself upgrade the system
+toolchain. The focused suite verifies atomic availability and compares
+first-order and scattering results against the CPU raster reference.
+
+Use `ARCHIMEDLIGHT_TEST_METAL=1` to skip gracefully when Metal is unavailable,
+or `required` to make missing hardware, drivers, or packages fail the run.
+
+!!! warning
+    `RasterGPUBackend` is experimental. Validate new devices and large scenes
+    against `RasterCPUBackend`, and size `max_hits_per_pixel`, `tile_size`, and
+    `tile_face_capacity` for the target geometry.
+
 ## Advanced Light Pipeline
 
 The explicit stage API is available as qualified, advanced API for debugging,
@@ -295,6 +373,7 @@ field. The supported `fields` selectors are:
 | `:absorbed_nir_initial_flux` | `Ra_NIR_0_f` |
 | `:absorbed_par_flux` | `Ra_PAR_f` |
 | `:absorbed_nir_flux` | `Ra_NIR_f` |
+| `:absorbed_shortwave_flux` | `Ra_SW_f` (`Ra_PAR_f + Ra_NIR_f`) |
 | `:absorbed_par_initial_energy` | `Ra_PAR_0_q` |
 | `:absorbed_nir_initial_energy` | `Ra_NIR_0_q` |
 | `:absorbed_par_energy` | `Ra_PAR_q` |
@@ -305,8 +384,11 @@ For `:area`, `attach_light_step!` attaches one scalar surface area per node,
 while `attach_light_series!` repeats that area once per step so the attached
 attribute has the same vector shape as the light fields.
 
-Use `names=Dict(selector => attr)` to override default attribute names, for
-example `Dict(:absorbed_nir_flux => :Ra_SW_f)`.
+Use `names=Dict(selector => attr)` to override a default attribute name.
+`Ra_SW_f` always contains absorbed PAR plus absorbed NIR. The historical
+`Dict(:absorbed_nir_flux => :Ra_SW_f)` mapping remains accepted and now
+produces that canonical sum, with a deprecation warning; request
+`:absorbed_shortwave_flux` in new code.
 
 ## Scene-Aware Light Queries
 

@@ -7,8 +7,10 @@ on:
       - main
     paths:
       - ".github/workflows/Docs.yml"
+      - ".github/workflows/RebuildWheatDemo.yml"
       - "docs/**"
       - "src/**"
+      - "ext/**"
       - "*.toml"
     tags: ["*"]
   pull_request:
@@ -16,8 +18,10 @@ on:
       - main
     paths:
       - ".github/workflows/Docs.yml"
+      - ".github/workflows/RebuildWheatDemo.yml"
       - "docs/**"
       - "src/**"
+      - "ext/**"
       - "*.toml"
     types: [opened, synchronize, reopened]
 
@@ -28,15 +32,45 @@ concurrency:
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 
 jobs:
+  rebuild-wheat:
+    # Main, release tags and manual Docs runs publish a freshly compiled demo.
+    # PR previews continue to validate the committed artifact.
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/RebuildWheatDemo.yml
+
   docs:
     name: Documentation
+    needs: rebuild-wheat
+    # A skipped rebuild is expected on PRs. A failed rebuild blocks publication.
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || needs.rebuild-wheat.result == 'success') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       actions: write # needed to allow julia-actions/cache to proactively delete old caches that it has created
       contents: write
       statuses: write
     steps:
       - uses: actions/checkout@v7
+      - name: Download this revision's rebuilt browser artifact
+        if: needs.rebuild-wheat.result == 'success'
+        uses: actions/download-artifact@v8
+        with:
+          name: wheat-browser-demo
+          path: ${{ runner.temp }}/wheat-browser-demo
+      - name: Install the rebuilt HTML and Wasm for documentation publication
+        if: needs.rebuild-wheat.result == 'success'
+        run: |
+          cp "$RUNNER_TEMP/wheat-browser-demo/docs/src/assets/live-wheat/index.html" docs/src/assets/live-wheat/index.html
+          cp "$RUNNER_TEMP/wheat-browser-demo/docs/src/assets/live-wheat/light.wasm" docs/src/assets/live-wheat/light.wasm
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Test wheat demo loading and preview readiness
+        run: node --test docs/tests/live_wheat_loader.mjs
+      - name: Check browser light calculations against native references
+        run: node docs/live_wheat/check_wasm.mjs
       - uses: julia-actions/setup-julia@v3
         with:
           version: "1"
@@ -49,14 +83,11 @@ jobs:
             Pkg.develop(PackageSpec(path=pwd()))
             Pkg.instantiate()'
       - uses: julia-actions/julia-buildpkg@v1
-      - name: Run doctest
-        run: |
-          julia --project=docs -e '
-            using Documenter: DocMeta, doctest
-            using ArchimedLight
-            DocMeta.setdocmeta!(ArchimedLight, :DocTestSetup, :(using ArchimedLight); recursive=true)
-            doctest(ArchimedLight)'
-      - uses: julia-actions/julia-docdeploy@v1
+      # makedocs runs the package and manual doctests together with the examples.
+      - name: Build and deploy documentation
+        uses: julia-actions/julia-docdeploy@v1
         env:
+          # Show the page and executable block responsible for a slow build.
+          JULIA_DEBUG: Documenter
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}

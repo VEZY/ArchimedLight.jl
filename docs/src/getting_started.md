@@ -21,7 +21,7 @@ plantviz(scene_preview.mtg, color = Dict("Mesh0" => :gray87, "Mesh1" => "#42A25A
 
 ## What This Example Covers
 
-- reading parameters from files, using a `config.yml` as the single source of truth for file paths and model options
+- reading file paths and model options from `config.yml`, then choosing a tutorial resolution explicitly
 - loading a scene from `.ops` and `.opf`
 - loading functional-group models from YAML
 - reading one meteo step
@@ -30,12 +30,18 @@ plantviz(scene_preview.mtg, color = Dict("Mesh0" => :gray87, "Mesh1" => "#42A25A
 
 ## Minimal Run
 
+For this tutorial we use 1 cm pixels, keeping the original coffee geometry,
+optical models, 46 sky directions, and scattering. The original configuration
+uses 1 mm pixels, which takes longer to compute. Omit the `pixel_size` override when you need to run that finer
+configuration.
+
 ```@example getting_started
 using ArchimedLight
 
 repo_root = normpath(joinpath(dirname(pathof(ArchimedLight)), ".."))
 config = joinpath(repo_root, "example_2", "config.yml")
 sim, meteo = read_simulation(config)
+update_options!(sim, LightOptions(sim.options; pixel_size=0.01, include_sky_fraction=true))
 scene = sim.scene
 models = sim.models
 options = sim.options
@@ -55,12 +61,9 @@ The result is a `LightStepResult`. The most useful field at first is `step.budge
 `ArchimedLight.jl` keeps the simulation results in the `LightStepResult` by default. If you want an inspectable scene, attach selected outputs back onto the MTG:
 
 ```@example getting_started
-sky_options = LightOptions(options; include_sky_fraction=true)
-sim_with_sky = LightSimulation(scene, models; options=sky_options)
-step_with_sky = run_light(sim_with_sky, row)
 attach_light_step!(
     scene,
-    step_with_sky;
+    step;
     fields=[:area, :incident_par_flux, :incident_par_energy, :absorbed_par_energy, :sky_fraction],
 )
 ```
@@ -129,7 +132,9 @@ fig_inf
 For a time series, we can generate the plot once and update `timestep` to inspect
 any simulated hour. Each `LightStepResult` supplies its own stored render
 geometry, so this also works for a series assembled from scenes that changed
-between simulation steps:
+between simulation steps.
+
+The scene stays fixed in this example (*i.e.* no growth or pruning), so we can enable `cache_radiation` to reuse most of the computations across the ten hourly steps. We will also use `toricity` to simulate an infinite canopy.
 
 ```@example getting_started
 # Generating a series of meteo row to simulate a day:
@@ -146,7 +151,7 @@ meteo = PlantMeteo.TimeStepTable(
     (latitude=15.0, file="interactive",),
 )
 
-update_options!(sim, LightOptions(turtle_sectors=16, all_in_turtle=true, radiation_timestep_minutes=5, pixel_size=0.003, toricity=true))
+update_options!(sim, LightOptions(sim.options; turtle_sectors=16, cache_radiation=true))
 series = run_light(sim, meteo)
 
 fig = Figure(resolution=(980, 700))

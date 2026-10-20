@@ -9,6 +9,9 @@ import Serialization
 import Dates
 import OrderedCollections: OrderedDict
 import PlantMeteo
+import Adapt
+import KernelAbstractions
+using KernelAbstractions: @atomic, @index
 import Tables
 import YAML
 import CSV
@@ -32,11 +35,13 @@ include("voxel/scattering.jl")
 include("voxel/pipeline.jl")
 include("attach.jl")
 include("outputs.jl")
+include("plantsimengine.jl")
 include("visualization.jl")
 include("query.jl")
 
 export LightRenderGeometry
 export LightNodeMetadata
+export LightComponentMetadata
 export LightModels
 export GroupModel
 export TypeModel
@@ -44,8 +49,12 @@ export InterceptionModel
 export EmitterModel
 export OpticalProperties
 export LightOptions
-export RasterCPUBackend
-export RaycastScatteringBackend
+export PixelHitStackPolicy
+export AutoPixelHitStack
+export SmallPixelHitStack
+export VectorPixelHitStack
+export RasterCPUBackend, RasterGPUBackendConfig, RasterGPUBackend
+export RaycastScatteringBackend, RasterGPUScatteringBackend
 export SkyState
 export LightBudget
 export LightStepResult
@@ -93,6 +102,7 @@ export read_options
 export read_simulation
 export read_meteo
 export prepare_meteo
+export interpolate_radiation
 export cache_summary
 export update_scene!
 export update_models!
@@ -142,6 +152,11 @@ export attach_node_values!
 export attach_light_step!
 export attach_light_series!
 export write_component_values
+export CompiledComponentAggregation
+export component_values
+export component_values!
+export ArchimedLightModel
+export archimed_light_outputs
 export light_render_geometry
 export tile_light_geometry
 export light_node_ids

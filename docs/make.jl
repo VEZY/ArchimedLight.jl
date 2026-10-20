@@ -1,27 +1,42 @@
 using ArchimedLight
 using Documenter
+using Bonito
 
 # For interactive rendering:
 # using LiveServer
 # servedocs()
-# or julia --project=docs -e 'using LiveServer; LiveServer.serve(dir = "docs/build/1")'
+# or LiveServer.serve(dir=joinpath(@__DIR__, "build"))
 
 DocMeta.setdocmeta!(ArchimedLight, :DocTestSetup, :(using ArchimedLight); recursive=true)
 
 # Update the videos:
 # include(joinpath(@__DIR__, "make_video", "make_video.jl"))
 
+# Documenter still evaluates examples, checks references and deploys the site.
+# Bonito supplies its static HTML writer and documentation theme.
+home = (
+    name="ArchimedLight.jl",
+    text="Light in 3D plant scenes",
+    tagline="Simulate radiation interception and scattering from individual organs to crop canopies.",
+    image="assets/archimedlight-logo.png",
+    actions=[
+        (text="Run your first simulation", link="getting_started.html", theme="brand"),
+        (text="Explore the model", link="theory_pipeline.html", theme="alt"),
+    ],
+)
+
 makedocs(;
     modules=[ArchimedLight],
     authors="Rémi Vezy <VEZY@users.noreply.github.com> and contributors",
     repo=Documenter.Remotes.GitHub("VEZY", "ArchimedLight.jl"),
     sitename="ArchimedLight.jl",
-    format=Documenter.HTML(
-        prettyurls=get(ENV, "CI", "false") == "true",
-        canonical="https://VEZY.github.io/ArchimedLight.jl",
-        edit_link="main",
-        assets=String[],
-        size_threshold=700000,
+    format=Bonito.DocumenterBonito(;
+        repo="github.com/VEZY/ArchimedLight.jl",
+        devbranch="main",
+        devurl="dev",
+        version=get(ENV, "GITHUB_REF_TYPE", "") == "tag" ? get(ENV, "GITHUB_REF_NAME", "dev") : "dev",
+        home,
+        description="Light interception and scattering in three-dimensional plant scenes, computed in Julia.",
     ),
     pages=[
         "Home" => "index.md",
@@ -41,6 +56,7 @@ makedocs(;
             "Voxel Terrain And Soil" => "voxel_terrain.md",
         ],
         "Outputs" => "outputs.md",
+        "Evaluation" => "evaluation.md",
         "Performance Benchmarks" => "performance_benchmarks.md",
         "Under The Hood" => [
             "Pipeline Overview" => "theory_pipeline.md",
@@ -50,8 +66,10 @@ makedocs(;
             "Voxel Future Directions" => "voxel_future_directions.md",
         ],
         "Advanced Usage" => [
+            "PlantSimEngine Coupling" => "plantsimengine.md",
             "File-Based Example" => "full_example.md",
             "Composable Stages" => "stages.md",
+            "GPU Backends And Benchmarks" => "gpu_backends.md",
             "Historical ARCHIMED Reference" => "archimed_reference.md",
         ],
         "API Reference" => [
@@ -61,8 +79,16 @@ makedocs(;
     ],
 )
 
+include(joinpath(@__DIR__, "check_static_export.jl"))
+finish_static_export()
+
 include(joinpath(@__DIR__, "check_inline_voxel_plot.jl"))
 check_inline_voxel_plot(joinpath(@__DIR__, "build"))
 
-deploydocs(; repo="github.com/VEZY/ArchimedLight.jl.git", devbranch="main", push_preview=true)
-# Visit https://VEZY.github.io/ArchimedLight.jl/previews/PR26 to visualize the preview of the PR #26
+if get(ENV, "ARCHIMEDLIGHT_DOCS_BUILD_ONLY", "false") != "true"
+    deploydocs(;
+        repo="github.com/VEZY/ArchimedLight.jl.git",
+        devbranch="main",
+        push_preview=true,
+    )
+end

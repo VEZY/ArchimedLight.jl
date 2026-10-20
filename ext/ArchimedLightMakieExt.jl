@@ -484,7 +484,9 @@ function Makie.plot!(plot::VoxelPlot)
         [:voxel_terrain_mesh, :voxel_terrain_values],
         :voxel_colored_terrain_mesh,
     ) do terrain_mesh, values
-        face_values = GeometryBasics.per_face(values, GeometryBasics.faces(terrain_mesh))
+        faces = GeometryBasics.faces(terrain_mesh)
+        # Empty terrains need no FaceView expansion during Makie conversion.
+        face_values = isempty(faces) ? values : GeometryBasics.per_face(values, faces)
         GeometryBasics.mesh(terrain_mesh; color=face_values)
     end
     map!(

@@ -1,5 +1,6 @@
 @testitem "Makie voxelplot renders terrain-aware voxel transport" tags=[:core, :voxel, :terrain, :fast] begin
     using CairoMakie
+    import GeometryBasics
 
     pad = reshape(
         [
@@ -107,6 +108,9 @@
     )
     @test isempty(Makie.to_value(no_terrain_plot[:voxel_hit_points]))
     @test isempty(Makie.to_value(no_terrain_plot[:voxel_reflected_weights]))
+    empty_terrain = Makie.to_value(no_terrain_plot[:voxel_colored_terrain_mesh])
+    @test isempty(GeometryBasics.coordinates(empty_terrain))
+    @test isempty(GeometryBasics.faces(empty_terrain))
     periodic_segments = Makie.to_value(no_terrain_plot[:voxel_ray_segments])
     @test all(
         point -> grid.minimum[1] - 1.0f-6 <= point[1] <= grid.maximum[1] + 1.0f-6,
@@ -130,12 +134,13 @@
         rays=[(origin=(3.0, 0.5, 4.0), direction=(0.0, 0.0, -1.0))],
     )
 
-    mktemp() do path, io
-        close(io)
-        png_path = string(path, ".png")
-        save(png_path, figure)
-        @test isfile(png_path)
-        @test filesize(png_path) > 0
+    mktempdir() do directory
+        for (name, rendered) in (("terrain", figure), ("no_terrain", no_terrain_figure))
+            png_path = joinpath(directory, "$name.png")
+            save(png_path, rendered)
+            @test isfile(png_path)
+            @test filesize(png_path) > 0
+        end
     end
 
     CairoMakie.empty!(figure)

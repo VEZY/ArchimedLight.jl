@@ -1,7 +1,6 @@
 using AirspeedVelocity
 using ArchimedLight
 using BenchmarkTools
-using CairoMakie
 using Dates
 using GeometryBasics
 using PlantGeom
@@ -9,8 +8,6 @@ using PlantGeom
 const PKG_ROOT = dirname(dirname(pathof(ArchimedLight)))
 const FAST_FIXTURE_ROOT = joinpath(PKG_ROOT, "test", "fast_fixtures")
 const SUITE = BenchmarkGroup()
-
-include(joinpath(PKG_ROOT, "scripts", "generate_home_figure.jl"))
 
 function _fixture_paths(name::String)
     root = joinpath(FAST_FIXTURE_ROOT, name, "input")
@@ -26,6 +23,36 @@ function _load_fixture(name::String)
     options, scene, meteo, models = ArchimedLight.read_config(paths.config)
     rows = collect(ArchimedLight.prepare_meteo(meteo, options))
     return (paths=paths, scene=scene, models=models, options=options, meteo=meteo, rows=rows)
+end
+
+function _coffee_fixture(pixel_size::Float64)
+    config = joinpath(PKG_ROOT, "example_2", "config.yml")
+    options, scene, meteo, models = ArchimedLight.read_config(config; plot_paving_override=2500)
+    options = ArchimedLight.LightOptions(
+        options;
+        pixel_size=pixel_size,
+        turtle_sectors=46,
+        all_in_turtle=true,
+        scattering=true,
+        toricity=true,
+        cache_radiation=false,
+        cache_pixel_table=false,
+        store_node_metadata=false,
+    )
+    row = first(ArchimedLight.prepare_meteo(meteo, options))
+    return (; scene, models, options, row)
+end
+
+function _coffee_end_to_end()
+    fixture = _coffee_fixture(0.005)
+    step = ArchimedLight.run_light_step(fixture.scene, fixture.models, fixture.row, fixture.options)
+    return fixture, step
+end
+
+function _coffee_projection_fixture()
+    fixture = _coffee_fixture(0.001)
+    prepared = ArchimedLight._prepare_interception_data(fixture.scene, fixture.models, fixture.options)
+    return (; prepared, options=fixture.options)
 end
 
 function _override_options(options0::ArchimedLight.LightOptions; kwargs...)
@@ -155,6 +182,26 @@ const SIMPLEPLANT = _load_fixture("simpleplant_16_notoric")
 const SKY_DIRECT = _load_fixture("sky_46_direct")
 const SYNTHETIC = _synthetic_fixture()
 
+function _moving_sun_fixture(; toricity=false, scattering=false)
+    options = _override_options(SIMPLEPLANT.options;
+        turtle_sectors=46, pixel_size=0.02, all_in_turtle=false,
+        cache_radiation=true, cache_pixel_table=false, store_node_metadata=false,
+        toricity, scattering,
+    )
+    sim = ArchimedLight.LightSimulation(SIMPLEPLANT.scene, SIMPLEPLANT.models; options)
+    skies = [ArchimedLight.SkyState(130.0 + 10i, 40.0 + 5i,
+        100.0, 50.0, 0.65, 0.35) for i in 0:4]
+    # Prepare the diffuse responses without visiting any timed sun direction.
+    ArchimedLight.run_light(sim, first(skies); step_duration_seconds=60.0)
+    return (; sim, skies=skies[2:end])
+end
+
+# The comparison script also runs against releases before owner aggregation.
+# New cases have no baseline there; common light-solver cases still compare.
+if isdefined(ArchimedLight, :CompiledComponentAggregation)
+    include(joinpath(@__DIR__, "component_values.jl"))
+end
+
 SUITE["IO"] = BenchmarkGroup()
 SUITE["IO"]["read config"]["simpleplant"] = @benchmarkable ArchimedLight.read_config($(SIMPLEPLANT.paths.config))
 SUITE["IO"]["read models"]["simpleplant"] = @benchmarkable ArchimedLight.read_models($(SIMPLEPLANT.paths.config))
@@ -238,6 +285,21 @@ SUITE["Run light"]["series"]["simpleplant prepared cache manual loop"] =
         cache = ArchimedLight.prepare_light_cache(scene, models, options)
     ) evals = 1
 
+# Fresh setup prevents later BenchmarkTools samples from hitting old sun entries.
+SUITE["Run light"]["series"]["simpleplant four moving suns"] =
+    @benchmarkable ArchimedLight.run_light(sim, skies; step_duration_seconds=60.0) setup = (
+        fixture = _moving_sun_fixture();
+        sim = fixture.sim;
+        skies = fixture.skies
+    ) evals = 1 samples = 3 seconds = 5
+
+SUITE["Run light"]["series"]["simpleplant four moving suns toric scattering"] =
+    @benchmarkable ArchimedLight.run_light(sim, skies; step_duration_seconds=60.0) setup = (
+        fixture = _moving_sun_fixture(; toricity=true, scattering=true);
+        sim = fixture.sim;
+        skies = fixture.skies
+    ) evals = 1 samples = 3 seconds = 5
+
 SUITE["Synthetic"] = BenchmarkGroup()
 SUITE["Synthetic"]["first order stacked plates"] =
     @benchmarkable ArchimedLight.run_light_step(scene, models, meteo_row, options) setup = (
@@ -257,9 +319,17 @@ SUITE["Synthetic"]["stacked plates with scattering"] =
 
 include(joinpath(@__DIR__, "voxel_benchmarks.jl"))
 
-SUITE["Docs"] = BenchmarkGroup()
-SUITE["Docs"]["home figure build"] =
-    @benchmarkable simulate_home_figure(PKG_ROOT) evals = 1
+SUITE["Coffee"] = BenchmarkGroup()
+# Retain the figure's full scene and scattering workload at a CI-sized resolution.
+SUITE["Coffee"]["end-to-end 46 sectors scattering 5 mm"] =
+    @benchmarkable _coffee_end_to_end() evals = 1 samples = 3 seconds = 60
+# The original 1 mm grid uses sparse hit storage; cover that path separately.
+SUITE["Coffee"]["zenith projection 1 mm"] =
+    @benchmarkable ArchimedLight._prepared_direction_projection(prepared, (0.0, 0.0, 1.0), options) setup = (
+        fixture = _coffee_projection_fixture();
+        prepared = fixture.prepared;
+        options = fixture.options
+    ) evals = 1 samples = 3 seconds = 60
 
 function _leaf_benchmarks(group, prefix=String[])
     out = String[]

@@ -1,0 +1,16 @@
+[defaults]
+image_root = "reference_images/fixtures"
+numeric_files = ["component_values.csv", "scene_values.csv", "summary.csv", "meteo.csv", "log-sun-position.csv", "log-iteration-scat-par.csv"]
+reference_root = "references/fixtures"
+
+[[fixtures]]
+config = "fixtures/test-scattering-one-plate/config.yml"
+enabled = true
+id = "test-scattering-one-plate"
+visual_metric = "Ri_PAR_f"
+
+[[fixtures]]
+config = "fixtures/test-scattering-two-plates/config.yml"
+enabled = true
+id = "test-scattering-two-plates"
+visual_metric = "Ri_PAR_f"

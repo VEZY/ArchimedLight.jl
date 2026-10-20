@@ -293,7 +293,7 @@ function read_options(path::AbstractString)
             get(raw, "node_metadata_attributes", ()),
         ),
         cache_pixel_table=_as_bool(get(raw, "cache_pixel_table", false), false),
-        pixel_hit_stack_mode=_as_string(get(raw, "pixel_hit_stack_mode", "auto"), "auto"),
+        pixel_hit_stack_mode=_parse_pixel_hit_stack_policy(get(raw, "pixel_hit_stack_mode", "auto")),
         toricity=_as_bool(get(raw, "toricity", true), true),
         radiation_timestep_minutes=_as_float(get(raw, "radiation_timestep", 15.0), 15.0),
         radiation_input_semantics=_as_radiation_input_semantics(get(raw, "radiation_input_semantics", nothing)),
@@ -308,23 +308,9 @@ function read_options(path::AbstractString)
         ),
         nir_interception=_as_bool(get(raw, "nir_interception", true), true),
         nir_scattering=_as_bool(get(raw, "nir_scattering", true), true),
-        java_logged_turtle_dirs=_as_bool(get(raw, "java_logged_turtle_dirs", false), false),
         meteo_range=begin
             v = get(raw, "meteo_range", nothing)
             v === nothing ? nothing : strip(string(v))
-        end,
-        debug=_as_bool(get(raw, "debug", false), false),
-        log_debug=_as_bool(get(raw, "log_debug", false), false),
-        debug_drop_leading_hit=begin
-            v = get(raw, "debug_drop_leading_hit", nothing)
-            if v isa AbstractDict
-                node_id = _as_int(get(v, "node_id", nothing), 0)
-                x = _as_int(get(v, "x", nothing), -1)
-                y = _as_int(get(v, "y", nothing), -1)
-                node_id > 0 && x >= 0 && y >= 0 ? (node_id=node_id, x=x, y=y) : nothing
-            else
-                nothing
-            end
         end,
     )
 end
@@ -454,7 +440,7 @@ julia> update_options!(
 julia> step = run_light(sim, first(meteo));
 
 julia> println(step)
-LightStepResult(PAR=291.777 kJ, NIR=316.092 kJ, sky=463.139 W m^-2 PAR / 501.734 W m^-2 NIR, sectors=1 [sky=1, sun=0], scattering=off)
+LightStepResult(PAR=1.266 MJ, NIR=1.372 MJ, sky=463.139 W m^-2 PAR / 501.734 W m^-2 NIR, sectors=1 [sky=1, sun=0], scattering=off)
 ```
 """
 function read_simulation(
@@ -504,7 +490,15 @@ function read_scene(path::AbstractString; plantgeom_backend=:auto)
     mtg = if ext == ".ops"
         PlantGeom.read_ops(path; relaxed=true, assume_scale_column=false, opf_scale=1.0, gwa_scale=0.01,)
     elseif ext == ".opf"
-        PlantGeom.read_opf(path, attr_type=Dict, attribute_types=Dict("pos" => Float64))
+        # An assembled scene may contain several instances with the same
+        # historical source_topology_id. Allocate fresh runtime node ids before
+        # the dense relabel below, while retaining those source ids as
+        # provenance attributes.
+        PlantGeom.read_opf(
+            path;
+            attribute_types=Dict("pos" => Float64),
+            read_id=false,
+        )
     elseif ext == ".gwa"
         PlantGeom.read_gwa(path)
     else
@@ -653,6 +647,14 @@ function _as_plantmeteo_table(data; metadata=_table_metadata_namedtuple(data))
     PlantMeteo.TimeStepTable(transformed, _meta_to_namedtuple(metadata))
 end
 
+function _is_incomplete_atmosphere_schema_error(err)
+    err isa ArgumentError || return false
+    startswith(
+        string(err.msg),
+        "Missing mandatory Atmosphere keyword argument(s):",
+    )
+end
+
 """
     read_meteo(path)::PlantMeteo.TimeStepTable
     read_meteo(data)::PlantMeteo.TimeStepTable
@@ -662,6 +664,11 @@ Read a meteorological forcing table from `path` and return it as a
 
 The resulting table keeps available metadata such as latitude, longitude,
 altitude, and source file path.
+
+Legacy radiation-only files that omit one or more mandatory `Atmosphere`
+columns (`T`, `Wind`, or `Rh`) remain readable as generic timestep tables.
+PlantMeteo date parsing, unit normalization, and scientific validation errors
+otherwise propagate unchanged.
 
 Arguments:
 
@@ -678,7 +685,8 @@ function read_meteo(path::AbstractString)
         )
         meta = merge((; file=path), _table_metadata_namedtuple(weather))
         return _with_meteo_metadata(weather, meta)
-    catch
+    catch err
+        _is_incomplete_atmosphere_schema_error(err) || rethrow()
         data, metadata_ = PlantMeteo.read_weather_(path)
         data = _normalize_raw_meteo_dates(data)
         meta = merge((; file=path), _meta_to_namedtuple(metadata_))

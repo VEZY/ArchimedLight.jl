@@ -18,12 +18,12 @@ It is a reimplementation of the Java-based ARCHIMED model from Jean Dauzat (AMAP
 <details>
 <summary>Reproducing the figures</summary>
 
-The figures above are generated from two example scenes available from an Artifact. You can generate them using the script in `docs/make_video.jl`.
+The figures above are generated from two example scenes available from an Artifact. You can generate them using the script in `docs/make_video/make_video.jl`.
 </details>
 
 ## Installation
 
-ArchimedLight.jl requires Julia 1.10 or newer. Install the registered package
+ArchimedLight.jl requires Julia 1.12 or newer. Install the registered package
 from the Julia package manager:
 
 ```julia
@@ -51,9 +51,23 @@ ARCHIMED computes:
 
 The triangle-scene and voxel workflows share meteorology, sky directions, and
 directional fluxes, but keep distinct result types and units. See the
-[voxel interception guide](https://VEZY.github.io/ArchimedLight.jl/dev/voxel_interception/)
+[voxel interception guide](https://VEZY.github.io/ArchimedLight.jl/dev/voxel_interception.html)
 for an in-memory example, historical `.vox` I/O, boundary semantics, and
 current limitations.
+
+## Optional GPU setup
+
+Metal remains an optional dependency. On Apple Silicon, install Metal 1.10.3 or
+newer in the environment that runs the GPU backend. The active Metal toolchain
+must also expose atomic support through KernelAbstractions (MSL 4.1 or newer):
+
+```julia
+using Pkg
+Pkg.add("Metal")
+```
+
+See the [GPU backend guide](https://VEZY.github.io/ArchimedLight.jl/dev/gpu_backends.html)
+for device configuration and validation.
 
 ## Core API
 
@@ -162,6 +176,40 @@ scat = ArchimedLight.compute_scattering(scene, models, turtle, first_order, opti
 budget = ArchimedLight.integrate_light(scene, models, first_order, scat, options; meteo_row=row)
 ```
 
+To use the GPU rasterizer, keep the same code, but pass a RasterGPU backend:
+
+```julia
+using KernelAbstractions
+using Metal # Could be any GPU backend supported by KernelAbstractions.jl, e.g. CUDA, AMDGPU, oneAPI, etc.
+
+metal_backend = KernelAbstractions.get_backend(MtlArray(zeros(Float32, 1)))
+# Replace MtlArray by CuArray, ROCArray, or oneAPIArray for other GPU backends.
+raster_gpu = ArchimedLight.RasterGPUBackend(
+    backend=metal_backend,
+    tile_size=1,
+    tile_face_capacity=128,
+    max_hits_per_pixel=128,
+    edge_accumulation=:auto,
+)
+
+first_order = ArchimedLight.compute_first_order(
+    scene,
+    models,
+    turtle,
+    fluxes,
+    options;
+    backend=raster_gpu,
+)
+scat = ArchimedLight.compute_scattering(
+    scene,
+    models,
+    turtle,
+    first_order,
+    options;
+    backend=ArchimedLight.RasterGPUScatteringBackend(raster_gpu),
+)
+```
+
 For ordinary simulations prefer `LightSimulation` and `run_light`.
 
 ## File-Based Example
@@ -267,6 +315,26 @@ benchmarks, Julia General registration, TagBot, and artifact upload, are in
 
 The repository includes a separate benchmark project for `AirspeedVelocity.jl` under
 `benchmark/`.
+
+Large benchmark OPS scenes are kept as a Julia artifact. The Zenodo source file is a ZIP,
+so it must first be converted to a tarball that Julia's artifact installer can unpack:
+
+```bash
+julia --project=. scripts/build_benchmark_scenes_artifact.jl \
+  --zip benchmark/benchmark_scenes.zip \
+  --tarball /tmp/archimedlight-benchmark-scenes.tar.gz
+```
+
+Omit `--zip` to download the default Zenodo source ZIP directly.
+
+After uploading the generated tarball somewhere stable, bind the downloadable artifact:
+
+```bash
+julia --project=. scripts/build_benchmark_scenes_artifact.jl \
+  --zip benchmark/benchmark_scenes.zip \
+  --tarball /tmp/archimedlight-benchmark-scenes.tar.gz \
+  --url https://example.org/archimedlight-benchmark-scenes.tar.gz
+```
 
 ## How to Cite
 

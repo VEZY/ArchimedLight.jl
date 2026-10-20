@@ -13,6 +13,135 @@ Reference interception backend based on CPU raster projection.
 struct RasterCPUBackend <: InterceptionBackend end
 
 """
+    RasterGPUBackendConfig(; backend=KernelAbstractions.CPU(), workgroupsize=nothing,
+        max_hits_per_pixel=32, tile_size=1, tile_face_capacity=32,
+        top_hit_tile_size=1, top_hit_tile_face_capacity=nothing,
+        edge_accumulation=:auto, dense_edge_limit_bytes=512 * 1024^2,
+        validate=false)
+
+Configuration for the native KernelAbstractions raster backend. The `backend`
+field is a KernelAbstractions backend; GPU packages are loaded by callers. The
+same device kernels are used for CPU-backed validation and GPU execution.
+"""
+struct RasterGPUBackendConfig{B}
+    backend::B
+    workgroupsize::Int
+    max_hits_per_pixel::Int
+    tile_size::Int
+    tile_face_capacity::Int
+    top_hit_tile_size::Int
+    top_hit_tile_face_capacity::Int
+    edge_accumulation::Symbol
+    dense_edge_limit_bytes::Int
+    validate::Bool
+
+    function RasterGPUBackendConfig(
+        backend::B,
+        workgroupsize::Integer,
+        max_hits_per_pixel::Integer,
+        tile_size::Integer,
+        tile_face_capacity::Integer,
+        top_hit_tile_size::Integer,
+        top_hit_tile_face_capacity::Integer,
+        edge_accumulation::Symbol,
+        dense_edge_limit_bytes::Integer,
+        validate::Bool,
+    ) where {B}
+        workgroupsize > 0 || error("RasterGPUBackendConfig workgroupsize must be positive.")
+        max_hits_per_pixel > 0 || error("RasterGPUBackendConfig max_hits_per_pixel must be positive.")
+        tile_size > 0 || error("RasterGPUBackendConfig tile_size must be positive.")
+        tile_face_capacity > 0 || error("RasterGPUBackendConfig tile_face_capacity must be positive.")
+        top_hit_tile_size > 0 || error("RasterGPUBackendConfig top_hit_tile_size must be positive.")
+        top_hit_tile_face_capacity > 0 ||
+            error("RasterGPUBackendConfig top_hit_tile_face_capacity must be positive.")
+        dense_edge_limit_bytes > 0 || error("RasterGPUBackendConfig dense_edge_limit_bytes must be positive.")
+        edge_accumulation in (:auto, :sparse_host_reduce, :dense_atomic) ||
+            error("Unsupported RasterGPU edge_accumulation: $edge_accumulation (supported: :auto, :sparse_host_reduce, :dense_atomic)")
+        return new{B}(
+            backend,
+            Int(workgroupsize),
+            Int(max_hits_per_pixel),
+            Int(tile_size),
+            Int(tile_face_capacity),
+            Int(top_hit_tile_size),
+            Int(top_hit_tile_face_capacity),
+            edge_accumulation,
+            Int(dense_edge_limit_bytes),
+            validate,
+        )
+    end
+end
+
+function RasterGPUBackendConfig(;
+    backend=KernelAbstractions.CPU(),
+    workgroupsize::Union{Nothing,Integer}=nothing,
+    max_hits_per_pixel::Integer=32,
+    tile_size::Integer=1,
+    tile_face_capacity::Integer=32,
+    top_hit_tile_size::Integer=1,
+    top_hit_tile_face_capacity::Union{Nothing,Integer}=nothing,
+    edge_accumulation::Symbol=:auto,
+    dense_edge_limit_bytes::Integer=512 * 1024^2,
+    validate::Bool=false,
+)
+    effective_top_hit_tile_face_capacity =
+        top_hit_tile_face_capacity === nothing ? tile_face_capacity : top_hit_tile_face_capacity
+    return RasterGPUBackendConfig(
+        backend,
+        workgroupsize === nothing ? 256 : workgroupsize,
+        max_hits_per_pixel,
+        tile_size,
+        tile_face_capacity,
+        top_hit_tile_size,
+        effective_top_hit_tile_face_capacity,
+        edge_accumulation,
+        dense_edge_limit_bytes,
+        validate,
+    )
+end
+
+"""
+    RasterGPUBackend(; kwargs...)
+    RasterGPUBackend(config::RasterGPUBackendConfig)
+
+Native GPU-oriented raster interception backend. It keeps projection,
+visibility stacks, visible-area reductions, and scattering-topology stack
+generation in KernelAbstractions kernels.
+"""
+struct RasterGPUBackend{C<:RasterGPUBackendConfig} <: InterceptionBackend
+    config::C
+end
+
+RasterGPUBackend(; kwargs...) = RasterGPUBackend(RasterGPUBackendConfig(; kwargs...))
+
+function _rastergpu_config_with(
+    config::RasterGPUBackendConfig;
+    backend=config.backend,
+    workgroupsize=config.workgroupsize,
+    max_hits_per_pixel=config.max_hits_per_pixel,
+    tile_size=config.tile_size,
+    tile_face_capacity=config.tile_face_capacity,
+    top_hit_tile_size=config.top_hit_tile_size,
+    top_hit_tile_face_capacity=config.top_hit_tile_face_capacity,
+    edge_accumulation=config.edge_accumulation,
+    dense_edge_limit_bytes=config.dense_edge_limit_bytes,
+    validate=config.validate,
+)
+    return RasterGPUBackendConfig(
+        backend,
+        workgroupsize,
+        max_hits_per_pixel,
+        tile_size,
+        tile_face_capacity,
+        top_hit_tile_size,
+        top_hit_tile_face_capacity,
+        edge_accumulation,
+        dense_edge_limit_bytes,
+        validate,
+    )
+end
+
+"""
     ScatteringBackend
 
 Abstract supertype for multiple-scattering backends.
@@ -26,6 +155,38 @@ Scattering backend that reconstructs transfer topology from directional
 ray-visibility stacks.
 """
 struct RaycastScatteringBackend <: ScatteringBackend end
+
+"""
+    RasterGPUScatteringBackend(interception_backend::RasterGPUBackend; kwargs...)
+    RasterGPUScatteringBackend(; kwargs...)
+
+Scattering backend that builds transfer topology from native raster GPU stacks.
+"""
+struct RasterGPUScatteringBackend{C<:RasterGPUBackendConfig} <: ScatteringBackend
+    config::C
+end
+
+RasterGPUScatteringBackend(; kwargs...) = RasterGPUScatteringBackend(RasterGPUBackendConfig(; kwargs...))
+
+function RasterGPUScatteringBackend(
+    interception_backend::RasterGPUBackend;
+    edge_accumulation::Symbol=interception_backend.config.edge_accumulation,
+    dense_edge_limit_bytes::Integer=interception_backend.config.dense_edge_limit_bytes,
+    tile_size::Integer=interception_backend.config.tile_size,
+    tile_face_capacity::Integer=interception_backend.config.tile_face_capacity,
+    validate::Bool=interception_backend.config.validate,
+)
+    return RasterGPUScatteringBackend(
+        _rastergpu_config_with(
+            interception_backend.config;
+            edge_accumulation=edge_accumulation,
+            dense_edge_limit_bytes=dense_edge_limit_bytes,
+            tile_size=tile_size,
+            tile_face_capacity=tile_face_capacity,
+            validate=validate,
+        ),
+    )
+end
 
 """
     OpticalProperties(par=0.0, nir=0.0)
@@ -503,6 +664,54 @@ function Base.show(io::IO, summary::MeteoSummary)
 end
 
 """
+    PixelHitStackPolicy
+
+Typed execution policy for the rasterizer's per-pixel hit-stack storage.
+
+- `AutoPixelHitStack` lets the rasterizer select the validated storage
+  for the current projection size.
+- `SmallPixelHitStack` forces compact inline storage.
+- `VectorPixelHitStack` forces the historical vector storage.
+
+ARCHIMED configuration files keep the portable text values `auto`, `small`,
+and `vector`; [`read_options`](@ref) converts those values to this type before
+the simulation reaches the raster runtime.
+"""
+@enum PixelHitStackPolicy::UInt8 begin
+    AutoPixelHitStack = 0
+    SmallPixelHitStack = 1
+    VectorPixelHitStack = 2
+end
+
+function _parse_pixel_hit_stack_policy(value)::PixelHitStackPolicy
+    value isa PixelHitStackPolicy && return value
+    normalized = lowercase(strip(string(value)))
+    normalized == "auto" && return AutoPixelHitStack
+    normalized == "small" && return SmallPixelHitStack
+    normalized == "vector" && return VectorPixelHitStack
+    throw(ArgumentError(
+        "pixel_hit_stack_mode must be auto, small, or vector, got $(repr(value))",
+    ))
+end
+
+function _coerce_pixel_hit_stack_policy(value)::PixelHitStackPolicy
+    value isa PixelHitStackPolicy && return value
+    if value isa AbstractString || value isa Symbol
+        Base.depwarn(
+            "Passing a string or symbol as LightOptions(pixel_hit_stack_mode=...) is deprecated; " *
+            "use AutoPixelHitStack, SmallPixelHitStack, or VectorPixelHitStack. " *
+            "Direct string/symbol construction will be removed in ArchimedLight 0.2; " *
+            "text values remain supported in ARCHIMED configuration files.",
+            :LightOptions,
+        )
+        return _parse_pixel_hit_stack_policy(value)
+    end
+    throw(ArgumentError(
+        "pixel_hit_stack_mode must be a PixelHitStackPolicy, got $(repr(value))",
+    ))
+end
+
+"""
     LightOptions
 
 Runtime controls for interception, scattering, and caching.
@@ -513,8 +722,12 @@ Fields:
   if `true`, redistribute it into the turtle sectors.
 - `turtle_sectors`: number of diffuse sky sectors. Common values are `16`, `46`,
   or denser grids for smoother angular resolution.
-- `pixel_size`: raster pixel size in meters. Smaller values improve geometric
-  fidelity but increase runtime and memory use.
+- `pixel_size`: requested ground resolution in meters, with either toricity
+  setting. Periodic scenes fit horizontal raster cells to the plot dimensions.
+  Finite scenes use a perpendicular projection plane whose pixels back-project
+  to squares of this side length on horizontal ground, rotated with light
+  azimuth. Smaller values increase sampling density, runtime, and memory use.
+  ARCHIMED YAML files express this value in centimetres.
 - `area_ratio`: enable the ARCHIMED projected-area correction used for parity
   with the historical implementation.
 - `scattering`: enable multiple scattering after first-order interception.
@@ -529,6 +742,7 @@ Fields:
   possible.
 - `include_sky_fraction`: store the per-node `sky_fraction` map in each
   [`LightStepResult`](@ref). Leave `false` unless downstream code needs it.
+  [`ArchimedLightModel`](@ref) enables this automatically for its organ outputs.
   When options are read from a config file, this is enabled by requesting
   `sky_fraction` in `component_variables` or `opf_variables`.
 - `store_node_metadata`: retain a lightweight per-scene node metadata snapshot
@@ -538,9 +752,13 @@ Fields:
   standard node metadata snapshot. Standard identity and group/type fields are
   always included when `store_node_metadata=true`.
 - `cache_pixel_table`: cache raster pixel tables for repeated projections.
-- `pixel_hit_stack_mode`: storage mode for per-pixel hit stacks. Supported
-  values are `"auto"`, `"small"`, and `"vector"`.
+- `pixel_hit_stack_mode`: typed [`PixelHitStackPolicy`](@ref) used for
+  per-pixel hit stacks. The default is `AutoPixelHitStack`.
 - `toricity`: enable horizontal periodic wrapping of the simulated plot.
+  With `true`, projection uses the horizontal plot tile. With `false`, each
+  light direction uses a fitted perpendicular canvas covering the complete
+  scene geometry, so elevated objects are not clipped by the plot footprint.
+  This changes neither the physical ground geometry nor the units of `pixel_size`.
 - `radiation_timestep_minutes`: internal radiative substep used when a meteo
   row covers a coarser interval.
 - `radiation_input_semantics`: interpretation of supplied irradiances.
@@ -559,18 +777,16 @@ Fields:
   interception.
 - `nir_scattering`: include NIR in the multiple-scattering stage. This has no
   effect if `nir_interception=false`.
-- `java_logged_turtle_dirs`: use the Java-compatibility turtle direction path
-  used in parity/debug workflows.
 - `meteo_range`: optional historical range selector applied during meteo
   preparation, for example `"2, 5"` or a datetime range.
-- `debug`: enable debug-only compatibility hooks.
-- `log_debug`: emit additional debug logging where implemented.
-- `debug_drop_leading_hit`: optional `(node_id, x, y)` hook used to remove a
-  leading raster hit at one pixel for parity debugging.
 
 Typical starting point for simple runs:
 
 `LightOptions(turtle_sectors=46, pixel_size=0.0025, scattering=true)`
+
+To force a raster storage policy from Julia, use for example
+`LightOptions(pixel_hit_stack_mode=SmallPixelHitStack)`. Configuration-file
+strings are parsed by [`read_options`](@ref) before runtime.
 
 Constructor keywords are the field names above. `LightOptions(old; kwargs...)`
 copies an existing options value and overrides only the supplied keywords.
@@ -588,7 +804,7 @@ Base.@kwdef struct LightOptions
     cache_radiation::Bool = false
     include_sky_fraction::Bool = false
     cache_pixel_table::Bool = false
-    pixel_hit_stack_mode::String = "auto"
+    pixel_hit_stack_mode::PixelHitStackPolicy = AutoPixelHitStack
     toricity::Bool = true
     radiation_timestep_minutes::Float64 = 15.0
     radiation_input_semantics::Symbol = :interval_mean
@@ -658,7 +874,7 @@ Base.@kwdef struct LightOptions
             Bool(cache_radiation),
             Bool(include_sky_fraction),
             Bool(cache_pixel_table),
-            String(pixel_hit_stack_mode),
+            _coerce_pixel_hit_stack_policy(pixel_hit_stack_mode),
             Bool(toricity),
             Float64(radiation_timestep_minutes),
             semantics,
@@ -890,6 +1106,70 @@ struct LightNodeMetadata
     inherited_attributes::NamedTuple
 end
 
+"""Internal read-only view used for retained scene-identity columns."""
+struct _ReadOnlyVector{T,V<:AbstractVector{T}} <: AbstractVector{T}
+    values::V
+end
+
+Base.IndexStyle(::Type{<:_ReadOnlyVector{T,V}}) where {T,V} = Base.IndexStyle(V)
+Base.size(values::_ReadOnlyVector) = size(getfield(values, :values))
+Base.axes(values::_ReadOnlyVector) = axes(getfield(values, :values))
+Base.length(values::_ReadOnlyVector) = length(getfield(values, :values))
+Base.@propagate_inbounds Base.getindex(values::_ReadOnlyVector, i::Int) =
+    getfield(values, :values)[i]
+
+"""
+    LightComponentMetadata
+
+Compact identity snapshot for the geometric components used by one prepared
+light scene.
+
+`node_id`, `source_owner`, and `radiative_area` are aligned columns. The owner
+is the durable `PlantGeom.SourceOwnerKey` assigned during scene
+assembly. `radiative_area` is the filtered mesh area used by ArchimedLight to
+normalize component fluxes; it is deliberately distinct from a generic
+botanical or projected area.
+
+When a scene exposes complete PlantGeom source ownership, every result produced
+from one light cache shares the same snapshot. Results therefore remain
+attributable after [`update_scene!`](@ref) replaces the live scene. Historical
+scenes without source ownership remain simulatable, but cannot be exported with
+[`component_values`](@ref).
+"""
+struct LightComponentMetadata
+    node_id::_ReadOnlyVector{Int,Vector{Int}}
+    source_owner::_ReadOnlyVector{PlantGeom.SourceOwnerKey,Vector{PlantGeom.SourceOwnerKey}}
+    radiative_area::_ReadOnlyVector{Float64,Vector{Float64}}
+
+    function LightComponentMetadata(
+        node_id::Vector{Int},
+        source_owner::Vector{PlantGeom.SourceOwnerKey},
+        radiative_area::Vector{Float64},
+    )
+        n = length(node_id)
+        length(source_owner) == n || throw(DimensionMismatch(
+            "source_owner has length $(length(source_owner)); expected $n.",
+        ))
+        length(radiative_area) == n || throw(DimensionMismatch(
+            "radiative_area has length $(length(radiative_area)); expected $n.",
+        ))
+        length(unique(node_id)) == n || throw(ArgumentError(
+            "Light component node ids must be unique within one prepared scene.",
+        ))
+        for (i, area) in pairs(radiative_area)
+            isfinite(area) && area > 0.0 || throw(ArgumentError(
+                "Light component $(node_id[i]) has non-positive or invalid " *
+                "radiative area $area.",
+            ))
+        end
+        new(
+            _ReadOnlyVector(copy(node_id)),
+            _ReadOnlyVector(copy(source_owner)),
+            _ReadOnlyVector(copy(radiative_area)),
+        )
+    end
+end
+
 function _scene_node_field(scene::PlantGeom.SceneGeometry, node_id::Integer, field::Symbol, default)
     node = PlantGeom.scene_node(scene, node_id)
     if node === nothing || !hasfield(typeof(node), field)
@@ -933,7 +1213,10 @@ function _scene_mtg_node(scene::PlantGeom.SceneGeometry, node_id::Integer)
 end
 
 function _inherited_attr(scene::PlantGeom.SceneGeometry, node_id::Integer, keys::Tuple, default)
-    node = _scene_mtg_node(scene, node_id)
+    _inherited_attr(_scene_mtg_node(scene, node_id), keys, default)
+end
+
+function _inherited_attr(node, keys::Tuple, default)
     while node !== nothing
         for key in keys
             v = _mtg_node_attr(node, key)
@@ -950,8 +1233,10 @@ function _scene_group(scene::PlantGeom.SceneGeometry, node_id::Integer, default=
     v === nothing ? default : string(v)
 end
 
-function _scene_type(scene::PlantGeom.SceneGeometry, node_id::Integer, default="")
-    node = _scene_mtg_node(scene, node_id)
+_scene_type(scene::PlantGeom.SceneGeometry, node_id::Integer, default="") =
+    _mtg_node_type(_scene_mtg_node(scene, node_id), default)
+
+function _mtg_node_type(node, default="")
     for key in (:type, :Type, :functional_type, :functionalType, :organ_type, :organType)
         v = _mtg_node_attr(node, key)
         if v !== nothing
@@ -1096,6 +1381,23 @@ struct SpectralNodeValues
     nir::Dict{Int,Float64}
 end
 
+struct DenseSpectralNodeValues
+    par::Vector{Float64}
+    nir::Vector{Float64}
+end
+
+struct DenseFirstOrderResult
+    node_ids::Vector{Int}
+    projected_area_per_node::Vector{Float64}
+    incident_power::DenseSpectralNodeValues
+    hits_per_node::Vector{Int}
+end
+
+struct DenseScatteringResult
+    node_ids::Vector{Int}
+    added_power::DenseSpectralNodeValues
+end
+
 struct InitialTotalSpectralNodeValues
     initial::SpectralNodeValues
     total::SpectralNodeValues
@@ -1113,6 +1415,7 @@ struct FirstOrderResult
     incident_power::SpectralNodeValues
     hits_per_node::Dict{Int,Int}
     emitter_escaped_power::SpectralNodeValues
+    dense::Union{Nothing,DenseFirstOrderResult}
 end
 
 FirstOrderResult(
@@ -1124,6 +1427,33 @@ FirstOrderResult(
     incident_power,
     hits_per_node,
     SpectralNodeValues(Dict{Int,Float64}(), Dict{Int,Float64}()),
+    nothing,
+)
+
+FirstOrderResult(
+    projected_area_per_node::Dict{Int,Float64},
+    incident_power::SpectralNodeValues,
+    hits_per_node::Dict{Int,Int},
+    emitter_escaped_power::SpectralNodeValues,
+) = FirstOrderResult(
+    projected_area_per_node,
+    incident_power,
+    hits_per_node,
+    emitter_escaped_power,
+    nothing,
+)
+
+FirstOrderResult(
+    projected_area_per_node::Dict{Int,Float64},
+    incident_power::SpectralNodeValues,
+    hits_per_node::Dict{Int,Int},
+    dense::Union{Nothing,DenseFirstOrderResult},
+) = FirstOrderResult(
+    projected_area_per_node,
+    incident_power,
+    hits_per_node,
+    SpectralNodeValues(Dict{Int,Float64}(), Dict{Int,Float64}()),
+    dense,
 )
 
 """
@@ -1136,26 +1466,39 @@ struct ScatteringResult
     added_power::SpectralNodeValues
     iterations::Int
     converged::Bool
+    dense::Union{Nothing,DenseScatteringResult}
 end
+
+ScatteringResult(
+    added_power::SpectralNodeValues,
+    iterations::Int,
+    converged::Bool,
+) = ScatteringResult(added_power, iterations, converged, nothing)
 
 """
     ScatteringPairCounts
 
 Compact transfer-edge storage for scattering graphs.
 
-The hot topology builder accumulates counts with packed integer keys, then materializes this
-container once so downstream code can still iterate edges as `((to, from), count)` pairs
-without keeping tuple-key dictionaries in the graph.
+The hot topology builder accumulates angularly weighted ray counts with packed integer
+keys, then materializes this container once so downstream code can still iterate edges as
+`((to, from), count)` tuples without keeping tuple-key dictionaries in the graph.
 """
 struct ScatteringPairCounts
     to_nodes::Vector{Int}
     from_nodes::Vector{Int}
-    counts::Vector{Int}
+    counts::Vector{Float64}
 end
+
+ScatteringPairCounts(
+    to_nodes::AbstractVector{<:Integer},
+    from_nodes::AbstractVector{<:Integer},
+    counts::AbstractVector{<:Real},
+) = ScatteringPairCounts(Vector{Int}(to_nodes), Vector{Int}(from_nodes), Vector{Float64}(counts))
 
 Base.length(pair_counts::ScatteringPairCounts) = length(pair_counts.counts)
 Base.isempty(pair_counts::ScatteringPairCounts) = isempty(pair_counts.counts)
-Base.eltype(::Type{ScatteringPairCounts}) = Pair{Tuple{Int,Int},Int}
+Base.eltype(::Type{ScatteringPairCounts}) = Tuple{Tuple{Int,Int},Float64}
 
 function Base.iterate(pair_counts::ScatteringPairCounts, state::Int=1)
     state > length(pair_counts.counts) && return nothing
@@ -1163,10 +1506,10 @@ function Base.iterate(pair_counts::ScatteringPairCounts, state::Int=1)
     return item, state + 1
 end
 
-function ScatteringPairCounts(pair_counts::Dict{Tuple{Int,Int},Int})
+function ScatteringPairCounts(pair_counts::AbstractDict{<:Tuple{Integer,Integer},<:Real})
     to_nodes = Int[]
     from_nodes = Int[]
-    counts = Int[]
+    counts = Float64[]
     sizehint!(to_nodes, length(pair_counts))
     sizehint!(from_nodes, length(pair_counts))
     sizehint!(counts, length(pair_counts))
@@ -1178,15 +1521,101 @@ function ScatteringPairCounts(pair_counts::Dict{Tuple{Int,Int},Int})
     return ScatteringPairCounts(to_nodes, from_nodes, counts)
 end
 
+struct DenseScatteringStaticGraph
+    to_idx::Vector{Int}
+    from_idx::Vector{Int}
+    counts::Vector{Float64}
+    coeff_par::Vector{Float64}
+    coeff_nir::Vector{Float64}
+    device_cache::IdDict{Any,Any}
+end
+
+function DenseScatteringStaticGraph(
+    pair_counts::ScatteringPairCounts,
+    node_ids::Vector{Int},
+    coeff_par_by_node::Dict{Int,Float64},
+    coeff_nir_by_node::Dict{Int,Float64},
+)
+    node_index = Dict{Int,Int}(nid => i for (i, nid) in pairs(node_ids))
+    coeff_par = zeros(Float64, length(node_ids))
+    coeff_nir = zeros(Float64, length(node_ids))
+    @inbounds for (i, nid) in pairs(node_ids)
+        coeff_par[i] = get(coeff_par_by_node, nid, 0.0)
+        coeff_nir[i] = get(coeff_nir_by_node, nid, 0.0)
+    end
+
+    n_edges = length(pair_counts)
+    to_idx = Vector{Int}(undef, n_edges)
+    from_idx = Vector{Int}(undef, n_edges)
+    counts = copy(pair_counts.counts)
+    @inbounds for edge_idx in 1:n_edges
+        to_idx[edge_idx] = node_index[pair_counts.to_nodes[edge_idx]]
+        from_idx[edge_idx] = node_index[pair_counts.from_nodes[edge_idx]]
+    end
+    return DenseScatteringStaticGraph(to_idx, from_idx, counts, coeff_par, coeff_nir, IdDict{Any,Any}())
+end
+
+function DenseScatteringStaticGraph(
+    to_idx::Vector{Int},
+    from_idx::Vector{Int},
+    counts::AbstractVector{<:Real},
+    node_ids::Vector{Int},
+    coeff_par_by_node::Dict{Int,Float64},
+    coeff_nir_by_node::Dict{Int,Float64},
+)
+    coeff_par = zeros(Float64, length(node_ids))
+    coeff_nir = zeros(Float64, length(node_ids))
+    @inbounds for (i, nid) in pairs(node_ids)
+        coeff_par[i] = get(coeff_par_by_node, nid, 0.0)
+        coeff_nir[i] = get(coeff_nir_by_node, nid, 0.0)
+    end
+    return DenseScatteringStaticGraph(to_idx, from_idx, Vector{Float64}(counts), coeff_par, coeff_nir, IdDict{Any,Any}())
+end
+
+struct DenseScatteringGraph
+    all_hits::Vector{Float64}
+    static::DenseScatteringStaticGraph
+    device_cache::IdDict{Any,Any}
+end
+
+function DenseScatteringGraph(all_hits::AbstractVector{<:Real}, static::DenseScatteringStaticGraph)
+    return DenseScatteringGraph(Vector{Float64}(all_hits), static, IdDict{Any,Any}())
+end
+
+function DenseScatteringGraph(
+    all_hits::AbstractDict{<:Integer,<:Real},
+    node_ids::Vector{Int},
+    static::DenseScatteringStaticGraph,
+)
+    hit_counts = zeros(Float64, length(node_ids))
+    @inbounds for (i, nid) in pairs(node_ids)
+        hit_counts[i] = get(all_hits, nid, 0.0)
+    end
+    return DenseScatteringGraph(hit_counts, static, IdDict{Any,Any}())
+end
+
+function DenseScatteringGraph(
+    pair_counts::ScatteringPairCounts,
+    all_hits::AbstractDict{<:Integer,<:Real},
+    node_ids::Vector{Int},
+    coeff_par_by_node::Dict{Int,Float64},
+    coeff_nir_by_node::Dict{Int,Float64},
+)
+    static = DenseScatteringStaticGraph(pair_counts, node_ids, coeff_par_by_node, coeff_nir_by_node)
+    return DenseScatteringGraph(all_hits, node_ids, static)
+end
+
 """
     ScatteringTransferGraph
 
 Compact scene-scale topology used by the scattering solver to move energy
-between nodes.
+between nodes. Link counts and total source hits use the same angular weights.
+Low-level constructors also accept integer counts, which are converted to `Float64`
+without applying additional directional weights.
 """
 struct ScatteringTransferGraph
     pair_counts::ScatteringPairCounts
-    all_hits::Dict{Int,Int}
+    all_hits::Dict{Int,Float64}
     node_ids::Vector{Int}
     node_group::Dict{Int,String}
     node_type::Dict{Int,String}
@@ -1195,11 +1624,42 @@ struct ScatteringTransferGraph
     coeff_nir_by_node::Dict{Int,Float64}
     default_coeff_par::Float64
     default_coeff_nir::Float64
+    dense::Base.RefValue{Union{Nothing,DenseScatteringGraph}}
+    dense_static::Union{Nothing,DenseScatteringStaticGraph}
 end
 
 function ScatteringTransferGraph(
-    pair_counts::Dict{Tuple{Int,Int},Int},
-    all_hits::Dict{Int,Int},
+    pair_counts::ScatteringPairCounts,
+    all_hits::AbstractDict{<:Integer,<:Real},
+    node_ids::Vector{Int},
+    node_group::Dict{Int,String},
+    node_type::Dict{Int,String},
+    group_type_coeffs::Dict{Tuple{String,String},Dict{String,Float64}},
+    coeff_par_by_node::Dict{Int,Float64},
+    coeff_nir_by_node::Dict{Int,Float64},
+    default_coeff_par::Float64,
+    default_coeff_nir::Float64,
+    dense_static::Union{Nothing,DenseScatteringStaticGraph}=nothing,
+)
+    return ScatteringTransferGraph(
+        pair_counts,
+        Dict{Int,Float64}(all_hits),
+        node_ids,
+        node_group,
+        node_type,
+        group_type_coeffs,
+        coeff_par_by_node,
+        coeff_nir_by_node,
+        default_coeff_par,
+        default_coeff_nir,
+        Ref{Union{Nothing,DenseScatteringGraph}}(nothing),
+        dense_static,
+    )
+end
+
+function ScatteringTransferGraph(
+    pair_counts::AbstractDict{<:Tuple{Integer,Integer},<:Real},
+    all_hits::AbstractDict{<:Integer,<:Real},
     node_ids::Vector{Int},
     node_group::Dict{Int,String},
     node_type::Dict{Int,String},
@@ -1265,8 +1725,12 @@ directional fluxes, first-order interception, optional scattering, and the
 integrated [`LightBudget`](@ref). When requested, the result can also store a
 per-node `sky_fraction` map. Results returned by `run_light_step` and
 `run_light_series` also carry the render geometry needed by `lightplot`.
-By default they retain a shared [`LightNodeMetadata`](@ref) snapshot for
-scene-aware queries across dynamic scene updates.
+When the scene exposes complete source ownership, they retain a shared
+[`LightComponentMetadata`](@ref) snapshot for stable source-owner attribution.
+Historical unattributed scenes keep this field as `nothing`. By default results
+also retain the broader
+[`LightNodeMetadata`](@ref) snapshot used by scene-aware queries across dynamic
+scene updates.
 """
 struct LightStepResult
     sky::SkyState
@@ -1279,6 +1743,7 @@ struct LightStepResult
     sky_fraction::Union{Nothing,Dict{Int,Float64}}
     render_geometry::Union{Nothing,LightRenderGeometry}
     node_metadata::Union{Nothing,LightNodeMetadata}
+    component_metadata::Union{Nothing,LightComponentMetadata}
 end
 
 LightStepResult(
@@ -1289,7 +1754,7 @@ LightStepResult(
     scattering::Union{Nothing,ScatteringResult},
     budget::LightBudget,
     extra_band_irradiance::Dict{String,Float64},
-) = LightStepResult(sky, turtle, fluxes, first_order, scattering, budget, extra_band_irradiance, nothing, nothing, nothing)
+) = LightStepResult(sky, turtle, fluxes, first_order, scattering, budget, extra_band_irradiance, nothing, nothing, nothing, nothing)
 
 LightStepResult(
     sky::SkyState,
@@ -1300,7 +1765,7 @@ LightStepResult(
     budget::LightBudget,
     extra_band_irradiance::Dict{String,Float64},
     sky_fraction::Union{Nothing,Dict{Int,Float64}},
-) = LightStepResult(sky, turtle, fluxes, first_order, scattering, budget, extra_band_irradiance, sky_fraction, nothing, nothing)
+) = LightStepResult(sky, turtle, fluxes, first_order, scattering, budget, extra_band_irradiance, sky_fraction, nothing, nothing, nothing)
 
 LightStepResult(
     sky::SkyState,
@@ -1322,6 +1787,34 @@ LightStepResult(
     extra_band_irradiance,
     sky_fraction,
     render_geometry,
+    nothing,
+    nothing,
+)
+
+# Preserve the historical ten-argument constructor used by downstream code
+# that supplied optional node metadata explicitly.
+LightStepResult(
+    sky::SkyState,
+    turtle::TurtleGrid,
+    fluxes::DirectionalFluxes,
+    first_order::FirstOrderResult,
+    scattering::Union{Nothing,ScatteringResult},
+    budget::LightBudget,
+    extra_band_irradiance::Dict{String,Float64},
+    sky_fraction::Union{Nothing,Dict{Int,Float64}},
+    render_geometry::Union{Nothing,LightRenderGeometry},
+    node_metadata::Union{Nothing,LightNodeMetadata},
+) = LightStepResult(
+    sky,
+    turtle,
+    fluxes,
+    first_order,
+    scattering,
+    budget,
+    extra_band_irradiance,
+    sky_fraction,
+    render_geometry,
+    node_metadata,
     nothing,
 )
 

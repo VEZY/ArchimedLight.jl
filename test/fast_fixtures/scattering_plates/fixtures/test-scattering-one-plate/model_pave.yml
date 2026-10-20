@@ -1,0 +1,12 @@
+---
+Group: oneplate
+Type:
+  pave:
+      Interception:
+          use: Translucent_1
+          Translucent_1:
+            model: Translucent
+            transparency: 0.0
+            optical_properties:
+                PAR: 0.9
+...

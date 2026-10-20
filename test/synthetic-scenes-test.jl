@@ -12,6 +12,48 @@
 end
 
 
+@testitem "SkyState runs retain optional sky fraction" tags = [:synthetic, :fast, :sky_fraction] setup = [HelperModule] begin
+    scene = HelperModule._synthetic_horizontal_scene([
+        (x0=0.0, x1=1.0, y0=0.0, y1=1.0, z=1.0, group="plate", type="plate", object_id=1),
+    ])
+    models = HelperModule._default_synthetic_models()
+    skies = [
+        ArchimedLight.SkyState(180.0, 90.0, 100.0, 50.0, 0.5, 0.5),
+        ArchimedLight.SkyState(135.0, 35.0, 200.0, 180.0, 0.5, 0.5),
+    ]
+    node_ids = unique(scene.face2node)
+
+    for cache_radiation in (false, true)
+        options = HelperModule._synthetic_options(
+            sectors=6, pixel_size=0.1, toricity=false, cache_radiation=cache_radiation,
+        )
+        sim = ArchimedLight.LightSimulation(scene, models; options=options)
+        unstored = ArchimedLight.run_light(sim, first(skies); step_duration_seconds=60.0)
+        unstored_series = ArchimedLight.run_light(sim, skies; step_duration_seconds=60.0)
+        @test unstored.sky_fraction === nothing
+        @test all(step -> step.sky_fraction === nothing, unstored_series)
+        # Reconstruct through the CSV fallback to check the stored values against
+        # the same sky-view calculation used by historical results.
+        expected = [
+            ArchimedLight._component_sky_fraction_per_node(scene, models, step, options, node_ids)
+            for step in unstored_series
+        ]
+        stored_options = ArchimedLight.LightOptions(options; include_sky_fraction=true)
+        stored_sim = ArchimedLight.LightSimulation(scene, models; options=stored_options)
+        stored = ArchimedLight.run_light(stored_sim, first(skies); step_duration_seconds=60.0)
+        stored_series = ArchimedLight.run_light(stored_sim, skies; step_duration_seconds=60.0)
+        @test stored.sky_fraction !== nothing
+        @test stored.sky_fraction == first(expected)
+        @test length(stored_series) == length(skies)
+        for (step, sky_fraction) in zip(stored_series, expected)
+            @test step.sky_fraction !== nothing
+            @test step.sky_fraction == sky_fraction
+            @test !isempty(sky_fraction)
+            @test any(>(0.0), values(sky_fraction))
+        end
+    end
+end
+
 
 @testitem "Synthetic case single_plate_direct" tags = [:synthetic, :fast, :single_plate_direct] setup = [HelperModule] begin
     scene = HelperModule._synthetic_horizontal_scene([(x0=0.0, x1=1.0, y0=0.0, y1=1.0, z=1.0, group="plate", type="plate", object_id=1)])
@@ -21,6 +63,76 @@ end
     @test isapprox(get(run.first.projected_area_per_node, 1, 0.0), 1.0; atol=1e-12, rtol=1e-12)
     @test isapprox(get(HelperModule._incident_par_initial_energy(run.budget), 1, 0.0), 100.0; atol=1e-10, rtol=1e-10)
     @test isapprox(get(HelperModule._incident_par_initial_flux(run.budget), 1, 0.0), 100.0; atol=1e-10, rtol=1e-10)
+end
+
+@testitem "Synthetic case coarse toric energy conservation" tags = [:synthetic, :fast, :projection, :toric_energy_conservation] setup = [HelperModule] begin
+    scene = HelperModule._synthetic_horizontal_scene([
+        (x0=0.0, x1=0.5, y0=0.0, y1=1.0, z=1.0, group="upper", type="plate", object_id=1),
+        (x0=0.0, x1=1.0, y0=0.0, y1=1.0, z=0.1, group="lower", type="plate", object_id=2),
+        (x0=0.0, x1=1.0, y0=0.0, y1=1.0, z=0.0, group="soil", type="plate", object_id=-1),
+    ])
+    models = HelperModule._default_synthetic_models()
+    sky = ArchimedLight.SkyState(180.0, 90.0, 100.0, 0.0, 1.0, 0.0)
+
+    for sectors in (1, 6, 16, 46, 136, 406)
+        options = ArchimedLight.LightOptions(; turtle_sectors=sectors, all_in_turtle=true)
+        turtle = ArchimedLight.build_turtle(options, sky)
+        logged = ArchimedLight.build_turtle(
+            ArchimedLight.LightOptions(options; java_logged_turtle_dirs=true), sky,
+        )
+        @test first(turtle.sectors).direction == HelperModule.SVector(0.0, 0.0, 1.0)
+        legacy_zenith = sectors == 1 ? HelperModule.SVector(0.0, 0.0, 1.0) :
+            HelperModule.SVector(3.82137093032941e-15, 4.371138828673793e-8, 1.0)
+        @test first(logged.sectors).direction == legacy_zenith
+        @test [s.direction for s in turtle.sectors[2:end]] == [s.direction for s in logged.sectors[2:end]]
+    end
+
+    # The opaque upper half intercepts 50 J and the full lower plate catches
+    # the remaining 50 J. At 15% scattering, 85 J are initially absorbed.
+    # This oracle does not depend on stored reference files or raster counts.
+    for sectors in (6, 16, 46), pixel_size in (0.05, 0.4), area_ratio in (false, true), scattering in (false, true)
+        @testset "sectors=$sectors pixel=$pixel_size area_ratio=$area_ratio scattering=$scattering" begin
+            options = ArchimedLight.LightOptions(
+                HelperModule._synthetic_options(
+                    sectors=sectors, all_in_turtle=true, toricity=true,
+                    pixel_size=pixel_size, scattering=scattering,
+                );
+                area_ratio=area_ratio,
+            )
+            sim = ArchimedLight.LightSimulation(scene, models; options=options)
+            step = ArchimedLight.run_light(sim, sky; step_duration_seconds=1.0)
+            budget = step.budget
+            for (node_id, expected_flux) in ((1, 100.0), (2, 50.0), (3, 0.0))
+                @test isapprox(
+                    get(budget.incident_flux.initial.par, node_id, 0.0),
+                    expected_flux;
+                    atol=1e-5, rtol=1e-7,
+                )
+            end
+            @test isapprox(sum(values(budget.incident_energy.initial.par)), 100.0; atol=1e-5, rtol=1e-7)
+            @test isapprox(sum(values(budget.absorbed_energy.initial.par)), 85.0; atol=1e-5, rtol=1e-7)
+            # Repeated scattering can raise cumulative incident energy above
+            # 100 J; a passive scene must still absorb at most the supplied 100 J.
+            absorbed_total = sum(values(budget.absorbed_energy.total.par))
+            @test 85.0 - 1e-5 <= absorbed_total <= 100.0 + 1e-5
+        end
+    end
+
+    # A full horizontal periodic plate also receives exactly 100 J when the
+    # sun is oblique, both with an explicit beam and after turtle redistribution.
+    full_plate = HelperModule._synthetic_horizontal_scene([
+        (x0=0.0, x1=1.0, y0=0.0, y1=1.0, z=1.0, group="plate", type="plate", object_id=1),
+    ])
+    oblique_sky = ArchimedLight.SkyState(135.0, 35.0, 100.0, 0.0, 1.0, 0.0)
+    for all_in_turtle in (false, true)
+        options = HelperModule._synthetic_options(
+            sectors=16, all_in_turtle=all_in_turtle, toricity=true, pixel_size=0.05,
+        )
+        sim = ArchimedLight.LightSimulation(full_plate, models; options=options)
+        budget = ArchimedLight.run_light(sim, oblique_sky; step_duration_seconds=1.0).budget
+        @test isapprox(sum(values(budget.incident_energy.initial.par)), 100.0; atol=1e-5, rtol=1e-7)
+        @test isapprox(sum(values(budget.absorbed_energy.initial.par)), 85.0; atol=1e-5, rtol=1e-7)
+    end
 end
 
 @testitem "Synthetic case stacked_scattering" tags = [:synthetic, :fast, :stacked_scattering] setup = [HelperModule] begin
@@ -54,7 +166,12 @@ end
     run0 = HelperModule._run_direct(scene, sky, HelperModule._synthetic_options(sectors=1, all_in_turtle=false, scattering=false, pixel_size=0.01, toricity=false))
     run1 = HelperModule._run_direct(scene, sky, HelperModule._synthetic_options(sectors=1, all_in_turtle=false, scattering=false, pixel_size=0.01, toricity=true))
 
-    @test get(HelperModule._incident_par_initial_energy(run1.budget), 1, 0.0) > get(HelperModule._incident_par_initial_energy(run0.budget), 1, 0.0)
+    # Finite projection covers the whole edge plate; periodic projection still
+    # wraps it into the tile. Neither path loses its illumination at the border.
+    for run in (run0, run1)
+        @test isapprox(get(run.first.projected_area_per_node, 1, 0.0), 0.4; atol=1e-6)
+        @test isapprox(get(HelperModule._incident_par_initial_energy(run.budget), 1, 0.0), 40.0; atol=1e-4)
+    end
 end
 
 @testitem "Synthetic case virtual_sensor_transparency" tags = [:synthetic, :fast, :virtual_sensor_transparency] setup = [HelperModule] begin
@@ -109,7 +226,123 @@ end
     @test isapprox(get(HelperModule._incident_par_initial_energy(stack_run.budget), 2, 0.0), 75.0; atol=1e-8, rtol=1e-8)
 end
 
+@testitem "Synthetic case GPU upper-hit transparency parity" tags = [:synthetic, :fast, :raster_gpu, :translucent_stack] setup = [HelperModule] begin
+    import KernelAbstractions
+
+    transparency = 0.25
+    scene = HelperModule._synthetic_horizontal_scene([
+        (x0=0.0, x1=1.0, y0=0.0, y1=1.0, z=1.0, group="leaf", type="plate", object_id=1),
+        (x0=0.0, x1=1.0, y0=0.0, y1=1.0, z=0.1, group="leaf", type="plate", object_id=2),
+    ])
+    models = ArchimedLight.prepare_models([
+        ArchimedLight.GroupModel(
+            "leaf";
+            types=HelperModule.OrderedDict(
+                "plate" => ArchimedLight.TypeModel(
+                    interception=ArchimedLight.InterceptionModel(
+                        model="Translucent",
+                        transparency=transparency,
+                        optical_properties=ArchimedLight.OpticalProperties(0.15, 0.30),
+                    ),
+                ),
+            ),
+        ),
+    ])
+    options = HelperModule._synthetic_options(
+        sectors=1,
+        all_in_turtle=false,
+        scattering=false,
+        pixel_size=0.1,
+        toricity=true,
+    )
+    prepared = ArchimedLight._prepare_interception_data(
+        scene,
+        models,
+        options;
+        include_budget_maps=true,
+    )
+    @test prepared.upper_hit
+    # A non-dividing toric tile exercises the upper-hit stack sort/reduce path.
+    sort_reduce_tile_size = first(
+        tile_size for tile_size in 2:11 if
+        prepared.geometry.plotbox.nx % tile_size != 0 ||
+        prepared.geometry.plotbox.ny % tile_size != 0
+    )
+
+    sky = ArchimedLight.SkyState(180.0, 90.0, 100.0, 0.0, 1.0, 0.0)
+    turtle = ArchimedLight.build_turtle(options, sky)
+    fluxes = ArchimedLight.compute_directional_fluxes(sky, turtle, options)
+    reference = ArchimedLight.compute_first_order(
+        scene,
+        models,
+        turtle,
+        fluxes,
+        options;
+        backend=ArchimedLight.RasterCPUBackend(),
+    )
+
+    expected_visible_fraction = 1.0 - transparency
+    @test isapprox(
+        get(reference.projected_area_per_node, 1, 0.0),
+        expected_visible_fraction;
+        atol=1e-10,
+        rtol=1e-10,
+    )
+    @test isapprox(
+        get(reference.incident_power.par, 1, 0.0),
+        100.0 * expected_visible_fraction;
+        atol=1e-8,
+        rtol=1e-8,
+    )
+    @test iszero(get(reference.projected_area_per_node, 2, 0.0))
+
+    candidates = (
+        ArchimedLight.RasterGPUBackend(
+            backend=KernelAbstractions.CPU(),
+            tile_size=2,
+            tile_face_capacity=64,
+            top_hit_tile_size=1,
+            top_hit_tile_face_capacity=64,
+        ),
+        ArchimedLight.RasterGPUBackend(
+            backend=KernelAbstractions.CPU(),
+            tile_size=2,
+            tile_face_capacity=64,
+            top_hit_tile_size=sort_reduce_tile_size,
+            top_hit_tile_face_capacity=64,
+        ),
+    )
+
+    for backend in candidates
+        candidate = ArchimedLight.compute_first_order(
+            scene,
+            models,
+            turtle,
+            fluxes,
+            options;
+            backend=backend,
+        )
+        @test candidate.dense !== nothing
+        node_ids = candidate.dense.node_ids
+        @test candidate.dense.projected_area_per_node ≈
+              [get(reference.projected_area_per_node, node_id, 0.0) for node_id in node_ids] atol = 1e-5 rtol = 1e-5
+        @test candidate.dense.incident_power.par ≈
+              [get(reference.incident_power.par, node_id, 0.0) for node_id in node_ids] atol = 1e-5 rtol = 1e-5
+        @test candidate.dense.incident_power.nir ≈
+              [get(reference.incident_power.nir, node_id, 0.0) for node_id in node_ids] atol = 1e-5 rtol = 1e-5
+        @test isapprox(
+            get(candidate.projected_area_per_node, 1, 0.0),
+            expected_visible_fraction;
+            atol=1e-5,
+            rtol=1e-5,
+        )
+        @test iszero(get(candidate.projected_area_per_node, 2, 0.0))
+    end
+end
+
 @testitem "Synthetic case Lambertian emitter energy accounting" tags = [:synthetic, :fast, :lambertian_emitter] setup = [HelperModule] begin
+    import KernelAbstractions
+
     models = ArchimedLight.prepare_models([
         ArchimedLight.GroupModel(
             "*";
@@ -183,11 +416,25 @@ end
     ])
     emitted_par, emitted_nir = ArchimedLight._emitter_power_per_node(closed_scene, models)
     first = ArchimedLight.compute_first_order(closed_scene, models, turtle, zero_fluxes, options)
+    gpu_first = ArchimedLight.compute_first_order(
+        closed_scene,
+        models,
+        turtle,
+        zero_fluxes,
+        options;
+        backend=ArchimedLight.RasterGPUBackend(
+            backend=KernelAbstractions.CPU(),
+            max_hits_per_pixel=64,
+            tile_size=2,
+            tile_face_capacity=256,
+        ),
+    )
     prepared = ArchimedLight._prepare_interception_data(closed_scene, models, options; include_budget_maps=true)
     n_nodes = length(prepared.geometry.node_ids)
     n_sectors = options.turtle_sectors + (options.all_in_turtle ? 0 : 1)
     expected_cache_estimate =
-        n_sectors * n_nodes * (sizeof(Float64) + sizeof(Int)) +
+        n_sectors * n_nodes * sizeof(Float64) +
+        n_nodes * sizeof(Int) +
         2 * length(prepared.emitter_nodes) * n_nodes * 64 +
         4 * n_nodes * sizeof(Float64)
     @test ArchimedLight._estimate_light_cache_entry_bytes(prepared, options) ==
@@ -206,6 +453,10 @@ end
     @test 0.0 < first.emitter_escaped_power.par[1] < emitted_par[1]
     @test isapprox(first.incident_power.par[2] + first.emitter_escaped_power.par[1], emitted_par[1]; atol=1e-10, rtol=1e-10)
     @test isapprox(first.incident_power.nir[2] + first.emitter_escaped_power.nir[1], emitted_nir[1]; atol=1e-10, rtol=1e-10)
+    @test HelperModule._dicts_close(gpu_first.incident_power.par, first.incident_power.par; atol=1e-5, rtol=1e-5)
+    @test HelperModule._dicts_close(gpu_first.incident_power.nir, first.incident_power.nir; atol=1e-5, rtol=1e-5)
+    @test HelperModule._dicts_close(gpu_first.emitter_escaped_power.par, first.emitter_escaped_power.par; atol=1e-5, rtol=1e-5)
+    @test HelperModule._dicts_close(gpu_first.emitter_escaped_power.nir, first.emitter_escaped_power.nir; atol=1e-5, rtol=1e-5)
     @test HelperModule._dicts_close(cached_first.incident_power.par, first.incident_power.par; atol=1e-10, rtol=1e-10)
     @test HelperModule._dicts_close(cached_first.incident_power.nir, first.incident_power.nir; atol=1e-10, rtol=1e-10)
     @test HelperModule._dicts_close(cached_first.emitter_escaped_power.par, first.emitter_escaped_power.par; atol=1e-10, rtol=1e-10)
@@ -305,6 +556,8 @@ end
 end
 
 @testitem "Emitter custom bands and virtual sensors preserve physical transfer" tags = [:synthetic, :fast, :lambertian_emitter] setup = [HelperModule] begin
+    import KernelAbstractions
+
     custom_gamma = ArchimedLight.OpticalProperties(
         0.2,
         0.5,
@@ -401,6 +654,21 @@ end
         emitter_band_par="CUSTOM",
         emitter_band_nir=nothing,
     )
+    custom_gpu_first = ArchimedLight.compute_first_order(
+        scene,
+        models,
+        turtle,
+        zero_fluxes,
+        options;
+        backend=ArchimedLight.RasterGPUBackend(
+            backend=KernelAbstractions.CPU(),
+            max_hits_per_pixel=64,
+            tile_size=2,
+            tile_face_capacity=256,
+        ),
+        emitter_band_par="CUSTOM",
+        emitter_band_nir=nothing,
+    )
     @test custom_first.incident_power.par[2] > 0.0
     @test custom_first.incident_power.par[3] > 0.0
     @test isapprox(
@@ -408,6 +676,18 @@ end
         custom_emitted;
         atol=1e-10,
         rtol=1e-10,
+    )
+    @test HelperModule._dicts_close(
+        custom_gpu_first.incident_power.par,
+        custom_first.incident_power.par;
+        atol=1e-5,
+        rtol=1e-5,
+    )
+    @test HelperModule._dicts_close(
+        custom_gpu_first.emitter_escaped_power.par,
+        custom_first.emitter_escaped_power.par;
+        atol=1e-5,
+        rtol=1e-5,
     )
 
     # An absent gamma must not inherit PAR emission in a custom-band pass.
@@ -767,6 +1047,8 @@ end
     @test isempty(step.first_order.emitter_escaped_power.nir)
     @test isempty(step.budget.emitter_escaped_energy_per_band["PAR"])
     @test isempty(step.budget.emitter_escaped_energy_per_band["NIR"])
+    @test step.component_metadata === nothing
+    @test_throws ArgumentError ArchimedLight.component_values(step)
 
     fallback_row = merge(
         row,
@@ -1091,6 +1373,57 @@ end
     end
 end
 
+@testitem "Synthetic case GPU backends ignore disabled explicit NIR flux" tags = [:synthetic, :fast, :nir_interception, :raster_gpu] setup = [HelperModule] begin
+    import KernelAbstractions
+
+    scene = HelperModule._synthetic_horizontal_scene([
+        (x0=0.0, x1=1.0, y0=0.0, y1=1.0, z=1.0, group="plate", type="plate", object_id=1),
+    ])
+    models = HelperModule._default_synthetic_models()
+    options = ArchimedLight.LightOptions(
+        HelperModule._synthetic_options(
+            sectors=1,
+            all_in_turtle=false,
+            scattering=false,
+            pixel_size=0.1,
+            toricity=false,
+        );
+        nir_interception=false,
+    )
+    sky = ArchimedLight.SkyState(180.0, 90.0, 80.0, 0.0, 1.0, 0.0)
+    turtle = ArchimedLight.build_turtle(options, sky)
+    fluxes = ArchimedLight.DirectionalFluxes(
+        [sector.id for sector in turtle.sectors],
+        fill(80.0, length(turtle.sectors)),
+        fill(37.0, length(turtle.sectors)),
+    )
+    @test any(x -> !iszero(x), fluxes.nir)
+
+    backends = (
+        ArchimedLight.RasterGPUBackend(
+            backend=KernelAbstractions.CPU(),
+            top_hit_tile_size=4,
+            top_hit_tile_face_capacity=32,
+        ),
+    )
+    for backend in backends
+        first = ArchimedLight.compute_first_order(
+            scene,
+            models,
+            turtle,
+            fluxes,
+            options;
+            backend=backend,
+        )
+
+        @test sum(values(first.incident_power.par)) > 0.0
+        @test all(iszero, values(first.incident_power.nir))
+        @test first.dense !== nothing
+        @test sum(first.dense.incident_power.par) > 0.0
+        @test all(iszero, first.dense.incident_power.nir)
+    end
+end
+
 @testitem "Synthetic case overlapping meteo steps option" tags = [:synthetic, :fast, :overlapping_meteo_steps] setup = [HelperModule] begin
     using Dates
 
@@ -1177,6 +1510,8 @@ end
     summary0 = ArchimedLight.cache_summary(cache)
     @test summary0.mode == :full
     @test summary0.cached_turtle_count == 0
+    @test summary0.component_metadata_count == 0
+    @test summary0.component_metadata_bytes == 0
 
     series_cached = ArchimedLight.run_light_series(cache, meteo)
     series_uncached = ArchimedLight.run_light_series(scene, models, meteo, HelperModule._synthetic_options(sectors=6, all_in_turtle=true, scattering=true, pixel_size=0.01, cache_radiation=false))

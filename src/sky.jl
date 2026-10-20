@@ -3,6 +3,98 @@ const _CENTER_OF_SOLAR_DISK_RAD = deg2rad(-0.83)
 const _SOLAR_TO_PAR = 0.48
 const _SOLAR_TO_NIR = 0.52
 
+@inline _solar_time_offset_hours(longitude, utc_offset_hours) =
+    longitude / 15.0 - utc_offset_hours
+
+function _mean_extraterrestrial_irradiance(date::Dates.Date, latitude_rad,
+    start_hour::Float64, end_hour::Float64)
+    energy = 0.0
+    cursor = start_hour
+    while cursor < end_hour
+        day_offset = floor(Int, cursor / 24.0)
+        stop = min(end_hour, 24.0 * (day_offset + 1))
+        doy = Dates.dayofyear(date + Dates.Day(day_offset))
+        energy += _java_extra_terrestrial_hourly_mj(latitude_rad, doy,
+            cursor - 24.0day_offset, stop - 24.0day_offset)
+        cursor = stop
+    end
+    return _mega_joules_to_watts(energy, end_hour - start_hour)
+end
+
+"""
+    interpolate_radiation(sw, par, direct_sw, hour; latitude, longitude,
+        date, utc_offset_hours=0, first_timestamp=0, interval_hours=1,
+        radiation_timestamp=:end)
+
+Estimate an instantaneous solar forcing from regularly spaced interval means.
+`sw`, `par`, and `direct_sw` are horizontal irradiances in W m⁻². `hour` and
+`first_timestamp` use the same civil clock, whose offset from UTC is given in
+hours. `date` is the civil date at hour zero; hours can extend across its
+calendar boundaries. Longitude is positive east. Timestamps mark `:start`, `:center`, or
+`:end` of each averaging interval; `:end` matches Open-Meteo radiation.
+
+Interpolate each component relative to its interval's extraterrestrial
+irradiance, then restore the instantaneous solar geometry. This avoids a
+spurious direct-normal irradiance peak at the horizon. Values outside the
+sample centres use the nearest component ratios. This smooth reconstruction
+does not exactly conserve each hourly integral and omits diffuse twilight.
+
+The returned named tuple contains canonical `RI_SW_f`, `RI_PAR_f`, `RI_NIR_f`,
+`direct_fraction`, `sun_azimuth`, and `sun_elevation`. Add a `date` and positive
+`step_duration` to use it with `run_light`; the explicit sun is already corrected
+for longitude and the UTC offset. NIR is the remainder `SW - PAR`.
+"""
+function interpolate_radiation(sw, par, direct_sw, hour::Real;
+    latitude::Real, longitude::Real, date::Dates.Date,
+    utc_offset_hours::Real=0.0, first_timestamp::Real=0.0,
+    interval_hours::Real=1.0, radiation_timestamp::Symbol=:end)
+    n = length(sw)
+    n >= 2 && length(par) == length(direct_sw) == n ||
+        throw(ArgumentError("radiation components must have the same length, at least two"))
+    h, dt = Float64(hour), Float64(interval_hours)
+    isfinite(h) && isfinite(first_timestamp) && isfinite(dt) && dt > 0.0 ||
+        throw(ArgumentError("radiation times must be finite and interval_hours positive"))
+    isfinite(latitude) && -90.0 <= latitude <= 90.0 &&
+        isfinite(longitude) && -180.0 <= longitude <= 180.0 &&
+        isfinite(utc_offset_hours) && -14.0 <= utc_offset_hours <= 14.0 ||
+        throw(ArgumentError("invalid latitude, longitude, or UTC offset"))
+    radiation_timestamp in (:start, :center, :end) ||
+        throw(ArgumentError("radiation_timestamp must be :start, :center, or :end"))
+    centre = Float64(first_timestamp) +
+        (radiation_timestamp == :start ? dt / 2 : radiation_timestamp == :end ? -dt / 2 : 0.0)
+    i = clamp(floor(Int, (h - centre) / dt) + 1, 1, n - 1)
+    w = clamp((h - centre - (i - 1) * dt) / dt, 0.0, 1.0)
+    for k in (i, i + 1)
+        isfinite(sw[k]) && isfinite(par[k]) && isfinite(direct_sw[k]) &&
+            0.0 <= par[k] <= sw[k] && 0.0 <= direct_sw[k] <= sw[k] ||
+            throw(ArgumentError("radiation components must be finite and satisfy 0 ≤ PAR, direct_SW ≤ SW"))
+    end
+    lat = deg2rad(Float64(latitude))
+    offset = _solar_time_offset_hours(Float64(longitude), Float64(utc_offset_hours))
+    solar_hour = h + offset
+    solar_day = floor(Int, solar_hour / 24.0)
+    doy = Dates.dayofyear(date + Dates.Day(solar_day))
+    az, el = _java_sun_position_deg(doy, lat, solar_hour - 24.0solar_day)
+    start = centre + (i - 1) * dt - dt / 2 + offset
+    et0 = _mean_extraterrestrial_irradiance(date, lat, start, start + dt)
+    et1 = _mean_extraterrestrial_irradiance(date, lat, start + dt, start + 2dt)
+    (et0 > 0.0 || sw[i] == 0.0) && (et1 > 0.0 || sw[i + 1] == 0.0) ||
+        throw(ArgumentError("positive radiation has no modeled daylight in its interval; check timestamps, longitude and UTC offset"))
+    global_w = par_w = direct_w = 0.0
+    if el > 0.0
+        horizontal = _SOLAR_CONSTANT_MJ_M2_MIN * 1e6 / 60.0 *
+            _java_corr_factor(doy) * sind(el)
+        a = et0 > 0.0 ? (1.0 - w) * horizontal / et0 : 0.0
+        b = et1 > 0.0 ? w * horizontal / et1 : 0.0
+        global_w = a * sw[i] + b * sw[i + 1]
+        par_w = a * par[i] + b * par[i + 1]
+        direct_w = a * direct_sw[i] + b * direct_sw[i + 1]
+    end
+    return (; RI_SW_f=global_w, RI_PAR_f=par_w, RI_NIR_f=global_w - par_w,
+        direct_fraction=global_w > 0.0 ? direct_w / global_w : 0.0,
+        sun_azimuth=az, sun_elevation=el)
+end
+
 function _duration_seconds_strict(v; field_name::AbstractString="duration")
     if v isa Dates.Period || v isa Dates.CompoundPeriod
         seconds = Dates.toms(v) * 1.0e-3
@@ -229,6 +321,21 @@ function _clearness_from_global_wm2(global_wm2::Float64, latitude_rad::Float64, 
     return 0.5
 end
 
+function _global_wm2_from_clearness(clearness::Float64, latitude_rad::Float64,
+    date::Dates.Date, start_hour::Float64, end_hour::Float64)
+    end_hour <= 24.0 && return _global_wm2_from_clearness(
+        clearness, latitude_rad, Dates.dayofyear(date), start_hour, end_hour)
+    return clearness * _mean_extraterrestrial_irradiance(date, latitude_rad, start_hour, end_hour)
+end
+
+function _clearness_from_global_wm2(global_wm2::Float64, latitude_rad::Float64,
+    date::Dates.Date, start_hour::Float64, end_hour::Float64)
+    end_hour <= 24.0 && return _clearness_from_global_wm2(
+        global_wm2, latitude_rad, Dates.dayofyear(date), start_hour, end_hour)
+    et = _mean_extraterrestrial_irradiance(date, latitude_rad, start_hour, end_hour)
+    return et > 0.0 ? global_wm2 / et : 0.5
+end
+
 function _java_sun_position_deg(doy::Int, latitude_rad::Float64, decimal_hour::Float64)
     hour_angle = deg2rad((decimal_hour + _java_equation_of_time(doy) - 12) * 15)
     cos_ha = cos(hour_angle)
@@ -275,123 +382,12 @@ function _partition_global_hourly(global_wm2::Float64, clearness::Float64, sun_e
     return diffuse, direct
 end
 
-function _use_tokens(row)
-    if :use in _row_propertynames(row)
-        v = getproperty(row, :use)
-        if v isa AbstractString
-            t = strip(String(v))
-            return isempty(t) ? String[] : split(t)
-        elseif v isa AbstractVector
-            return [strip(string(x)) for x in v if !isempty(strip(string(x)))]
-        elseif v !== missing
-            t = strip(string(v))
-            return isempty(t) ? String[] : split(t)
-        end
-    end
-    meta_v = _row_metadata_value(row, [:use])
-    if meta_v isa AbstractString
-        t = strip(String(meta_v))
-        return isempty(t) ? String[] : split(t)
-    elseif meta_v isa AbstractVector
-        return [strip(string(x)) for x in meta_v if !isempty(strip(string(x)))]
-    elseif meta_v !== nothing && meta_v !== missing
-        t = strip(string(meta_v))
-        return isempty(t) ? String[] : split(t)
-    end
-    return String[]
-end
-
 function _has_any_column(row, candidates::Vector{Symbol})
     names = _row_propertynames(row)
     for c in candidates
         c in names && return true
     end
     return false
-end
-
-function _normalize_radiation_use_token(token::AbstractString)
-    s = strip(String(token))
-    ls = lowercase(s)
-    ls == "clearness" && return "clearness"
-
-    su = uppercase(s)
-    su == "RI_SW_F" && return "RI_SW_f"
-    su == "RI_PAR_F" && return "RI_PAR_f"
-    su == "RI_NIR_F" && return "RI_NIR_f"
-    return ""
-end
-
-function _effective_radiation_use_tokens(row)
-    uses = String[]
-    for token in _use_tokens(row)
-        normalized = _normalize_radiation_use_token(token)
-        isempty(normalized) || push!(uses, normalized)
-    end
-    uses = unique(uses)
-    !isempty(uses) && return uses
-
-    has_cl = _has_any_column(row, [:clearness, :Kt])
-    has_sw = _has_any_column(row, [:RI_SW_f, :Ri_SW_f, :Rg, :rg, :sw_global, :global])
-    has_par = _has_any_column(row, [:RI_PAR_f, :Ri_PAR_f, :PAR, :par])
-    has_nir = _has_any_column(row, [:RI_NIR_f, :Ri_NIR_f, :NIR, :nir])
-
-    if (has_cl && (has_sw || has_par || has_nir)) || (has_sw && has_par && has_nir)
-        if has_sw
-            return ["RI_SW_f"]
-        elseif has_par
-            return ["RI_PAR_f"]
-        elseif has_nir
-            return ["RI_NIR_f"]
-        end
-    end
-
-    return uses
-end
-
-function _validate_meteo_radiation_inputs(use_tokens::AbstractVector{<:AbstractString}, has_cl::Bool, has_sw::Bool, has_par::Bool, has_nir::Bool)
-    key_cl = "clearness"
-    keys_set2 = ("RI_SW_f", "RI_PAR_f", "RI_NIR_f")
-    all_keys = (key_cl, keys_set2...)
-    uses_rel = [u for u in use_tokens if u in all_keys]
-
-    # Java check for RI_SW_f/RI_PAR_f/RI_NIR_f triplet consistency.
-    if has_sw && has_par && has_nir
-        k = count(u -> u in keys_set2, uses_rel)
-        k == 0 && error("meteo consistency error: missing 'use' line with RI_SW_f/RI_PAR_f/RI_NIR_f columns")
-        k == 1 || error("meteo consistency error: extra use(s) with RI_SW_f/RI_PAR_f/RI_NIR_f columns")
-    end
-
-    # Java checkConsistency(set1=clearness, set2=[RI_SW_f, RI_PAR_f, RI_NIR_f], allowDoubleUse=true)
-    has_any = has_cl || has_sw || has_par || has_nir
-    has_any || error("meteo consistency error: missing column clearness/RI_SW_f/RI_PAR_f/RI_NIR_f")
-
-    for u in uses_rel
-        if u == key_cl && !has_cl
-            error("meteo consistency error: missing clearness column specified in 'use' line")
-        elseif u == "RI_SW_f" && !has_sw
-            error("meteo consistency error: missing RI_SW_f column specified in 'use' line")
-        elseif u == "RI_PAR_f" && !has_par
-            error("meteo consistency error: missing RI_PAR_f column specified in 'use' line")
-        elseif u == "RI_NIR_f" && !has_nir
-            error("meteo consistency error: missing RI_NIR_f column specified in 'use' line")
-        end
-    end
-
-    use1 = any(==("clearness"), uses_rel)
-    uses2 = [u for u in uses_rel if u in keys_set2]
-    if use1
-        length(uses2) <= 1 || error("meteo consistency error: multiple uses: clearness/$(join(uses2, '/'))")
-    else
-        length(uses2) <= 1 || error("meteo consistency error: multiple uses: $(join(uses2, '/'))")
-    end
-
-    if !use1 && isempty(uses2) && has_cl && (has_sw || has_par || has_nir)
-        cols = String[]
-        has_sw && push!(cols, "RI_SW_f")
-        has_par && push!(cols, "RI_PAR_f")
-        has_nir && push!(cols, "RI_NIR_f")
-        error("meteo consistency error: missing 'use' for columns clearness/$(join(cols, '/'))")
-    end
 end
 
 function _dict_float_or_nan(d, key::String)
@@ -493,32 +489,10 @@ function _daylight_fraction(
     clamp(sum((ss.duration for ss in substeps); init=0.0) / step_duration, 0.0, 1.0)
 end
 
-function _has_daylight_interval_metadata(meteo_row)
-    names = _row_propertynames(meteo_row)
-    has_date = (:date in names) || (:dayofyear in names)
-    has_latitude =
-        (:latitude in names) || (:lat in names) ||
-        _row_metadata_value(meteo_row, [:latitude, :lat]) !== nothing
-    date_has_time =
-        :date in names && getproperty(meteo_row, :date) isa Dates.DateTime
-    has_start = date_has_time || (:hour_start in names) || (:hour in names)
-    has_stop =
-        (:hour_end in names) || (:step_duration in names) || (:duration in names)
-    return has_date && has_latitude && has_start && has_stop
-end
-
 function _radiation_input_effective_scale(meteo_row, options::LightOptions)
     options.radiation_input_semantics == :interval_mean && return 1.0
-    provided_sun = _provided_sun_position_deg(meteo_row)
-    if provided_sun !== nothing && !_has_daylight_interval_metadata(meteo_row)
-        # Explicit sun geometry is authoritative when no complete astronomical
-        # interval is available from which to integrate sunrise/sunset.
-        return provided_sun.elevation > 0.0 ? 1.0 : 0.0
-    end
-    latitude_rad = deg2rad(_row_value(meteo_row, [:latitude, :lat], 0.0))
-    date = _row_date(meteo_row)
-    start_h, end_h = _row_step_hours(meteo_row)
-    _daylight_fraction(date, start_h, end_h, _cfg_radiation_timestep_hours(options), latitude_rad)
+    resolved = _resolved_meteo_step_or_error(meteo_row, options)
+    return _radiation_input_effective_scale(meteo_row, options, resolved)
 end
 
 function _radiation_input_effective_scale(
@@ -529,10 +503,11 @@ function _radiation_input_effective_scale(
     options.radiation_input_semantics == :interval_mean && return 1.0
     if resolved.latitude_deg !== nothing && _meteo_has_resolved_solar_interval(resolved)
         latitude_rad = deg2rad(resolved.latitude_deg)
+        solar = _meteo_solar_interval(resolved)
         return _daylight_fraction(
-            resolved.date,
-            resolved.start_hour,
-            resolved.end_hour,
+            solar.date,
+            solar.start_hour,
+            solar.end_hour,
             _cfg_radiation_timestep_hours(options),
             latitude_rad,
         )
@@ -742,13 +717,14 @@ function compute_sky(
 
     if has_astronomical_interval
         latitude_rad = deg2rad(resolved.latitude_deg)
-        date = resolved.date
+        solar = _meteo_solar_interval(resolved)
+        date = solar.date
         doy = Dates.dayofyear(date)
-        start_h = resolved.start_hour
-        end_h = resolved.end_hour
+        start_h = solar.start_hour
+        end_h = solar.end_hour
         clearness =
             clearness_provided ? resolved.clearness :
-            _clearness_from_global_wm2(ri_sw, latitude_rad, doy, start_h, end_h)
+            _clearness_from_global_wm2(ri_sw, latitude_rad, date, start_h, end_h)
 
         radiation_timestep_h = _cfg_radiation_timestep_hours(options)
         daylight_fraction =

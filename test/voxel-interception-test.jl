@@ -212,6 +212,80 @@ end
     )
 end
 
+@testitem "Voxel meteorology preserves equivalent UTC and civil radiation intervals" tags=[:voxel, :meteo, :temporal_resolution, :fast] begin
+    using Dates
+    AL = ArchimedLight
+    grid = VoxelGrid((0, 0, 0), (1, 1, 2), fill(0.5, 1, 1, 2))
+    backend = VoxelCPUBackend(rays_per_voxel=1, boundary=:periodic)
+    options = LightOptions(
+        turtle_sectors=6,
+        all_in_turtle=false,
+        scattering=false,
+        radiation_timestep_minutes=5.0,
+    )
+    base = (; date=Date(2025, 5, 15), step_duration=3600.0,
+        latitude=43.610, longitude=3.878, RI_SW_f=200.0, direct_fraction=0.6)
+    utc_start = [merge(base, (; hour=Time(hour), radiation_timestamp=:start,
+        timezone="UTC", utc_offset_hours=0.0)) for hour in (10, 11)]
+    utc_end = [merge(row, (; hour=row.hour + Hour(1), radiation_timestamp=:end))
+        for row in utc_start]
+    civil_end = [merge(row, (; hour=row.hour + Hour(2),
+        timezone="Europe/Paris", utc_offset_hours=2.0)) for row in utc_end]
+    expected = [run_voxel_light_step(grid, row, options; backend) for row in utc_start]
+
+    # All three descriptions cover the same two physical intervals. Series
+    # execution also exercises response reuse across their changing sun directions.
+    for rows in (utc_start, utc_end, civil_end)
+        series = run_voxel_light_series(grid, rows, options; backend)
+        @test length(series) == length(expected)
+        for (index, row) in enumerate(rows)
+            step = run_voxel_light_step(grid, row, options; backend)
+            reference = expected[index]
+            for result in (step, series[index])
+                @test result.duration_seconds == 3600.0
+                @test all(isapprox(getfield(result.sky, field), getfield(reference.sky, field);
+                    atol=1e-10, rtol=1e-10) for field in fieldnames(AL.SkyState))
+                @test [sector.id for sector in result.turtle.sectors] ==
+                    [sector.id for sector in reference.turtle.sectors]
+                @test [sector.source for sector in result.turtle.sectors] ==
+                    [sector.source for sector in reference.turtle.sectors]
+                @test all(isapprox(actual.direction, target.direction; atol=1e-12, rtol=1e-12)
+                    for (actual, target) in zip(result.turtle.sectors, reference.turtle.sectors))
+                @test first(result.turtle.sectors).direction == AL.StaticArrays.SVector(0.0, 0.0, 1.0)
+                @test result.fluxes.sector_ids == reference.fluxes.sector_ids
+                @test result.fluxes.par ≈ reference.fluxes.par
+                @test result.fluxes.nir ≈ reference.fluxes.nir
+                @test sum(result.fluxes.par) ≈ result.sky.ri_par_f
+                @test sum(result.fluxes.nir) ≈ result.sky.ri_nir_f
+                for field in (:par_energy, :nir_energy, :par_flux, :nir_flux,
+                    :par_incoming_energy, :nir_incoming_energy,
+                    :par_escaped_energy, :nir_escaped_energy)
+                    @test isapprox(getfield(result.first_order, field),
+                        getfield(reference.first_order, field); atol=1e-8, rtol=1e-10)
+                end
+                first_order = result.first_order
+                @test first_order.par_incoming_energy ≈ 3600.0 * result.sky.ri_par_f
+                @test first_order.nir_incoming_energy ≈ 3600.0 * result.sky.ri_nir_f
+                @test sum(first_order.par_energy) + first_order.par_escaped_energy ≈
+                    first_order.par_incoming_energy
+                @test sum(first_order.nir_energy) + first_order.nir_escaped_energy ≈
+                    first_order.nir_incoming_energy
+            end
+        end
+    end
+
+    # These deliberately incorrect descriptions must be distinguishable, so
+    # equivalence above cannot pass merely because the pipeline ignores clocks.
+    ignored_end = merge(first(utc_end), (; radiation_timestamp=:start))
+    ignored_clock = merge(first(civil_end), (; timezone="UTC", utc_offset_hours=0.0))
+    for row in (ignored_end, ignored_clock)
+        shifted = run_voxel_light_step(grid, row, options; backend)
+        @test abs(shifted.sky.sun_elevation_deg - first(expected).sky.sun_elevation_deg) > 1.0
+        @test !isapprox(shifted.first_order.par_energy, first(expected).first_order.par_energy;
+            atol=1e-8, rtol=1e-6)
+    end
+end
+
 @testitem "Voxel ports the scientific intentions of Java TestVoxel1-TestVoxel4" tags=[:voxel, :java_fixture, :fast] begin
     function rotated_direction(azimuth_degrees; elevation_degrees=37.0)
         azimuth = deg2rad(azimuth_degrees)

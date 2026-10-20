@@ -10,12 +10,6 @@ This is the `Mir` stage in the historical ARCHIMED software developed by Jean Da
 
 The canopy is treated as a set of surfaces, implemented as triangle meshes. Each leaf, stem, soil tile, or object contributes through its mesh faces.
 
-Compared to other simpler approaches, this means that:
-
-- visibility is geometric
-- occlusion is explicit, which is important for downstream processes such as photosynthesis, energy balance, and scattering
-- the solver works at the level of surfaces and projected areas
-
 ## Why Projection Instead Of Full Ray Tracing
 
 ARCHIMED’s efficiency comes from a very specific compromise. It:
@@ -28,8 +22,18 @@ This is much cheaper than general-purpose ray tracing, while remaining well matc
 
 ## Pixel Tables
 
-For each direction, the scene is projected onto the plot domain.
-The plot is discretized into pixels whose target size is controlled by a parameter (`pixel_size`).
+For each direction, periodic scenes (`toricity=true`) project onto the horizontal
+plot tile, with cell widths fitted to that tile. Finite scenes (`toricity=false`)
+project onto a plane perpendicular to the light direction, with a canvas fitted
+to all scene geometry. Both use `pixel_size` as the requested ground resolution.
+
+For finite scenes, the perpendicular raster pitches are `p` and `p * s_z`, where
+`p = pixel_size` and `s_z` is the upward direction's vertical component. A pixel
+therefore covers a square of side `p` when projected along the ray onto horizontal
+ground; its orientation follows the light azimuth. Visible areas are converted
+back to horizontal-equivalent areas before multiplication by horizontal
+irradiance. The original component mesh area remains the denominator for output
+fluxes.
 
 Each pixel stores:
 
@@ -75,6 +79,14 @@ When `toricity=true`, projected rays that exit the plot re-enter from the opposi
 This is particularly useful for cropping systems with regular spatial patterns, such as annual row crops, orchards, or other repeated planting arrangements. Instead of simulating an entire field, only a single representative tile needs to be modeled while still capturing the light environment created by the surrounding canopy. This approximation works well when neighboring plants are sufficiently similar. However, if plant-to-plant phenotypic variability is large, explicitly representing each plant will generally produce more accurate results.
 
 Toricity is one of the features that makes ARCHIMED well suited for large-scale agricultural simulations because it can approximate an effectively infinite canopy at a fraction of the computational cost, since only the geometry of a single tile needs to be simulated.
+
+With `toricity=false`, each fitted perpendicular canvas covers the complete
+scene. Elevated geometry is therefore sampled even when its projection onto
+the horizontal ground would fall outside the plot. The physical soil and scene
+bounds are not enlarged. Maintaining the same ground resolution can require
+more pixels at shallow light elevations; changing the projection plane alone
+does not guarantee fewer rays. The [configuration reference](reference_config.md)
+explains the pixel-spacing contract.
 
 ## What The First-Order Stage Produces
 

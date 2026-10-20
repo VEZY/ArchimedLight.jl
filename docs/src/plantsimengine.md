@@ -1,0 +1,397 @@
+# Couple ArchimedLight With PlantSimEngine
+
+Use this integration when one scene-scale light calculation must provide
+irradiance to many physiological organs. `ArchimedLightModel` runs
+`ArchimedLight` once on a `Scene` object, maps geometric components back to
+stable botanical identities, and publishes the resulting variables directly
+to the selected organ statuses. Flux densities are normalized by the mesh
+surface area published as `area`.
+
+This is an ordinary PlantSimEngine model coupling. The light results are model
+outputs owned by the scene application and stored on their destination
+objects; they are not a mutable environment and do not require
+`commit_environment!`. Likewise, there is no bookkeeping `LeafLightModel` or
+`InternodeLightModel` to execute once per organ.
+
+!!! note "Optional integration"
+    PlantSimEngine is a weak dependency. Add it to the active environment and
+    load both packages to activate the extension:
+
+    ```julia
+    using ArchimedLight
+    using PlantSimEngine
+    ```
+
+## Declare the scene writer
+
+Assume `light_sim` is an existing [`LightSimulation`](@ref) whose
+`PlantGeom.SceneGeometry` retains source-owner identities. Construct the
+PlantSimEngine kernel, then declare its destination objects with
+`outputs_to`:
+
+```julia
+light_kernel = ArchimedLightModel(
+    light_sim;
+    output_schema=:coupling,
+    par_energy_to_photon=4.57,
+)
+
+light_application = ModelSpec(
+    light_kernel;
+    name=:archimed_light,
+    on=One(scale=:Scene),
+    outputs_to=(
+        OutputTo(
+            Many(
+                scale=:Leaf,
+                within=SceneScope(),
+            );
+            coverage=:exact,
+        ),
+    ),
+)
+```
+
+`ArchimedLightModel` returns a model kernel, not a `ModelSpec`. The scenario
+therefore keeps ownership of the application name, the `Scene` target, the
+organ selector, and the cadence. The model declares its distributed variables
+through `outputs_`; this single `OutputTo` binds all of them to the selected organs.
+
+## Connect leaf physiology
+
+ArchimedLight is naturally compatible with models from [PlantBiophysics](https://vezy.github.io/PlantBiophysics.jl/stable/). ArchimedLight's `aPPFD` connects directly to FvCB, and `Ra_SW_f` and `sky_fraction` connect directly to Monteith. Both packages declare these fluxes with the same `:surface_area` contract; no area conversion is needed.
+
+The following example shows these bindings. It assumes your leaf objects
+already provide the other required physiology inputs, including `d`, and
+that `stomatal_conductance_application` is configured for the same leaves.
+
+```julia
+using PlantBiophysics
+
+leaf_photosynthesis_application = ModelSpec(
+    Fvcb();
+    name=:photosynthesis,
+    on=Many(scale=:Leaf),
+    inputs=(
+        :aPPFD => One(
+            within=Self(), application=:archimed_light, var=:aPPFD,
+            policy=HoldLast(),
+        ),
+    ),
+)
+
+leaf_energy_balance_application = ModelSpec(
+    Monteith();
+    name=:energy_balance,
+    on=Many(scale=:Leaf),
+    inputs=(
+        :Ra_SW_f => One(
+            within=Self(), application=:archimed_light, var=:Ra_SW_f,
+            policy=HoldLast(),
+        ),
+        :sky_fraction => One(
+            within=Self(), application=:archimed_light, var=:sky_fraction,
+            policy=HoldLast(),
+        ),
+    ),
+)
+
+model = CompositeModel(
+    light_sim.scene.mtg;
+    applications=(
+        light_application,
+        leaf_energy_balance_application,
+        leaf_photosynthesis_application,
+        stomatal_conductance_application,
+    ),
+    environment=forcing,
+)
+
+simulation = run!(model; outputs=:all)
+```
+
+The leaf applications remain ordinary PlantSimEngine applications on
+`Many(scale=:Leaf)`. The compiler schedules the scene writer before its
+physiology consumers. Application tuple order and MTG traversal order do not
+define this coupling.
+
+FvCB and Monteith consume flux densities and do not require an `area` input.
+The published `area` is available when another model needs an organ total.
+For example, multiplying an absorbed irradiance by `area` gives absorbed
+power. Ground-area canopy outputs remain different: Beer-Lambert outputs
+still need the appropriate LAI conversion before coupling to leaf physiology.
+
+Leaf-scale energy balance and photosynthesis should use the canonical
+`Many(scale=:Leaf)` destination above. If another radiative process genuinely
+owns outputs on internodes, select those organs explicitly with
+`Many(scale=(:Leaf, :Internode), within=SceneScope())`; exact coverage then
+applies to both scales.
+
+## Choose the output schema
+
+`archimed_light_outputs` returns the `Distributed(Default(value))` declarations
+used by `PlantSimEngine.outputs_` for the chosen model schema. The application
+only selects destinations; defaults and types belong to the model. Two schemas
+are available.
+
+The default `:coupling` schema keeps the hot publication path compact:
+
+| Variable | Meaning | Unit |
+| --- | --- | --- |
+| `Ri_PAR_f` | total intercepted PAR irradiance | `W m⁻²` |
+| `Ri_NIR_f` | total intercepted NIR irradiance | `W m⁻²` |
+| `Ra_PAR_f` | total absorbed PAR irradiance | `W m⁻²` |
+| `Ra_NIR_f` | total absorbed NIR irradiance | `W m⁻²` |
+| `Ra_SW_f` | `Ra_PAR_f + Ra_NIR_f` | `W m⁻²` |
+| `aPPFD` | absorbed photosynthetic photon flux density | `μmol m⁻² s⁻¹` |
+| `area` | mesh surface area used by the light solver for normalization | `m²` |
+| `sky_fraction` | simulated visible-sky fraction, area-weighted over the organ components | dimensionless |
+
+`area` is the sum of the retained geometric triangle areas mapped to each
+target object. For a leaf represented by a single lamina surface, this is its
+leaf area and the reference surface for its flux densities. The pixel
+projection correction adjusts intercepted power; it does not change `area`
+or its use as the flux denominator.
+The [`component_values`](@ref) table continues to expose the same quantity
+under its legacy column name, `radiative_mesh_area`. That spelling does not
+denote a separate area or require a conversion.
+
+`aPPFD` is computed as `Ra_PAR_f * par_energy_to_photon`; `4.57` is the
+default broadband PAR conversion in `μmol J^-1`.
+
+The extension declares scientific contracts for `aPPFD`, `Ra_SW_f`, and
+`area`. Both fluxes use `basis=:surface_area`; `area` uses
+`unit=:square_metre` and `basis=:organ`. The `Ri_*` and component PAR/NIR
+diagnostics remain available but are deliberately not assigned contracts by
+analogy. These contract names describe the same surface used by the solver;
+the radiation calculations and normalization are unchanged.
+
+The `:full` schema adds all initial (`*_0_*`) and scattering-inclusive PAR/NIR
+incident and absorbed variables:
+
+- `Ri_PAR_0_f`, `Ri_NIR_0_f`, `Ri_PAR_f`, and `Ri_NIR_f`;
+- `Ri_PAR_0_q`, `Ri_NIR_0_q`, `Ri_PAR_q`, and `Ri_NIR_q`;
+- `Ra_PAR_0_f`, `Ra_NIR_0_f`, `Ra_PAR_f`, and `Ra_NIR_f`;
+- `Ra_PAR_0_q`, `Ra_NIR_0_q`, `Ra_PAR_q`, and `Ra_NIR_q`; and
+- the coupling columns `Ra_SW_f`, `aPPFD`, `area`, and `sky_fraction`.
+
+Choose the schema on the model; a single destination declaration infers its variables:
+
+```julia
+full_light = ArchimedLightModel(light_sim; output_schema=:full)
+
+full_application = ModelSpec(
+    full_light;
+    name=:archimed_light,
+    on=One(scale=:Scene),
+    outputs_to=(
+        OutputTo(
+            Many(scale=:Leaf, within=SceneScope());
+            coverage=:exact,
+        ),
+    ),
+)
+```
+
+When using explicit `vars`, provide a tuple of declared variable names. Missing
+or unknown distributed variables are rejected before the light calculation.
+
+### Sky visibility
+
+Both output schemas publish `sky_fraction` for every selected organ by
+default. Construct `ArchimedLightModel` normally; no `LightOptions` setting or
+separate leaf sky-view value is needed for Monteith. The scene model produces
+`sky_fraction` even when incident shortwave radiation is zero.
+
+ArchimedLight calculates each component's value from its visible projected
+area across sky sectors, divided by its mesh area. The direct-sun sector is
+excluded. When several components map to one organ, the model publishes
+their mesh-area-weighted mean. Monteith uses the published value for longwave
+exchange.
+
+## Supply the radiative forcing
+
+The model reads five canonical values from the sampled PlantSimEngine
+environment:
+
+| Variable | Contract |
+| --- | --- |
+| `sun_azimuth_deg` | finite angle in `[0, 360)` degrees |
+| `sun_elevation_deg` | finite angle in `[-90, 90]` degrees |
+| `Ri_PAR_f` | non-negative incident PAR irradiance in `W m^-2` |
+| `Ri_NIR_f` | non-negative incident NIR irradiance in `W m^-2` |
+| `direct_fraction` | direct fraction in `[0, 1]` |
+
+ArchimedLight uses `1 - direct_fraction` as the diffuse fraction. Every global
+forcing row must also carry a finite positive `duration`, either as a number of
+seconds or as a fixed `Dates` period such as `Hour(1)`. PlantSimEngine adds
+this timeline field automatically to the sampled model-facing environment, so
+do not declare or remap a second duration input for `ArchimedLightModel`.
+
+For example, one forcing row can be written as:
+
+```julia
+using Dates
+
+forcing = (
+    sun_azimuth_deg=180.0,
+    sun_elevation_deg=45.0,
+    Ri_PAR_f=500.0,
+    Ri_NIR_f=450.0,
+    direct_fraction=0.7,
+    duration=Hour(1),
+)
+```
+
+All values are validated before the numerical light solver runs and before any
+organ status is modified.
+
+!!! compat "Same-cadence contract in the first integration"
+    Use one ArchimedLight execution per forcing interval. This first version
+    does not define a cross-rate aggregation policy for solar azimuth,
+    elevation, or direct fraction. In particular, averaging angular forcing
+    over a coarser light cadence would not have a well-defined physical meaning
+    here.
+
+## Map geometry to destination objects
+
+PlantGeom stores each simulated component's owner as a composite key:
+`(source_instance_id, source_node_id)`. The extension compiles those keys to
+PlantSimEngine `ObjectId`s once per stable scene generation.
+
+Three mapping modes are available:
+
+1. With neither `source_roots` nor `object_resolver`, the PlantSimEngine model
+   must be built from the exact `scene.mtg` retained by `light_sim.scene`.
+2. For a radiative scene assembled from other MTG roots, pass
+   `source_roots=instance_id => exact_registered_root` mappings. The value can
+   also be a function of the current `RunContext` returning that mapping.
+3. For a non-MTG ownership scheme, pass
+   `object_resolver=key -> registered_object`. PlantGeom accepts a registered
+   object, status, exact MTG node, `ObjectId`, or raw registered id and validates
+   the result against the runtime model.
+
+For example:
+
+```julia
+light_kernel = ArchimedLightModel(
+    light_sim;
+    source_roots=Dict(
+        1 => exact_first_plant_root,
+        2 => exact_second_plant_root,
+    ),
+)
+```
+
+`source_roots` and `object_resolver` are mutually exclusive. Never derive an
+`ObjectId` from `source_node_id` alone: the same raw MTG node id may occur in
+several source instances.
+
+The `source_roots` mode also makes the publication boundary explicit for an
+assembled scene. A ground surface or another source instance omitted from the
+mapping remains in the radiative calculation and can still shade or scatter
+light, but it is not written to an organ status. More generally, any geometric
+component outside the selected target set remains physically active and is
+not published.
+
+## Exact coverage and atomic publication
+
+Only `coverage=:exact` is supported. Every current object selected by
+`OutputTo` must map to at least one simulated radiative component. Several
+components or owner keys may map to the same destination; energy quantities
+are summed and flux densities are weighted by their radiative mesh areas.
+
+If a selected `Leaf` or `Internode` has no mapped geometry, the extension raises
+an error before `run_light` and before writing any destination. It does not
+retain an old value, fill in zero, or rely on row order. This matters after
+organ creation: either rebuild the scene so that the new target has geometry,
+or deliberately keep that object outside the destination selector.
+
+The final identified assignment is also atomic with respect to validation:
+unknown, duplicate, extra, or missing destination identities and missing
+declared columns are rejected before status mutation.
+
+## Refresh the scene whenever the topology changes
+
+Steady-state runs reuse by default the compiled models and variables mapping and the result buffers.
+When a model changes the topology / geometry in the scene, the
+`LightSimulation` scene needs to be explicitly refreshed:
+
+```julia
+light_kernel = ArchimedLightModel(
+    light_sim;
+    scene_provider=context -> rebuild_light_scene(context),
+    source_roots=context -> current_source_roots(context),
+)
+```
+
+`scene_provider(context)` must return the `PlantGeom.SceneGeometry` valid for
+the current runtime topology. If geometry changed, the callback is responsible
+for rebuilding it through PlantGeom. Calling
+`update_scene!(light_sim, light_sim.scene)` by itself only invalidates
+ArchimedLight caches; it does not reconstruct a merged mesh from newly created
+organs.
+
+For an unrelated PlantSimEngine revision, a provider may return the still-valid
+current scene object at the same scene version to acknowledge that no geometric
+rebuild was required; this preserves the expensive radiative cache while owner
+and target bindings are refreshed. A version increase on the same
+`SceneGeometry` object is different: it does not prove that the merged mesh was
+rebuilt, so it requires `scene_provider` to return or explicitly affirm the
+geometry prepared for that generation. Without a provider, such an
+uncoordinated lifecycle change is a hard error instead of a run against stale
+geometry.
+
+Explicitly installing a distinct rebuilt `SceneGeometry` with
+[`update_scene!`](@ref) is accepted and triggers mapping recompilation without
+calling the provider.
+
+One kernel instance belongs to one PlantSimEngine runtime model and one
+execution `Scene`. Construct a distinct `ArchimedLightModel` for each scene
+application instead of reusing the same mutable kernel across models or
+`Scene` objects.
+
+## Performance and diagnostics
+
+On an unchanged scene, the adapter uses constant-time revision checks and
+reuses its component-to-target mapping, aggregation columns, and target-id
+buffer. It obtains the current PlantSimEngine `OutputTargets` view on every
+invocation and never retains that lifecycle-scoped view across steps. Custom
+wrappers should follow the same rule.
+
+Use PlantSimEngine diagnostics to inspect the compiled writer, both area
+boundaries, and their consumers:
+
+```julia
+Diagnostics.explain_applications(model)
+Diagnostics.explain_writers(model)
+Diagnostics.explain_bindings(model)
+Diagnostics.explain_schedule(model)
+```
+
+Run with `outputs=:all` when both the raw ArchimedLight history and the current
+converted physiology state are needed. The final `aPPFD` and `Ra_SW_f` fields
+on the leaf are the converted values; read the raw values from the
+`:archimed_light` output stream:
+
+```julia
+simulation = run!(model; outputs=:all)
+leaf_state = final_state(simulation, :leaf_42)
+raw_ppfd = last(outputs(simulation)[
+    (:archimed_light, ObjectId(:leaf_42), :aPPFD)
+])[2]
+raw_shortwave = last(outputs(simulation)[
+    (:archimed_light, ObjectId(:leaf_42), :Ra_SW_f)
+])[2]
+(
+    raw_ppfd=raw_ppfd,
+    leaf_ppfd=leaf_state.aPPFD_leaf_mean,
+    raw_shortwave=raw_shortwave,
+    leaf_shortwave=leaf_state.Ra_SW_f_leaf_mean,
+)
+```
+
+For large canopies, prefer the `:coupling` schema unless the full diagnostic
+budget is actually consumed. Recompile the mapping only at a real scene or
+topology lifecycle barrier; do not rebuild selectors or perform an MTG join in
+the per-step path.

@@ -99,11 +99,12 @@ function _key_columns_for_file(name::String, cols::Vector{String})
     candidates =
         if name == "component_values.csv"
             [
+                # Physical nodes stay distinct even when source identities collide.
+                ["step_number", "node_id"],
                 ["step_number", "item_id", "component_id"],
                 ["step_number", "object_id", "source_topology_id"],
                 ["step_number", "source_topology_id"],
                 ["step_number", "component_id"],
-                ["step_number", "node_id"],
             ]
         elseif name == "scene_values.csv"
             [["step_number"], ["stepNumber"]]
@@ -137,6 +138,13 @@ function _stable_value_columns(name::String, cols::Vector{String})
     wanted =
         if name == "component_values.csv"
             [
+                "node_id",
+                "source_topology_id",
+                "object_id",
+                "item_id",
+                "component_id",
+                "group",
+                "type",
                 "area",
                 "Ri_PAR_0_f",
                 "Ri_NIR_0_f",
@@ -173,7 +181,10 @@ function _stable_value_columns(name::String, cols::Vector{String})
 end
 
 function _csv_tolerance(col::String)
-    if col in ("date", "hour_start", "hour_end", "group", "type", "sky_mode", "source")
+    if col in (
+        "date", "hour_start", "hour_end", "group", "type", "sky_mode", "source",
+        "node_id", "source_topology_id", "object_id", "item_id", "component_id",
+    )
         return (numeric=false, atol=0.0, rtol=0.0)
     elseif occursin("barycentre", col) || startswith(col, "dir_")
         return (numeric=true, atol=1e-6, rtol=1e-6)
@@ -216,11 +227,23 @@ function compare_stable_csv_paths(expected_path::AbstractString, observed_path::
     cols = String[string(n) for n in propertynames(first(exp_rows))]
     key_cols = _key_columns_for_file(name, cols)
     isempty(key_cols) && error("$(label): unable to infer key columns for $(name)")
+    # The baseline defines the compared fields. Newly exported columns have no
+    # reference value yet; they do not replace its selected physical row key.
     value_cols = [c for c in _stable_value_columns(name, cols) if !(c in key_cols)]
 
     keyf(row) = Tuple(_row_get(row, c) for c in key_cols)
-    exp_map = Dict{Tuple,Any}(keyf(r) => r for r in exp_rows)
-    obs_map = Dict{Tuple,Any}(keyf(r) => r for r in obs_rows)
+    function unique_rows(rows, side)
+        by_key = Dict{Tuple,Any}()
+        for row in rows
+            key = keyf(row)
+            any(ismissing, key) && throw(ArgumentError("$(label): $(side) row has missing identity in $(key_cols): $(key)"))
+            haskey(by_key, key) && throw(ArgumentError("$(label): $(side) rows have duplicate key=$(key) for $(key_cols)"))
+            by_key[key] = row
+        end
+        return by_key
+    end
+    exp_map = unique_rows(exp_rows, "expected")
+    obs_map = unique_rows(obs_rows, "observed")
     exp_keys = Set(keys(exp_map))
     obs_keys = Set(keys(obs_map))
     missing = length(setdiff(exp_keys, obs_keys))
