@@ -1,6 +1,13 @@
 using ArchimedLight
 using Documenter
 using Bonito
+using WGLMakie
+using CairoMakie
+
+# Load WGL before examples can activate it, and keep ordinary figures as PNG.
+# Bonito's HTML figure renderer otherwise uses WGL even with Cairo active.
+# The interactive voxel App selects WebGL explicitly with WGLMakie.WithConfig.
+CairoMakie.activate!(type="image/png")
 
 # For interactive rendering:
 # using LiveServer

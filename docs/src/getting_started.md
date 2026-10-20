@@ -7,7 +7,7 @@ Here is how to plot it:
 ```@setup getting_started
 using CairoMakie, ArchimedLight, PlantGeom, PlantMeteo
 using Dates
-CairoMakie.activate!(type = "png")
+CairoMakie.activate!(type = "image/png")
 ```
 
 ```@example getting_started

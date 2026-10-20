@@ -9,7 +9,7 @@ The key bridge is:
 
 ```@setup interactive_workflow
 using CairoMakie
-CairoMakie.activate!(type = "png")
+CairoMakie.activate!(type = "image/png")
 ```
 
 ## When To Use This Workflow
