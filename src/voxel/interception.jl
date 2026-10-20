@@ -1,6 +1,5 @@
-function _voxel_reference_ray_offsets(grid::VoxelGrid, requested::Integer)
+function _voxel_face_ray_offsets(dx, dy, requested::Integer)
     requested > 0 || throw(ArgumentError("requested ray count must be positive"))
-    dx, dy, _ = grid.voxel_size
     spacing = sqrt(dx * dy / requested)
     count_x = max(1, floor(Int, dx / spacing))
     count_y = max(1, floor(Int, dy / spacing))
@@ -12,6 +11,41 @@ function _voxel_reference_ray_offsets(grid::VoxelGrid, requested::Integer)
         push!(offsets, ((i - 0.5) * step_x, (j - 0.5) * step_y))
     end
     return offsets
+end
+
+_voxel_reference_ray_offsets(grid::VoxelGrid, requested::Integer) =
+    _voxel_face_ray_offsets(grid.voxel_size[1], grid.voxel_size[2], requested)
+
+# Irradiances are horizontal-plane fluxes. Side-face samples therefore carry
+# their projected area relative to one horizontal voxel, including |dxy/dz|.
+function _voxel_incident_rays(grid::VoxelGrid, direction, requested, toricity)
+    lo, hi = grid.minimum, grid.maximum
+    dx, dy, dz = grid.voxel_size
+    nx, ny, nz = size(grid)
+    offsets = _voxel_reference_ray_offsets(grid, requested)
+    weight = 1.0 / length(offsets)
+    top = (((lo[1] + (i - 1) * dx + offset[1],
+             lo[2] + (j - 1) * dy + offset[2], hi[3]), weight, false)
+           for offset in offsets, i in 1:nx, j in 1:ny)
+    toricity && return top, length(offsets)
+
+    offsets_x = direction[1] == 0 ? NTuple{2,Float64}[] :
+                _voxel_face_ray_offsets(dy, dz, requested)
+    offsets_y = direction[2] == 0 ? NTuple{2,Float64}[] :
+                _voxel_face_ray_offsets(dx, dz, requested)
+    weight_x = isempty(offsets_x) ? 0.0 :
+               abs(direction[1] / direction[3]) * dz / dx / length(offsets_x)
+    weight_y = isempty(offsets_y) ? 0.0 :
+               abs(direction[2] / direction[3]) * dz / dy / length(offsets_y)
+    x_face = direction[1] > 0 ? lo[1] : hi[1]
+    y_face = direction[2] > 0 ? lo[2] : hi[2]
+    side_x = (((x_face, lo[2] + (j - 1) * dy + offset[1],
+                lo[3] + (k - 1) * dz + offset[2]), weight_x, true)
+              for offset in offsets_x, j in 1:ny, k in 1:nz)
+    side_y = (((lo[1] + (i - 1) * dx + offset[1], y_face,
+                lo[3] + (k - 1) * dz + offset[2]), weight_y, true)
+              for offset in offsets_y, i in 1:nx, k in 1:nz)
+    return Iterators.flatten((top, side_x, side_y)), length(offsets)
 end
 
 function _voxel_grid_fingerprint(grid::VoxelGrid)
@@ -44,8 +78,9 @@ end
     compute_voxel_direction_response(grid, propagation_direction, backend; options=LightOptions())
 
 Compute a unit-irradiance geometric response for one downward propagation
-direction. Each horizontal voxel receives unit incident weight. The response
-can subsequently be scaled independently for PAR and NIR. `options.toricity`
+direction. Each horizontal voxel receives unit incident weight through the
+top; finite scenes also receive projected incident weight on upwind sides.
+The response can subsequently be scaled independently for PAR and NIR. `options.toricity`
 selects periodic wrapping or termination at the first horizontal exit.
 """
 function compute_voxel_direction_response(
@@ -57,9 +92,9 @@ function compute_voxel_direction_response(
 )
     _validate_terrain_for_grid(grid, terrain, options.toricity)
     direction = _normalise_voxel_direction(propagation_direction)
-    offsets = _voxel_reference_ray_offsets(grid, backend.rays_per_voxel)
-    effective_ray_count = length(offsets)
-    ray_weight = 1.0 / effective_ray_count
+    rays, effective_ray_count = _voxel_incident_rays(
+        grid, direction, backend.rays_per_voxel, options.toricity,
+    )
     interception = zeros(Float64, size(grid))
     escaped_weight = 0.0
     escaped_top_weight = 0.0
@@ -68,53 +103,49 @@ function compute_voxel_direction_response(
     bottom_exit_fraction = zeros(Float64, size(grid)[1:2])
     terrain_incident_fraction = zeros(Float64, terrain_patch_count(terrain))
     terrain_incident_weight = 0.0
-    nx, ny, _ = size(grid)
-    dx, dy, _ = grid.voxel_size
-    lo = grid.minimum
-    top = grid.maximum[3]
-
-    for start_j in 1:ny, start_i in 1:nx
-        for offset in offsets
-            origin = (
-                lo[1] + (start_i - 1) * dx + offset[1],
-                lo[2] + (start_j - 1) * dy + offset[2],
-                top,
-            )
-            path = _voxel_path_for_backend(grid, origin, direction, backend, terrain; options=options)
-            incoming = ray_weight
-            last_index = nothing
-            for segment in path
-                i, j, k = segment.index
-                density = grid.pad[i, j, k]
-                if density > 0 && backend.g > 0
-                    transmission = exp(-backend.g * density * segment.length)
-                    outgoing = transmission * incoming
-                    interception[i, j, k] += incoming - outgoing
-                    incoming = outgoing
-                end
-                last_index = segment.index
+    incoming_weight = Float64(size(grid)[1] * size(grid)[2])
+    for (origin, ray_weight, from_side) in rays
+        if from_side
+            if !(terrain isa NoVoxelTerrain)
+                surface = terrain_elevation_at(terrain, origin[1], origin[2])
+                tolerance = 512eps(Float64) * max(abs(surface), abs(origin[3]), 1.0)
+                origin[3] > surface + tolerance || continue
             end
-            if path.exit_reason == :terrain
-                hit = something(path.terrain_hit)
-                terrain_incident_fraction[hit.patch_id] += incoming
-                terrain_incident_weight += incoming
-            elseif path.exit_reason == :bottom
-                escaped_weight += incoming
-                escaped_bottom_weight += incoming
-                last_index === nothing || (bottom_exit_fraction[last_index[1], last_index[2]] += incoming)
-            elseif path.exit_reason == :side
-                escaped_weight += incoming
-                escaped_side_weight += incoming
-            elseif path.exit_reason == :top
-                escaped_weight += incoming
-                escaped_top_weight += incoming
-            else
-                error("unsupported voxel exit reason: $(path.exit_reason)")
+            incoming_weight += ray_weight
+        end
+        path = _voxel_path_for_backend(grid, origin, direction, backend, terrain; options=options)
+        incoming = ray_weight
+        last_index = nothing
+        for segment in path
+            i, j, k = segment.index
+            density = grid.pad[i, j, k]
+            if density > 0 && backend.g > 0
+                transmission = exp(-backend.g * density * segment.length)
+                outgoing = transmission * incoming
+                interception[i, j, k] += incoming - outgoing
+                incoming = outgoing
             end
+            last_index = segment.index
+        end
+        if path.exit_reason == :terrain
+            hit = something(path.terrain_hit)
+            terrain_incident_fraction[hit.patch_id] += incoming
+            terrain_incident_weight += incoming
+        elseif path.exit_reason == :bottom
+            escaped_weight += incoming
+            escaped_bottom_weight += incoming
+            last_index === nothing || (bottom_exit_fraction[last_index[1], last_index[2]] += incoming)
+        elseif path.exit_reason == :side
+            escaped_weight += incoming
+            escaped_side_weight += incoming
+        elseif path.exit_reason == :top
+            escaped_weight += incoming
+            escaped_top_weight += incoming
+        else
+            error("unsupported voxel exit reason: $(path.exit_reason)")
         end
     end
 
-    incoming_weight = Float64(nx * ny)
     intercepted_weight = sum(interception)
     isapprox(
         intercepted_weight + escaped_weight + terrain_incident_weight,

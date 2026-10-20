@@ -83,15 +83,8 @@ function _voxel_scattering_source_point(
     index::CartesianIndex{3},
     terrain::AbstractVoxelTerrain,
 )
-    centre = _voxel_center(grid, index)
-    terrain isa NoVoxelTerrain && return centre
-    surface = terrain_elevation_at(terrain, centre[1], centre[2])
-    scale = maximum(ntuple(axis -> grid.maximum[axis] - grid.minimum[axis], 3))
-    tolerance = 1024eps(Float64) * max(scale, 1.0)
-    voxel_top = grid.minimum[3] + index[3] * grid.voxel_size[3]
-    voxel_top > surface + tolerance || return nothing
-    source_z = clamp(max(centre[3], surface + tolerance), grid.minimum[3], voxel_top - tolerance)
-    return (centre[1], centre[2], source_z)
+    terrain isa NoVoxelTerrain && return _voxel_center(grid, index)
+    return _terrain_voxel_source_point(grid, index, terrain)
 end
 
 function _voxel_ground_center(grid::VoxelGrid, i::Int, j::Int)
@@ -105,8 +98,9 @@ end
 """
     prepare_voxel_scattering_transport(grid, quadrature, backend; options=LightOptions())
 
-Cache internal source-to-boundary DDA paths for occupied voxel centres and
-upward ground rays. Attenuation is deliberately not stored in the cache, so
+Cache internal source-to-boundary DDA paths for occupied voxels and upward
+ground rays. Terrain-cut voxels use a source point in their exposed part.
+Attenuation is deliberately not stored in the cache, so
 the transport application remains an explicit Beer-Lambert calculation.
 """
 function prepare_voxel_scattering_transport(
@@ -160,6 +154,7 @@ function prepare_voxel_scattering_transport(
     terrain_direction_weights = Dict{Int,Tuple{Vector{Int},Vector{Float64}}}()
     for patch_id in 1:terrain_patch_count(terrain)
         origin = _terrain_launch_point(grid, terrain, patch_id)
+        origin === nothing && continue
         normal = terrain_patch_normal(terrain, patch_id)
         direction_indices, weights = terrain_lambertian_weights(quadrature, normal)
         terrain_direction_weights[patch_id] = (direction_indices, weights)
@@ -279,7 +274,8 @@ end
                                      initial_ground_energy=nothing, cache=nothing)
 
 Apply one deterministic, matrix-free scattering transport step. Foliage
-sources emit from voxel centres over the full sphere. A supplied ground is
+sources emit from voxel centres, or an exposed point in terrain-cut cells,
+over the full sphere. A supplied ground is
 Lambertian: radiation reaching it is split into absorbed and reflected energy,
 and reflected energy is propagated upward immediately.
 """
@@ -318,6 +314,26 @@ function apply_voxel_scattering_transport(
     transport_cache = cache === nothing ?
                       prepare_voxel_scattering_transport(grid, quadrature, backend, terrain; options=options) :
                       _validate_voxel_scattering_cache(grid, quadrature, backend, terrain, cache; options=options)
+    return _apply_voxel_scattering_transport(
+        grid, emitted, quadrature, backend, transport_cache;
+        band, ground, initial_ground_energy, terrain, initial_terrain_energy,
+    )
+end
+
+# Public callers validate scene fingerprints above. Multiple-scattering orders
+# reuse one validated scene, so do not rehash every PAD/terrain array per order.
+function _apply_voxel_scattering_transport(
+    grid::VoxelGrid,
+    emitted::AbstractArray{<:Real,3},
+    quadrature::VoxelScatteringQuadrature,
+    backend::VoxelCPUBackend,
+    transport_cache::VoxelScatteringTransportCache;
+    band::Symbol=:par,
+    ground::Union{Nothing,VoxelGroundOptics}=nothing,
+    initial_ground_energy::Union{Nothing,AbstractArray{<:Real,2}}=nothing,
+    terrain::AbstractVoxelTerrain=NoVoxelTerrain(),
+    initial_terrain_energy::Union{Nothing,AbstractVector{<:Real}}=nothing,
+)
     intercepted = zeros(Float64, size(grid))
     ground_incident = zeros(Float64, size(grid)[1:2])
     terrain_incident = zeros(Float64, terrain_patch_count(terrain))
@@ -335,6 +351,10 @@ function apply_voxel_scattering_transport(
             isfinite(value) && value >= 0 || throw(ArgumentError(
                 "initial terrain energy must be finite and non-negative",
             ))
+            value == 0 || haskey(transport_cache.terrain_direction_weights, index) ||
+                throw(ArgumentError(
+                    "non-zero incident energy was assigned to terrain patch $index outside the voxel domain",
+                ))
             terrain_incident[index] = value
         end
     end
@@ -701,18 +721,17 @@ function _compute_voxel_scattering_band(
             emitted[index] = omega * incoming
         end
         scattered_total += sum(emitted)
-        transport = apply_voxel_scattering_transport(
+        transport = _apply_voxel_scattering_transport(
             grid,
             emitted,
             quadrature,
-            backend;
-            options=options,
+            backend,
+            cache;
             band=band,
             ground=ground,
             initial_ground_energy=iteration == 1 ? initial_ground : nothing,
             terrain=terrain,
             initial_terrain_energy=iteration == 1 ? initial_terrain : nothing,
-            cache=cache,
         )
         ground_absorbed += transport.ground_absorbed_energy
         ground_reflected += transport.ground_reflected_energy

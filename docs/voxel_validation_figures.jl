@@ -145,13 +145,16 @@ function generate()
     mkpath(OUTPUT); CairoMakie.activate!()
     profiles, budgets = physical_checks()
     terrain_data = terrain_figure(); physics_figure(profiles, budgets)
+    sources = [@__FILE__, joinpath(@__DIR__, "voxel_terrain_3d.jl")]
+    append!(sources, filter(path -> endswith(path, ".jl"),
+        readdir(joinpath(ROOT, "src", "voxel"); join=true)))
     provenance = Dict("head_sha"=>readchomp(`git -C $ROOT rev-parse HEAD`),
+        "worktree_dirty"=>!isempty(readchomp(`git -C $ROOT status --porcelain --untracked-files=no`)),
         "archimed_path"=>relpath(pathof(ArchimedLight), ROOT), "julia_version"=>string(VERSION),
         "versions"=>Dict(string(m)=>string(pkgversion(m)) for m in
             (ArchimedLight, CairoMakie, CairoMakie.Makie, Scene.Bonito, Scene.WGLMakie,
                 ArchimedLight.PlantMeteo, ArchimedLight.PlantGeom)),
-        "sha256"=>Dict(relpath(p, ROOT)=>bytes2hex(sha256(read(p))) for p in
-            (@__FILE__, joinpath(@__DIR__, "voxel_terrain_3d.jl"))),
+        "sha256"=>Dict(relpath(p, ROOT)=>bytes2hex(sha256(read(p))) for p in sources),
         "profile_parameters"=>Dict("PAD_m2_m3"=>0.4, "G"=>0.5, "rays_per_voxel"=>4,
             "bounds_m"=>[1, 1, 3], "grid_size"=>[1, 1, 12], "toricity"=>true, "traversal"=>"dda"),
         "budget_parameters"=>Dict("PAD_m2_m3"=>0.5, "G"=>0.5, "rays_per_voxel"=>4,

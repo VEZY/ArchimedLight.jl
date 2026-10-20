@@ -126,8 +126,10 @@ end
     periodic = run_voxel_light_step(grid, row, LightOptions(options; toricity=true))
     @test open.first_order.par_escaped_side_energy > 0
     @test periodic.first_order.par_escaped_side_energy == 0
-    @test sum(open.first_order.par_energy) < sum(periodic.first_order.par_energy)
-    @test open.first_order.par_incoming_energy == periodic.first_order.par_incoming_energy
+    # A finite volume also receives sunlight through its upwind sides.
+    @test open.first_order.par_incoming_energy > periodic.first_order.par_incoming_energy
+    @test sum(open.first_order.par_energy) / open.first_order.par_incoming_energy <
+          sum(periodic.first_order.par_energy) / periodic.first_order.par_incoming_energy
     for result in (open, periodic)
         @test sum(result.first_order.par_energy) + result.first_order.par_escaped_energy ≈
               result.first_order.par_incoming_energy
@@ -392,8 +394,8 @@ end
     ]
     @test maximum(pillar_totals) - minimum(pillar_totals) <= 2e-12
 
-    # Periodic and open boundaries agree for a vertical ray, while
-    # an oblique open ray can escape through a side instead of wrapping.
+    # Periodic and open boundaries agree for a vertical ray. Oblique finite
+    # illumination also enters through the sides, with a lower intercepted fraction.
     vertical_periodic = ArchimedLight.compute_voxel_direction_response(
         ground, (0, 0, -1), VoxelCPUBackend(rays_per_voxel=1)
     )
@@ -409,6 +411,8 @@ end
         ground, rotated_direction(0.0), VoxelCPUBackend(rays_per_voxel=1);
         options=LightOptions(toricity=false),
     )
-    @test sum(oblique_open.interception_fraction) < sum(oblique_periodic.interception_fraction)
+    @test sum(oblique_open.interception_fraction) / oblique_open.incoming_weight <
+          sum(oblique_periodic.interception_fraction) / oblique_periodic.incoming_weight
+    @test oblique_open.incoming_weight > oblique_periodic.incoming_weight
     @test oblique_open.escaped_weight > oblique_periodic.escaped_weight
 end

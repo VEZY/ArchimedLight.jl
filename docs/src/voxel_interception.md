@@ -101,6 +101,17 @@ workflow, including ray diagnostics and cached transport:
 The backend only configures ray sampling and numerical traversal. Pass the same
 `options` to standalone ray tracing and `voxelplot` to inspect simulation paths.
 
+First-order illumination enters through the top and, for a finite scene, every
+upwind lateral face. Lateral ray weights include the face area projected onto
+the horizontal irradiance reference plane. Rays entering a side below the soil
+surface are excluded. Adding empty air above a finite canopy therefore does
+not remove its lateral illumination.
+
+`rays_per_voxel` requests midpoint samples per incident voxel face; the effective
+count depends on face aspect ratio. Terrain visibility and interception use
+this quadrature. Refine sampling until soil and foliage results converge:
+coarse samples can alias a diagonal boundary, especially on tall, thin voxels.
+
 The production traversal is `:dda`. `:reference` is a correct sorted-plane
 implementation used to validate the DDA. Historical Java behavior is kept only
 as test provenance.
@@ -129,9 +140,12 @@ flux is reported as zero.
 | `par_flux` | `Ri_PAR_0_f` | `W m⁻² plant` |
 | `nir_flux` | `Ri_NIR_0_f` | `W m⁻² plant` |
 
-`par_incoming_energy` and `nir_incoming_energy` are incident energies over the
-whole horizontal domain. The corresponding `*_escaped_energy` fields close the
-energy balance.
+`par_incoming_energy` and `nir_incoming_energy` include all energy entering the
+computational domain. With periodic boundaries, this is horizontal irradiance
+times horizontal area and step duration. A finite scene also includes lateral
+inflow above the terrain, so its incoming energy can exceed that product. The
+corresponding `*_escaped_energy` fields close the energy balance, including
+light that passes through empty air.
 
 ## Add Terrain And Soil
 
@@ -320,7 +334,8 @@ only optics does not require rebuilding those paths.
     identities, adaptive grids, wavelength-resolved transport, and GPU
     execution are not implemented. Internal foliage emission uses the voxel
     centre (or the above-surface part of a terrain-straddling voxel) as a
-    deterministic sub-voxel approximation; terrain emission uses patch centres.
+    deterministic sub-voxel approximation; terrain emission uses the centroid
+    of each patch's overlap with the horizontal grid domain.
 
 The voxel workflow is intentionally separate from the triangle-based
 `LightSimulation` / `run_light` API. It reuses the same sky and meteorological

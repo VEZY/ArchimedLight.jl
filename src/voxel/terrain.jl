@@ -134,7 +134,7 @@ struct TerrainBVH{T<:AbstractFloat}
     leaves::Vector{Vector{Int}}
 end
 
-"""General non-periodic triangle terrain with a cached BVH."""
+"""General non-periodic triangle terrain; geometry and its cached BVH are read-only."""
 struct TriangulatedTerrain{T<:AbstractFloat} <: AbstractVoxelTerrain
     vertices::Vector{NTuple{3,T}}
     triangles::Vector{NTuple{3,Int}}
@@ -284,7 +284,8 @@ end
 
 Triangulated height samples at increasing vertex coordinates `x` and `y`.
 Every cell uses the fixed southwest-to-northeast diagonal. A BVH is built once
-and reused. `periodic=true` tiles the height field horizontally.
+and reused. `periodic=true` tiles the height field horizontally and requires
+matching elevations on opposite edges.
 """
 struct HeightFieldTerrain{T<:AbstractFloat} <: AbstractVoxelTerrain
     x::Vector{T}
@@ -321,6 +322,14 @@ function HeightFieldTerrain(
     ))
     z = Float64.(elevation)
     all(isfinite, z) || throw(ArgumentError("height-field elevations must be finite (no NODATA)"))
+    if periodic
+        scale = max(maximum(abs, z), xv[end] - xv[1], yv[end] - yv[1], 1.0)
+        tolerance = 256eps(Float64) * scale
+        all(abs(z[1, j] - z[end, j]) <= tolerance for j in eachindex(yv)) ||
+            throw(ArgumentError("periodic height-field elevations must match on opposite x edges"))
+        all(abs(z[i, 1] - z[i, end]) <= tolerance for i in eachindex(xv)) ||
+            throw(ArgumentError("periodic height-field elevations must match on opposite y edges"))
+    end
 
     vertices = NTuple{3,Float64}[]
     for j in eachindex(yv), i in eachindex(xv)
@@ -367,11 +376,8 @@ terrain_bounds(terrain::PlanarTerrain) = (
     (terrain.x_bounds[2], terrain.y_bounds[2], terrain.elevation),
 )
 
-function terrain_bounds(terrain::TriangulatedTerrain)
-    lower = ntuple(axis -> minimum(vertex[axis] for vertex in terrain.vertices), 3)
-    upper = ntuple(axis -> maximum(vertex[axis] for vertex in terrain.vertices), 3)
-    return lower, upper
-end
+# Geometry is read-only after construction, like the BVH used for intersections.
+terrain_bounds(terrain::TriangulatedTerrain) = (terrain.bvh.lower[1], terrain.bvh.upper[1])
 
 terrain_bounds(terrain::HeightFieldTerrain) = terrain_bounds(terrain.mesh)
 
@@ -809,12 +815,134 @@ function terrain_lambertian_weights(
     return direction_indices, weights
 end
 
-function _terrain_launch_point(grid::VoxelGrid, terrain, patch_id::Integer)
+# Convex terrain facets stay planar when clipped, so projected-area centroids
+# also give their surface-area centroids. This handles partial patch overlap
+# without launching rays from the centroid of the portion outside the grid.
+function _clip_terrain_polygon(polygon, axis::Int, bound::Float64, keep_above::Bool)
+    clipped = NTuple{3,Float64}[]
+    isempty(polygon) && return clipped
+    previous = polygon[end]
+    previous_inside = keep_above ? previous[axis] >= bound : previous[axis] <= bound
+    for point in polygon
+        inside = keep_above ? point[axis] >= bound : point[axis] <= bound
+        if inside != previous_inside
+            fraction = (bound - previous[axis]) / (point[axis] - previous[axis])
+            push!(clipped, ntuple(i -> previous[i] + fraction * (point[i] - previous[i]), 3))
+        end
+        inside && push!(clipped, point)
+        previous, previous_inside = point, inside
+    end
+    return clipped
+end
+
+function _clip_terrain_xy(polygon, lower, upper)
+    for axis in 1:2
+        polygon = _clip_terrain_polygon(polygon, axis, Float64(lower[axis]), true)
+        polygon = _clip_terrain_polygon(polygon, axis, Float64(upper[axis]), false)
+    end
+    return polygon
+end
+
+function _terrain_polygon_centroid(polygon)
+    length(polygon) >= 3 || return nothing
+    first = polygon[1]
+    area = 0.0
+    weighted = (0.0, 0.0, 0.0)
+    for i in 2:(length(polygon) - 1)
+        second, third = polygon[i], polygon[i + 1]
+        weight = abs((second[1] - first[1]) * (third[2] - first[2]) -
+                     (second[2] - first[2]) * (third[1] - first[1]))
+        weighted = ntuple(axis -> weighted[axis] +
+                                  weight * (first[axis] + second[axis] + third[axis]) / 3, 3)
+        area += weight
+    end
+    return area > 0 ? ntuple(axis -> weighted[axis] / area, 3) : nothing
+end
+
+function _terrain_patch_emission_point(grid::VoxelGrid, terrain::PlanarTerrain, patch_id::Integer)
     point = terrain_patch_point(terrain, patch_id)
+    half_size = ((terrain.x_bounds[2] - terrain.x_bounds[1]) / (2 * terrain.cells[1]),
+                 (terrain.y_bounds[2] - terrain.y_bounds[1]) / (2 * terrain.cells[2]))
+    all(grid.minimum[axis] <= point[axis] - half_size[axis] &&
+        point[axis] + half_size[axis] <= grid.maximum[axis] for axis in 1:2) && return point
+    lower = ntuple(axis -> max(point[axis] - half_size[axis], grid.minimum[axis]), 2)
+    upper = ntuple(axis -> min(point[axis] + half_size[axis], grid.maximum[axis]), 2)
+    all(upper[axis] > lower[axis] for axis in 1:2) || return nothing
+    return ((lower[1] + upper[1]) / 2, (lower[2] + upper[2]) / 2, point[3])
+end
+
+function _terrain_patch_emission_point(grid::VoxelGrid, terrain::TriangulatedTerrain, patch_id::Integer)
+    patch = _check_terrain_patch(terrain, patch_id)
+    points = [terrain.vertices[vertex] for vertex in terrain.triangles[patch]]
+    all(grid.minimum[axis] <= point[axis] <= grid.maximum[axis]
+        for point in points for axis in 1:2) && return terrain_patch_point(terrain, patch)
+    return _terrain_polygon_centroid(_clip_terrain_xy(points, grid.minimum, grid.maximum))
+end
+
+_terrain_patch_emission_point(grid::VoxelGrid, terrain::HeightFieldTerrain, patch_id::Integer) =
+    _terrain_patch_emission_point(grid, terrain.mesh, patch_id)
+
+function _terrain_launch_point(grid::VoxelGrid, terrain, patch_id::Integer)
+    point = _terrain_patch_emission_point(grid, terrain, patch_id)
+    point === nothing && return nothing
     normal = terrain_patch_normal(terrain, patch_id)
     scale = maximum(ntuple(axis -> grid.maximum[axis] - grid.minimum[axis], 3))
     offset = 1024eps(Float64) * max(scale, 1.0)
-    return ntuple(axis -> point[axis] + offset * normal[axis], 3)
+    launch = ntuple(axis -> point[axis] + offset * normal[axis], 3)
+    if any(launch[axis] < grid.minimum[axis] || launch[axis] > grid.maximum[axis] for axis in 1:2)
+        # A clipped sliver can be narrower than the normal offset. A vertical
+        # nudge stays inside its footprint and above this height surface.
+        return (point[1], point[2], min(point[3] + offset, grid.maximum[3]))
+    end
+    return launch
+end
+
+function _terrain_exposed_source_point(grid, index, terrain::TriangulatedTerrain, tolerance)
+    lower = ntuple(axis -> grid.minimum[axis] + (index[axis] - 1) * grid.voxel_size[axis] + tolerance, 3)
+    upper = ntuple(axis -> grid.minimum[axis] + index[axis] * grid.voxel_size[axis] - tolerance, 3)
+    stack = Int[1]
+    while !isempty(stack)
+        node = pop!(stack)
+        bounds_lower, bounds_upper = terrain.bvh.lower[node], terrain.bvh.upper[node]
+        all(bounds_lower[axis] < upper[axis] && bounds_upper[axis] > lower[axis]
+            for axis in 1:2) || continue
+        bounds_lower[3] < upper[3] - tolerance || continue
+        if isempty(terrain.bvh.leaves[node])
+            push!(stack, terrain.bvh.right[node], terrain.bvh.left[node])
+            continue
+        end
+        for patch in terrain.bvh.leaves[node]
+            points = [terrain.vertices[vertex] for vertex in terrain.triangles[patch]]
+            polygon = _clip_terrain_xy(points, lower, upper)
+            polygon = _clip_terrain_polygon(polygon, 3, upper[3] - tolerance, false)
+            point = _terrain_polygon_centroid(polygon)
+            point === nothing && continue
+            surface = terrain_elevation_at(terrain, point[1], point[2])
+            surface < upper[3] - tolerance || continue
+            centre_z = grid.minimum[3] + (index[3] - 0.5) * grid.voxel_size[3]
+            return (point[1], point[2], min(max(centre_z, surface + tolerance), upper[3]))
+        end
+    end
+    return nothing
+end
+
+_terrain_exposed_source_point(grid, index, terrain::HeightFieldTerrain, tolerance) =
+    _terrain_exposed_source_point(grid, index, terrain.mesh, tolerance)
+_terrain_exposed_source_point(grid, index, terrain::PlanarTerrain, tolerance) = nothing
+
+function _terrain_voxel_source_point(grid::VoxelGrid, index::CartesianIndex{3}, terrain::AbstractVoxelTerrain)
+    centre = ntuple(axis -> grid.minimum[axis] + (index[axis] - 0.5) * grid.voxel_size[axis], 3)
+    terrain isa NoVoxelTerrain && return centre
+    surface = terrain_elevation_at(terrain, centre[1], centre[2])
+    scale = maximum(ntuple(axis -> grid.maximum[axis] - grid.minimum[axis], 3))
+    tolerance = 1024eps(Float64) * max(scale, 1.0)
+    voxel_top = grid.minimum[3] + index[3] * grid.voxel_size[3]
+    if voxel_top > surface + 2tolerance
+        source_z = min(max(centre[3], surface + tolerance), voxel_top - tolerance)
+        return (centre[1], centre[2], source_z)
+    end
+    # A buried column centre does not imply the whole cut cell is underground.
+    return _terrain_exposed_source_point(grid, index, terrain, tolerance)
 end
 
 function _truncate_voxel_path_at_terrain(

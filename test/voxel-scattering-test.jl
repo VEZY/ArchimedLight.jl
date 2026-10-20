@@ -628,7 +628,11 @@ end
     periodic = run_voxel_light_step(grid, row, LightOptions(options; toricity=true); optics)
     @test open.scattering.par.escaped_side_energy > 0
     @test periodic.scattering.par.escaped_side_energy == 0
-    @test sum(open.scattering.par.absorbed_energy) < sum(periodic.scattering.par.absorbed_energy)
+    # A finite canopy also receives light through its upwind sides. Compare
+    # absorbed fractions rather than totals with different incoming energies.
+    @test open.first_order.par_incoming_energy > periodic.first_order.par_incoming_energy
+    @test sum(open.scattering.par.absorbed_energy) / open.first_order.par_incoming_energy <
+          sum(periodic.scattering.par.absorbed_energy) / periodic.first_order.par_incoming_energy
     for result in (open, periodic), band in (:par, :nir)
         @test getproperty(result.scattering, band).relative_balance_residual <= 1e-12
     end

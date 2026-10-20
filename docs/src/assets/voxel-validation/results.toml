@@ -1,7 +1,8 @@
 archimed_path = "src/ArchimedLight.jl"
 budget_quantity_order = ["foliage_absorbed", "soil_absorbed", "escaped", "unresolved"]
-head_sha = "6565f0ec9ff66a323ca1b64669b02696c3e9dc84"
+head_sha = "10d3235021c4b501eb10ba102858c1af5095e8ab"
 julia_version = "1.13.1"
+worktree_dirty = true
 
 [budget_parameters]
 G = 0.5
@@ -9,7 +10,6 @@ NIR_W_m2 = 50
 PAD_m2_m3 = 0.5
 PAR_W_m2 = 100
 all_in_turtle = true
-boundary = "open"
 bounds_m = [1, 1, 2]
 direct_fraction = 0.5
 duration_s = 3600
@@ -24,13 +24,13 @@ soil_PAR_NIR_rho = [0.2, 0.5]
 sun_azimuth_deg = 180
 sun_elevation_deg = 35
 terrain_elevation_m = 0.0
+toricity = false
 turtle_sectors = 1
 
 [[budgets]]
 accounted_J = [140171.64170428523, 182356.56922161786, 37471.789072004336, 2.0926319278768946e-6]
 fractions = [0.3893656714007923, 0.5065460256156051, 0.10408830297778983, 5.8128664663247075e-12]
 incoming_J = 360000.0
-injected_J = 0.0
 iterations = 8
 relative_balance_residual = 0.0
 soil_reflected_J = 45589.142305404464
@@ -39,7 +39,6 @@ waveband = "PAR"
 accounted_J = [18414.45892639894, 74954.9463643255, 86630.59470718658, 2.08899712986314e-6]
 fractions = [0.10230254959110523, 0.4164163686906972, 0.4812810817065921, 1.1605539610350777e-11]
 incoming_J = 180000.0
-injected_J = 0.0
 iterations = 18
 relative_balance_residual = 1.6168794698185392e-16
 soil_reflected_J = 74954.9463643255
@@ -48,10 +47,10 @@ waveband = "NIR"
 [profile_parameters]
 G = 0.5
 PAD_m2_m3 = 0.4
-boundary = "periodic"
 bounds_m = [1, 1, 3]
 grid_size = [1, 1, 12]
 rays_per_voxel = 4
+toricity = true
 traversal = "dda"
 
 [[profiles]]
@@ -71,7 +70,16 @@ numerical_fraction = [0.0, 0.07995558537067671, 0.15351827510938587, 0.221199216
 
 [sha256]
 "docs/voxel_terrain_3d.jl" = "e0b9423650e5a346524e550916baa8ab60d8869e76d69fb4395036c87881d05e"
-"docs/voxel_validation_figures.jl" = "fef8892b1b26c5f6adb249ac89db74c26568bee222c4951ddd8617df79861299"
+"docs/voxel_validation_figures.jl" = "21cb66e27ebb59074edfd38c829a06c89ad158e7c2b88e0110297adff119fbdf"
+"src/voxel/interception.jl" = "6232e78fd71ffe8962e8277c502b5b7594cbe8e449d02f5e77bed139477605e2"
+"src/voxel/io.jl" = "664c2ecc0995948c0cacde07c396cc2aecfaae7ba27bdd77c4d02a6ecfedfe7e"
+"src/voxel/pipeline.jl" = "55c21308e18a16cb5fefc1d02302eb8471bdebb83a486f75d252a88344bafdbd"
+"src/voxel/scattering.jl" = "138da1827b419044dd6a05afe489f8ede01a482bd13f87363053ebf87b3c29a5"
+"src/voxel/terrain.jl" = "b464c8c20c7b77c4c929532810abd89cbe41ff99d5eefb2bf6c7df665a450006"
+"src/voxel/terrain_io.jl" = "51cbef9a4c6fc42e3f2173c0cf1af05c4a40ba8033c392075a1cc97cb1d2b9fa"
+"src/voxel/traversal_dda.jl" = "967ae979cd019b4abbc599a4c860d79f83850ff8832561271ee885378e6e57f1"
+"src/voxel/traversal_reference.jl" = "62d5190f965f3ce58c6edee69a1a2f25792afe46ac768ad4accfb3bc6404c733"
+"src/voxel/types.jl" = "5f69592ca14061b64fd7b54c500dc9cad1931993038ec6e773fbcff9eb600c7f"
 
 [terrain]
 bounds_m = [[0.0, 0.0, 0.0], [8.0, 8.0, 9.0]]
@@ -99,5 +107,5 @@ Bonito = "5.2.0"
 CairoMakie = "0.15.16"
 Makie = "0.24.16"
 PlantGeom = "0.20.0"
-PlantMeteo = "0.9.0"
+PlantMeteo = "0.9.1"
 WGLMakie = "0.13.16"

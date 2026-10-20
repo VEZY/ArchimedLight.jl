@@ -165,10 +165,16 @@ domain. It may lie above `grid.minimum[3]` and cross several vertical voxel
 layers, but it must remain below the top. Terrain below the grid minimum is
 rejected because it could not stop a ray before bottom escape.
 
-For `options.toricity=true`, both conditions are mandatory:
+A larger terrain is accepted, while transport remains restricted to the voxel
+x/y domain. Soil reflection starts at the centroid of each patch's overlap
+with that domain; patches wholly outside it have no transport sources.
+
+For `options.toricity=true`, all conditions are mandatory:
 
 1. construct the planar or height-field terrain with `periodic=true`;
-2. make its x/y bounds exactly match the voxel x/y bounds.
+2. make its x/y bounds exactly match the voxel x/y bounds;
+3. for a height field, match elevations on opposite edges, within floating-point
+   tolerance, so that the repeated surface has no artificial vertical step.
 
 A periodic canopy with non-periodic terrain fails explicitly.
 
