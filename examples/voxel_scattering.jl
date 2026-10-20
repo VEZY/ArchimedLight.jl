@@ -1,7 +1,7 @@
 using ArchimedLight
 
-# Run with:
-#   julia --project=. examples/voxel_scattering.jl
+# Run in a project session:
+#   include("examples/voxel_scattering.jl")
 #
 # These optical values are pedagogical and are not a species calibration.
 
@@ -13,7 +13,6 @@ grid = VoxelGrid(
 
 backend = VoxelCPUBackend(
     rays_per_voxel=4,
-    boundary=:periodic,
     traversal=:dda,
 )
 
@@ -27,6 +26,7 @@ row = (
 )
 
 base_options = LightOptions(
+    toricity=true,
     turtle_sectors=6,
     all_in_turtle=true,
     scattering=false,
@@ -103,11 +103,11 @@ end
 print_budget(
     "PAR energy budget",
     converged.scattering.par,
-    converged.first_order.par_incoming_energy + converged.first_order.par_injected_energy,
+    converged.first_order.par_incoming_energy,
 )
 println()
 print_budget(
     "NIR energy budget",
     converged.scattering.nir,
-    converged.first_order.nir_incoming_energy + converged.first_order.nir_injected_energy,
+    converged.first_order.nir_incoming_energy,
 )

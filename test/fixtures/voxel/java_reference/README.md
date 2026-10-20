@@ -31,9 +31,14 @@ three complete directional response fields, and compact layer profiles for a
 ground layer and a central pillar on small deterministic grids. The output is
 kept at the precision printed by Java.
 
-The `:java_reference` compatibility tests compare these printed path lengths
-and Float32-accumulated coefficients exactly; they do not loosen a tolerance to
-hide drift. For the corrected Julia DDA, a separate seeded comparison covered
+The Julia tests use the production `:dda` and `:reference` algorithms directly.
+They compare the unchanged vertical path exactly, and compare homogeneous
+periodic responses and the ground-layer profile at Float32 precision because
+Java accumulated Float32 values while production Julia uses Float64. The
+baseline remains frozen; no Java traversal or intensity-reset mode is retained
+in the implementation.
+
+A separate seeded comparison of the Julia DDA and reference traversal covered
 3,720 segments from 256 periodic/open rays. Its largest DDA/reference
 difference was `7.105427357601002e-15` in absolute value and
 `1.0442467563577877e-13` in relative value. The acceptance limits are therefore
@@ -47,11 +52,11 @@ wall when an origin has a positive coordinate and the ray travels in the
 positive direction. Consequently, the `diagonal` and `corner` baselines can
 contain consecutive segments associated with the same voxel. These rows are a
 compatibility record, not the desired geometric contract for the Julia DDA
-kernel. Julia tests must distinguish deliberate compatibility from the
-production invariant that adjacent path segments are separated by an actual
-voxel boundary.
+kernel. Julia tests check the corrected diagonal and corner paths explicitly and
+retain the production invariant that adjacent path segments are separated by an
+actual voxel boundary.
 
 The Java non-toric mode also wraps horizontal indices and resets ray intensity
 at a detected wall instead of terminating the ray. It is preserved in the
-`diagonal_java_nontoric` response for characterization only. The Julia public
-`:open` mode terminates a ray at the first horizontal exit.
+`diagonal_java_nontoric` response for characterization only. With `LightOptions(toricity=false)`, Julia terminates a ray at the first
+horizontal exit; `toricity=true` selects periodic wrapping.

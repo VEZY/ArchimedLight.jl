@@ -45,7 +45,7 @@
     @test isapprox(sum(segment.length for segment in diagonal), 3sqrt(1.25); atol=1e-12)
 
     open_path = trace_voxel_ray(
-        grid, (1.75, 0.5, 3.0), (1.0, 0.0, -1.0); boundary=:open
+        grid, (1.75, 0.5, 3.0), (1.0, 0.0, -1.0); options=LightOptions(toricity=false)
     )
     @test open_path.exit_reason == :side
     @test only(open_path.segments).index == (2, 1, 3)
@@ -62,7 +62,7 @@ end
     rng = MersenneTwister(0x564f58454c)
     grid = VoxelGrid((-1.5, 0.25, -2.0), (3.5, 4.25, 2.5), fill(0.2, 5, 4, 6))
 
-    for boundary in (:periodic, :open), _ in 1:128
+    for toricity in (true, false), _ in 1:128
         origin = (
             grid.minimum[1] + rand(rng) * (grid.maximum[1] - grid.minimum[1]),
             grid.minimum[2] + rand(rng) * (grid.maximum[2] - grid.minimum[2]),
@@ -70,9 +70,9 @@ end
         )
         direction = (4rand(rng) - 2, 4rand(rng) - 2, -(0.05 + 1.95rand(rng)))
         reference = trace_voxel_ray(
-            grid, origin, direction; boundary=boundary, algorithm=:reference
+            grid, origin, direction; options=LightOptions(toricity=toricity), algorithm=:reference
         )
-        dda = trace_voxel_ray(grid, origin, direction; boundary=boundary, algorithm=:dda)
+        dda = trace_voxel_ray(grid, origin, direction; options=LightOptions(toricity=toricity), algorithm=:dda)
 
         @test dda.exit_reason == reference.exit_reason
         @test [segment.index for segment in dda] == [segment.index for segment in reference]

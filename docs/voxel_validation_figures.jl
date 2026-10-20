@@ -52,11 +52,14 @@ end
 
 function physical_checks()
     grid = VoxelGrid((0, 0, 0), (1, 1, 3), fill(0.4, 1, 1, 12))
-    backend = VoxelCPUBackend(rays_per_voxel=4, g=0.5, boundary=:periodic, traversal=:dda)
+    backend = VoxelCPUBackend(rays_per_voxel=4, g=0.5, traversal=:dda)
+    periodic_options = LightOptions(toricity=true)
     depth = collect(range(0.0, 3.0; length=13))
     profiles = map((1.0, 0.6)) do mu
         direction = (sqrt(1-mu^2), 0.0, -mu)
-        response = ArchimedLight.compute_voxel_direction_response(grid, direction, backend)
+        response = ArchimedLight.compute_voxel_direction_response(
+            grid, direction, backend; options=periodic_options,
+        )
         layers = vec(sum(response.interception_fraction; dims=(1, 2)))
         numerical = vcat(0.0, cumsum(reverse(layers))) ./ response.incoming_weight
         analytical = 1 .- exp.(-0.5 * 0.4 .* depth ./ mu)
@@ -68,29 +71,28 @@ function physical_checks()
     end
     # Same explicit optical/soil contract and budget as voxel-terrain-test.jl.
     small = VoxelGrid((0, 0, 0), (1, 1, 2), fill(0.5, 1, 1, 2))
-    cpu = VoxelCPUBackend(rays_per_voxel=4, g=0.5, boundary=:open, traversal=:dda)
+    cpu = VoxelCPUBackend(rays_per_voxel=4, g=0.5, traversal=:dda)
     soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.5)
     terrain = PlanarTerrain(small, soil; elevation=0.0)
     optics = VoxelOpticalProperties(small; par_reflectance=0.08, par_transmittance=0.07,
         nir_reflectance=0.45, nir_transmittance=0.40)
     row = (step_duration=3600.0, Ri_PAR_f=100.0, Ri_NIR_f=50.0, sun_azimuth=180.0,
         sun_elevation=35.0, direct_fraction=0.5)
-    options = LightOptions(turtle_sectors=1, all_in_turtle=true, scattering=true,
+    options = LightOptions(toricity=false, turtle_sectors=1, all_in_turtle=true, scattering=true,
         scattering_max_iter=80, scattering_stop_ratio=1e-10,
         nir_interception=true, nir_scattering=true, radiation_timestep_minutes=5.0)
     result = run_voxel_light_step(small, row, options; backend=cpu, optics, terrain)
     budgets = map((:par, :nir)) do waveband
         band = getproperty(result.scattering, waveband)
         incoming = getproperty(result.first_order, Symbol(waveband, :_incoming_energy))
-        injected = getproperty(result.first_order, Symbol(waveband, :_injected_energy))
         values = [sum(band.absorbed_energy), soil_absorbed_energy(band),
             band.escaped_top_energy+band.escaped_side_energy+band.escaped_bottom_energy, band.unresolved_energy]
         @assert band.converged && all(values .>= 0) && band.escaped_bottom_energy == 0
-        @assert isapprox(sum(values), incoming+injected; atol=1e-7, rtol=1e-11)
+        @assert isapprox(sum(values), incoming; atol=1e-7, rtol=1e-11)
         @assert band.relative_balance_residual <= 1e-11
-        @assert band.unresolved_energy / (incoming+injected) < 1e-10
-        Dict("waveband"=>uppercase(string(waveband)), "incoming_J"=>incoming, "injected_J"=>injected,
-            "accounted_J"=>values, "fractions"=>values ./ (incoming+injected),
+        @assert band.unresolved_energy / incoming < 1e-10
+        Dict("waveband"=>uppercase(string(waveband)), "incoming_J"=>incoming,
+            "accounted_J"=>values, "fractions"=>values ./ incoming,
             "iterations"=>band.iterations, "relative_balance_residual"=>band.relative_balance_residual,
             "soil_reflected_J"=>soil_reflected_energy(band))
     end
@@ -151,9 +153,9 @@ function generate()
         "sha256"=>Dict(relpath(p, ROOT)=>bytes2hex(sha256(read(p))) for p in
             (@__FILE__, joinpath(@__DIR__, "voxel_terrain_3d.jl"))),
         "profile_parameters"=>Dict("PAD_m2_m3"=>0.4, "G"=>0.5, "rays_per_voxel"=>4,
-            "bounds_m"=>[1, 1, 3], "grid_size"=>[1, 1, 12], "boundary"=>"periodic", "traversal"=>"dda"),
+            "bounds_m"=>[1, 1, 3], "grid_size"=>[1, 1, 12], "toricity"=>true, "traversal"=>"dda"),
         "budget_parameters"=>Dict("PAD_m2_m3"=>0.5, "G"=>0.5, "rays_per_voxel"=>4,
-            "grid_size"=>[1,1,2], "bounds_m"=>[1,1,2], "boundary"=>"open", "duration_s"=>3600,
+            "grid_size"=>[1,1,2], "bounds_m"=>[1,1,2], "toricity"=>false, "duration_s"=>3600,
             "PAR_W_m2"=>100, "NIR_W_m2"=>50, "turtle_sectors"=>1, "scattering_max_iter"=>80,
             "sun_azimuth_deg"=>180, "sun_elevation_deg"=>35, "direct_fraction"=>0.5,
             "radiation_timestep_minutes"=>5, "all_in_turtle"=>true, "terrain_elevation_m"=>0.0,

@@ -68,11 +68,12 @@ soil = SoilOpticalProperties(
 )
 
 terrain = PlanarTerrain(grid, soil; elevation=0.6)
+options = LightOptions(toricity=false)
 path = trace_voxel_ray(
     grid,
     (0.5, 0.5, 3.0),
     (0.1, 0.0, -1.0);
-    boundary=:open,
+    options=options,
     terrain=terrain,
 )
 
@@ -156,7 +157,7 @@ termination is one of:
 
 - `:terrain`: the nearest soil intersection;
 - `:top`: vertical escape above the grid;
-- `:side`: lateral escape with `boundary=:open`;
+- `:side`: lateral escape with `options.toricity=false`;
 - `:bottom`: lower escape only with `NoVoxelTerrain()`.
 
 For open horizontal boundaries, terrain must cover the complete voxel x/y
@@ -164,7 +165,7 @@ domain. It may lie above `grid.minimum[3]` and cross several vertical voxel
 layers, but it must remain below the top. Terrain below the grid minimum is
 rejected because it could not stop a ray before bottom escape.
 
-For `boundary=:periodic`, both conditions are mandatory:
+For `options.toricity=true`, both conditions are mandatory:
 
 1. construct the planar or height-field terrain with `periodic=true`;
 2. make its x/y bounds exactly match the voxel x/y bounds.
@@ -206,11 +207,12 @@ energy rather than silently converted to absorption.
 Pass terrain independently of foliage optics:
 
 ```julia
+options = LightOptions(toricity=false, scattering=true)
 result = run_voxel_light_step(
     grid,
     meteo_row,
     options;
-    backend=VoxelCPUBackend(boundary=:open),
+    backend=VoxelCPUBackend(),
     optics=leaf_optics,
     terrain=terrain,
 )

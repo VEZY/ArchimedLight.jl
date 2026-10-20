@@ -3,7 +3,7 @@
 
 const VOXEL_BENCHMARK_METADATA = (
     julia_version=string(VERSION),
-    boundary=:periodic,
+    toricity=true,
     traversal=:dda,
     rays_per_voxel=4,
     turtle_sectors=16,
@@ -24,6 +24,7 @@ function _voxel_apply_many_steps(
     grid,
     turtle,
     fluxes,
+    options,
     backend,
     cache,
     count::Int,
@@ -35,6 +36,7 @@ function _voxel_apply_many_steps(
             turtle,
             fluxes,
             backend;
+            options=options,
             duration_seconds=1800.0,
             cache=cache,
         )
@@ -47,7 +49,6 @@ const VOXEL_MEDIUM = _voxel_benchmark_grid(VOXEL_BENCHMARK_METADATA.sizes.medium
 const VOXEL_LARGE = _voxel_benchmark_grid(VOXEL_BENCHMARK_METADATA.sizes.large)
 const VOXEL_BACKEND = ArchimedLight.VoxelCPUBackend(
     rays_per_voxel=VOXEL_BENCHMARK_METADATA.rays_per_voxel,
-    boundary=VOXEL_BENCHMARK_METADATA.boundary,
     traversal=VOXEL_BENCHMARK_METADATA.traversal,
 )
 const VOXEL_ROW = (
@@ -59,6 +60,7 @@ const VOXEL_ROW = (
     direct_fraction=0.6,
 )
 const VOXEL_OPTIONS = ArchimedLight.LightOptions(
+    toricity=VOXEL_BENCHMARK_METADATA.toricity,
     turtle_sectors=VOXEL_BENCHMARK_METADATA.turtle_sectors,
     all_in_turtle=true,
     scattering=false,
@@ -75,7 +77,8 @@ const VOXEL_FLUXES = ArchimedLight.compute_directional_fluxes(
 const VOXEL_MEDIUM_CACHE = ArchimedLight.prepare_voxel_responses(
     VOXEL_MEDIUM,
     VOXEL_TURTLE,
-    VOXEL_BACKEND,
+    VOXEL_BACKEND;
+    options=VOXEL_OPTIONS,
 )
 const VOXEL_SERIES_ROWS = [
     merge(
@@ -123,10 +126,9 @@ const VOXEL_TERRAIN_HEIGHT = ArchimedLight.HeightFieldTerrain(
     periodic=true,
 )
 const VOXEL_TERRAIN_MESH = VOXEL_TERRAIN_HEIGHT.mesh
-const VOXEL_TERRAIN_OPEN_BACKEND = ArchimedLight.VoxelCPUBackend(
-    rays_per_voxel=4,
-    boundary=:open,
-    traversal=:dda,
+const VOXEL_TERRAIN_OPEN_OPTIONS = ArchimedLight.LightOptions(
+    VOXEL_OPTIONS;
+    toricity=false,
 )
 const VOXEL_TERRAIN_RAY_ORIGIN = (8.25, 7.5, 16.0)
 const VOXEL_TERRAIN_RAY_DIRECTION = (0.37, -0.21, -1.0)
@@ -152,7 +154,7 @@ SUITE["Voxel"]["single ray"]["16x16x16 reference"] =
         $VOXEL_MEDIUM,
         $VOXEL_RAY_ORIGIN,
         $VOXEL_RAY_DIRECTION;
-        boundary=:periodic,
+        options=$VOXEL_OPTIONS,
         algorithm=:reference,
     )
 SUITE["Voxel"]["single ray"]["16x16x16 DDA"] =
@@ -160,7 +162,7 @@ SUITE["Voxel"]["single ray"]["16x16x16 DDA"] =
         $VOXEL_MEDIUM,
         $VOXEL_RAY_ORIGIN,
         $VOXEL_RAY_DIRECTION;
-        boundary=:periodic,
+        options=$VOXEL_OPTIONS,
         algorithm=:dda,
     )
 
@@ -173,21 +175,22 @@ for (name, grid) in (
         @benchmarkable ArchimedLight.compute_voxel_direction_response(
             $grid,
             (0.37, -0.21, -1.0),
-            $VOXEL_BACKEND,
+            $VOXEL_BACKEND;
+            options=$VOXEL_OPTIONS,
         ) evals = 1
 end
 
 for rays in (1, 4, 16)
     ray_backend = ArchimedLight.VoxelCPUBackend(
         rays_per_voxel=rays,
-        boundary=:periodic,
         traversal=:dda,
     )
     SUITE["Voxel"]["direction construction"]["8x8x8 rays=$rays"] =
         @benchmarkable ArchimedLight.compute_voxel_direction_response(
             $VOXEL_SMALL,
             (0.37, -0.21, -1.0),
-            $ray_backend,
+            $ray_backend;
+            options=$VOXEL_OPTIONS,
         ) evals = 1
 end
 
@@ -195,7 +198,8 @@ SUITE["Voxel"]["cache and series"]["build 16-direction cache 16x16x16"] =
     @benchmarkable ArchimedLight.prepare_voxel_responses(
         $VOXEL_MEDIUM,
         $VOXEL_TURTLE,
-        $VOXEL_BACKEND,
+        $VOXEL_BACKEND;
+        options=$VOXEL_OPTIONS,
     ) evals = 1
 
 SUITE["Voxel"]["cache and series"]["apply cached response 48 steps 16x16x16"] =
@@ -203,6 +207,7 @@ SUITE["Voxel"]["cache and series"]["apply cached response 48 steps 16x16x16"] =
         $VOXEL_MEDIUM,
         $VOXEL_TURTLE,
         $VOXEL_FLUXES,
+        $VOXEL_OPTIONS,
         $VOXEL_BACKEND,
         $VOXEL_MEDIUM_CACHE,
         $(VOXEL_BENCHMARK_METADATA.repeated_steps),
@@ -282,17 +287,18 @@ const VOXEL_SCATTER_QUADRATURE_16 = ArchimedLight.prepare_voxel_scattering_quadr
     VOXEL_SCATTER_TURTLE_16,
 )
 
-for (name, terrain, terrain_backend) in (
-    ("planar 16x16 patches", VOXEL_TERRAIN_PLANAR, VOXEL_BACKEND),
-    ("height field 16x16 cells", VOXEL_TERRAIN_HEIGHT, VOXEL_BACKEND),
-    ("triangle mesh 512 facets", VOXEL_TERRAIN_MESH, VOXEL_TERRAIN_OPEN_BACKEND),
+for (name, terrain, terrain_options) in (
+    ("planar 16x16 patches", VOXEL_TERRAIN_PLANAR, VOXEL_OPTIONS),
+    ("height field 16x16 cells", VOXEL_TERRAIN_HEIGHT, VOXEL_OPTIONS),
+    ("triangle mesh 512 facets", VOXEL_TERRAIN_MESH, VOXEL_TERRAIN_OPEN_OPTIONS),
 )
     SUITE["Voxel"]["terrain transport setup"][name] =
         @benchmarkable ArchimedLight.prepare_voxel_scattering_transport(
             $VOXEL_TERRAIN_GRID,
             $VOXEL_SCATTER_QUADRATURE_6,
-            $terrain_backend,
-            $terrain,
+            $VOXEL_BACKEND,
+            $terrain;
+            options=$terrain_options,
         ) evals = 1
 end
 
@@ -313,12 +319,14 @@ const VOXEL_SCATTER_FIRST_SMALL = ArchimedLight.compute_voxel_first_order(
     VOXEL_SCATTER_TURTLE_6,
     VOXEL_SCATTER_FLUXES_6,
     VOXEL_BACKEND;
+    options=VOXEL_SCATTER_OPTIONS_6,
     duration_seconds=1800.0,
 )
 const VOXEL_SCATTER_CACHE_SMALL_6 = ArchimedLight.prepare_voxel_scattering_transport(
     VOXEL_SCATTER_SMALL_DENSE,
     VOXEL_SCATTER_QUADRATURE_6,
-    VOXEL_BACKEND,
+    VOXEL_BACKEND;
+    options=VOXEL_SCATTER_OPTIONS_6,
 )
 const VOXEL_SCATTER_EMITTED_SMALL =
     0.85 .* VOXEL_SCATTER_FIRST_SMALL.nir_energy
@@ -349,7 +357,8 @@ for (name, grid, quadrature) in (
         @benchmarkable ArchimedLight.prepare_voxel_scattering_transport(
             $grid,
             $quadrature,
-            $VOXEL_BACKEND,
+            $VOXEL_BACKEND;
+            options=$VOXEL_OPTIONS,
         ) evals = 1
 end
 
@@ -359,6 +368,7 @@ SUITE["Voxel"]["scattering apply"]["cached dense 4x4x4 directions=12"] =
         $VOXEL_SCATTER_EMITTED_SMALL,
         $VOXEL_SCATTER_QUADRATURE_6,
         $VOXEL_BACKEND;
+        options=$VOXEL_SCATTER_OPTIONS_6,
         band=:nir,
         cache=$VOXEL_SCATTER_CACHE_SMALL_6,
     ) evals = 1

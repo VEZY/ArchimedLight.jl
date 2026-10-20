@@ -271,10 +271,6 @@ function VoxelOpticalProperties(
     return VoxelOpticalProperties(dimensions, par_r, par_t, nir_r, nir_t)
 end
 
-"""Historical ARCHIMED example optics: total scattering 0.15 PAR and 0.90 NIR."""
-voxel_java_parity_optics(grid::VoxelGrid) =
-    VoxelOpticalProperties(grid; scattering_par=0.15, scattering_nir=0.90)
-
 """Documented generic-green-leaf example optics: total scattering 0.17 PAR and 0.85 NIR."""
 voxel_generic_green_leaf_optics(grid::VoxelGrid) =
     VoxelOpticalProperties(grid; scattering_par=0.17, scattering_nir=0.85)
@@ -347,17 +343,15 @@ end
 
 """
     VoxelCPUBackend(; rays_per_voxel=1000, g=0.5,
-                      boundary=:periodic, traversal=:dda, lidf=:spherical)
+                      traversal=:dda, lidf=:spherical)
 
-CPU settings for first-order voxel interception. `boundary` accepts
-`:periodic`, `:open`, or the historical diagnostic mode `:java_nontoric`.
-`traversal` accepts `:dda`, `:reference`, or the compatibility-only
-`:java_reference`. Only spherical LIDF is currently supported.
+CPU settings for first-order voxel interception. Horizontal wrapping is
+controlled by `LightOptions.toricity`, as for mesh interception. `traversal`
+accepts `:dda` or `:reference`. Only spherical LIDF is currently supported.
 """
 struct VoxelCPUBackend <: InterceptionBackend
     rays_per_voxel::Int
     g::Float64
-    boundary::Symbol
     traversal::Symbol
     lidf::Symbol
 end
@@ -365,18 +359,15 @@ end
 function VoxelCPUBackend(;
     rays_per_voxel::Integer=1000,
     g::Real=0.5,
-    boundary::Symbol=:periodic,
     traversal::Symbol=:dda,
     lidf::Symbol=:spherical,
 )
     rays_per_voxel > 0 || throw(ArgumentError("rays_per_voxel must be positive"))
     isfinite(g) && g >= 0 || throw(ArgumentError("g must be finite and non-negative"))
-    boundary in (:periodic, :open, :java_nontoric) ||
-        throw(ArgumentError("boundary must be :periodic, :open, or :java_nontoric"))
-    traversal in (:dda, :reference, :java_reference) ||
-        throw(ArgumentError("traversal must be :dda, :reference, or :java_reference"))
+    traversal in (:dda, :reference) ||
+        throw(ArgumentError("traversal must be :dda or :reference"))
     lidf == :spherical || throw(ArgumentError("only lidf=:spherical is supported"))
-    return VoxelCPUBackend(Int(rays_per_voxel), Float64(g), boundary, traversal, lidf)
+    return VoxelCPUBackend(Int(rays_per_voxel), Float64(g), traversal, lidf)
 end
 
 """Unit-irradiance response of a voxel grid for one propagation direction."""
@@ -384,7 +375,6 @@ struct VoxelDirectionResponse{T<:AbstractFloat}
     interception_fraction::Array{T,3}
     direction::NTuple{3,T}
     incoming_weight::T
-    injected_weight::T
     escaped_weight::T
     escaped_top_weight::T
     escaped_side_weight::T
@@ -400,6 +390,7 @@ struct VoxelResponseCache{T<:AbstractFloat}
     grid_fingerprint::UInt
     terrain_fingerprint::UInt
     backend::VoxelCPUBackend
+    toricity::Bool
     directions::Vector{NTuple{3,T}}
     responses::Vector{VoxelDirectionResponse{T}}
 end
@@ -412,8 +403,6 @@ struct VoxelFirstOrderResult{T<:AbstractFloat}
     nir_flux::Array{T,3}
     par_incoming_energy::T
     nir_incoming_energy::T
-    par_injected_energy::T
-    nir_injected_energy::T
     par_escaped_energy::T
     nir_escaped_energy::T
     par_escaped_top_energy::T
@@ -441,6 +430,7 @@ struct VoxelScatteringTransportCache{T<:AbstractFloat}
     grid_fingerprint::UInt
     terrain_fingerprint::UInt
     backend::VoxelCPUBackend
+    toricity::Bool
     quadrature_fingerprint::UInt
     source_paths::Dict{Tuple{Int,Int},VoxelRayPath{T}}
     ground_paths::Dict{Tuple{Int,Int},VoxelRayPath{T}}

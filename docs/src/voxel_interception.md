@@ -26,6 +26,7 @@ grid = VoxelGrid(
 )
 
 options = LightOptions(
+    toricity=true,
     turtle_sectors=6,
     all_in_turtle=true,
     scattering=false,
@@ -43,7 +44,6 @@ row = (
 
 backend = VoxelCPUBackend(
     rays_per_voxel=4,
-    boundary=:periodic,
     traversal=:dda,
 )
 step = run_voxel_light_step(grid, row, options; backend=backend)
@@ -85,23 +85,25 @@ path = trace_voxel_ray(
     grid,
     (0.5, 0.5, grid.maximum[3]),
     (0.5, 0.0, -1.0);
-    boundary=:periodic,
+    options=options,
     algorithm=:dda,
 )
 [(segment.index, segment.length) for segment in path]
 ```
 
-The public boundary modes are:
+`LightOptions.toricity` controls horizontal boundaries throughout the voxel
+workflow, including ray diagnostics and cached transport:
 
-- `:periodic`: horizontal exits wrap to the opposite side while retaining the
-  current ray intensity;
-- `:open`: the ray leaves permanently at the first horizontal boundary;
-- `:java_nontoric`: a diagnostic compatibility mode that reproduces the
-  historical Java wrap-and-reset behavior.
+- `toricity=true`: horizontal exits wrap to the opposite side while retaining
+  the current ray intensity;
+- `toricity=false`: the ray leaves permanently at the first horizontal boundary.
+
+The backend only configures ray sampling and numerical traversal. Pass the same
+`options` to standalone ray tracing and `voxelplot` to inspect simulation paths.
 
 The production traversal is `:dda`. `:reference` is a correct sorted-plane
-implementation used to validate the DDA. `:java_reference` preserves known
-historical wall-selection behavior and is intended only for parity work.
+implementation used to validate the DDA. Historical Java behavior is kept only
+as test provenance.
 
 An origin exactly on the top or a horizontal grid plane is classified using a
 small forward probe in the propagation direction. Simultaneous edge and corner
@@ -129,8 +131,7 @@ flux is reported as zero.
 
 `par_incoming_energy` and `nir_incoming_energy` are incident energies over the
 whole horizontal domain. The corresponding `*_escaped_energy` fields close the
-energy balance. `*_injected_energy` is zero for the public boundary modes and
-records only the artificial reinjection required by `:java_nontoric`.
+energy balance.
 
 ## Add Terrain And Soil
 
@@ -146,7 +147,7 @@ terrain = PlanarTerrain(
     grid,
     soil;
     elevation=grid.minimum[3],
-    periodic=backend.boundary == :periodic,
+    periodic=options.toricity,
 )
 ```
 
@@ -302,9 +303,9 @@ series = run_voxel_light_series(
 Directional geometric responses and internal scattering paths are cached
 across a series. The cache key
 includes grid bounds, dimensions, all `PAD` values, the normalized direction,
-`G`, boundary mode, traversal, and ray sampling settings. A changed grid or
-backend cannot silently reuse an incompatible explicit cache. With terrain,
-the key also includes surface geometry, topology, periodicity, normal mode, and
+`G`, `options.toricity`, traversal, and ray sampling settings. A changed grid,
+toricity, or backend cannot silently reuse an incompatible explicit cache.
+With terrain, the key also includes surface geometry, topology, periodicity, normal mode, and
 patch material assignment. Optical albedos and soil reflectance
 are applied during iteration rather than baked into geometric paths, so changing
 only optics does not require rebuilding those paths.
@@ -331,18 +332,18 @@ The exported workflow is deliberately small:
 
 ```julia
 VoxelGrid(minimum, maximum, pad)
-VoxelCPUBackend(; rays_per_voxel, g, boundary, traversal, lidf)
+VoxelCPUBackend(; rays_per_voxel, g, traversal, lidf)
 VoxelOpticalProperties(grid; par_reflectance, par_transmittance,
                        nir_reflectance, nir_transmittance)
 VoxelGroundOptics(grid; par_reflectance, nir_reflectance)
 read_voxel_grid(path)
 write_voxel_grid(path, grid, result=nothing)
-trace_voxel_ray(grid, origin, direction; boundary, algorithm)
-prepare_voxel_responses(grid, turtle, backend)
-compute_voxel_first_order(grid, turtle, fluxes, backend; duration_seconds, cache)
+trace_voxel_ray(grid, origin, direction; options, algorithm)
+prepare_voxel_responses(grid, turtle, backend; options)
+compute_voxel_first_order(grid, turtle, fluxes, backend; options, duration_seconds, cache)
 prepare_voxel_scattering_quadrature(turtle)
-prepare_voxel_scattering_transport(grid, quadrature, backend)
-apply_voxel_scattering_transport(grid, emitted, quadrature, backend; ...)
+prepare_voxel_scattering_transport(grid, quadrature, backend; options)
+apply_voxel_scattering_transport(grid, emitted, quadrature, backend; options, ...)
 compute_voxel_scattering(grid, turtle, first, optics, options, backend; ...)
 run_voxel_light_step(grid, meteo_row, options; backend, optics, ground)
 run_voxel_light_series(grid, meteo, options; backend, optics, ground)

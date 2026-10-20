@@ -1,6 +1,6 @@
 @testitem "Voxel Beer-Lambert response and spectral energy balance" tags=[:voxel, :fast] begin
     grid = VoxelGrid((0, 0, 0), (3, 2, 3), fill(0.4, 3, 2, 3))
-    backend = VoxelCPUBackend(rays_per_voxel=4, traversal=:dda, boundary=:periodic)
+    backend = VoxelCPUBackend(rays_per_voxel=4, traversal=:dda)
     response = ArchimedLight.compute_voxel_direction_response(grid, (0, 0, -1), backend)
 
     expected_layers = [
@@ -19,7 +19,6 @@
         response.incoming_weight;
         atol=1e-12,
     )
-    @test response.injected_weight == 0.0
     @test response.effective_ray_count == 4
 
     turtle = ArchimedLight.TurtleGrid([
@@ -47,11 +46,22 @@
     @test all(isfinite, result.par_flux)
     @test all(result.par_flux .>= 0)
 
+    # Responses traced in a periodic scene cannot be reused for a finite one.
     @test_throws ArgumentError compute_voxel_first_order(
         grid,
         turtle,
         directional_fluxes,
-        VoxelCPUBackend(rays_per_voxel=4, g=0.4, traversal=:dda, boundary=:periodic);
+        backend;
+        options=LightOptions(toricity=false),
+        duration_seconds=3600.0,
+        cache=cache,
+    )
+
+    @test_throws ArgumentError compute_voxel_first_order(
+        grid,
+        turtle,
+        directional_fluxes,
+        VoxelCPUBackend(rays_per_voxel=4, g=0.4, traversal=:dda);
         duration_seconds=3600.0,
         cache=cache,
     )
@@ -94,6 +104,43 @@
         duration_seconds=3600.0,
         cache=cache,
     )
+end
+
+@testitem "Voxel default backend honors LightOptions toricity in steps and series" tags=[:voxel, :fast] begin
+    grid = VoxelGrid((0, 0, 0), (1, 1, 3), fill(0.4, 1, 1, 3))
+    options = LightOptions(
+        turtle_sectors=6,
+        all_in_turtle=false,
+        toricity=false,
+        scattering=false,
+    )
+    row = (
+        step_duration=3600.0,
+        Ri_PAR_f=100.0,
+        Ri_NIR_f=50.0,
+        sun_azimuth=90.0,
+        sun_elevation=20.0,
+        direct_fraction=1.0,
+    )
+    open = run_voxel_light_step(grid, row, options)
+    periodic = run_voxel_light_step(grid, row, LightOptions(options; toricity=true))
+    @test open.first_order.par_escaped_side_energy > 0
+    @test periodic.first_order.par_escaped_side_energy == 0
+    @test sum(open.first_order.par_energy) < sum(periodic.first_order.par_energy)
+    @test open.first_order.par_incoming_energy == periodic.first_order.par_incoming_energy
+    for result in (open, periodic)
+        @test sum(result.first_order.par_energy) + result.first_order.par_escaped_energy ≈
+              result.first_order.par_incoming_energy
+    end
+
+    rows = [row, merge(row, (Ri_PAR_f=80.0, Ri_NIR_f=40.0))]
+    for toricity in (false, true)
+        series = run_voxel_light_series(grid, rows, LightOptions(options; toricity))
+        reference = toricity ? periodic.first_order : open.first_order
+        @test series[1].first_order.par_energy ≈ reference.par_energy
+        @test series[2].first_order.par_energy ≈ 0.8reference.par_energy
+        @test series[2].first_order.par_escaped_side_energy ≈ 0.8reference.par_escaped_side_energy
+    end
 end
 
 @testitem "Voxel sampling and analytical Beer-Lambert invariants" tags=[:voxel, :fast] begin
@@ -216,7 +263,7 @@ end
     using Dates
     AL = ArchimedLight
     grid = VoxelGrid((0, 0, 0), (1, 1, 2), fill(0.5, 1, 1, 2))
-    backend = VoxelCPUBackend(rays_per_voxel=1, boundary=:periodic)
+    backend = VoxelCPUBackend(rays_per_voxel=1)
     options = LightOptions(
         turtle_sectors=6,
         all_in_turtle=false,
@@ -286,7 +333,7 @@ end
     end
 end
 
-@testitem "Voxel ports the scientific intentions of Java TestVoxel1-TestVoxel4" tags=[:voxel, :java_fixture, :fast] begin
+@testitem "Voxel homogeneous-canopy, rotation, and boundary invariants" tags=[:voxel, :fast] begin
     function rotated_direction(azimuth_degrees; elevation_degrees=37.0)
         azimuth = deg2rad(azimuth_degrees)
         horizontal = cosd(elevation_degrees)
@@ -297,11 +344,11 @@ end
         )
     end
 
-    # TestVoxel1: a horizontally uniform periodic canopy stays horizontally
+    # A horizontally uniform periodic canopy stays horizontally
     # uniform and its vertical interception follows one exponential profile.
     uniform = VoxelGrid((0, 0, 0), (7, 5, 6), fill(0.1, 7, 5, 6))
     combined = zeros(size(uniform))
-    backend = VoxelCPUBackend(rays_per_voxel=4, boundary=:periodic)
+    backend = VoxelCPUBackend(rays_per_voxel=4)
     for azimuth in (0.0, 90.0, 180.0, 270.0)
         combined .+= ArchimedLight.compute_voxel_direction_response(
             uniform, rotated_direction(azimuth), backend
@@ -315,7 +362,7 @@ end
     layer_deltas = diff(logarithmic_layers)
     @test maximum(layer_deltas) - minimum(layer_deltas) <= 2e-13
 
-    # TestVoxel2: rotating a direction at fixed elevation does not change the
+    # Rotating a direction at fixed elevation does not change the
     # total response of a periodic homogeneous ground layer.
     ground_pad = zeros(12, 12, 6)
     ground_pad[:, :, 1] .= 0.5
@@ -329,7 +376,7 @@ end
     ]
     @test maximum(ground_totals) - minimum(ground_totals) <= 2e-12
 
-    # TestVoxel3: a square central pillar is stable under quarter-turns.
+    # A square central pillar is stable under quarter-turns.
     pillar_pad = zeros(11, 11, 6)
     pillar_pad[5:7, 5:7, :] .= 0.5
     pillar = VoxelGrid((0, 0, 0), (5.5, 5.5, 3), pillar_pad)
@@ -338,26 +385,29 @@ end
             ArchimedLight.compute_voxel_direction_response(
                 pillar,
                 rotated_direction(azimuth; elevation_degrees=87.0),
-                VoxelCPUBackend(rays_per_voxel=9, boundary=:open),
+                VoxelCPUBackend(rays_per_voxel=9);
+                options=LightOptions(toricity=false),
             ).interception_fraction,
         ) for azimuth in (0.0, 90.0, 180.0, 270.0)
     ]
     @test maximum(pillar_totals) - minimum(pillar_totals) <= 2e-12
 
-    # TestVoxel4: periodic and open boundaries agree for a vertical ray, while
+    # Periodic and open boundaries agree for a vertical ray, while
     # an oblique open ray can escape through a side instead of wrapping.
     vertical_periodic = ArchimedLight.compute_voxel_direction_response(
-        ground, (0, 0, -1), VoxelCPUBackend(rays_per_voxel=1, boundary=:periodic)
+        ground, (0, 0, -1), VoxelCPUBackend(rays_per_voxel=1)
     )
     vertical_open = ArchimedLight.compute_voxel_direction_response(
-        ground, (0, 0, -1), VoxelCPUBackend(rays_per_voxel=1, boundary=:open)
+        ground, (0, 0, -1), VoxelCPUBackend(rays_per_voxel=1);
+        options=LightOptions(toricity=false),
     )
     @test vertical_periodic.interception_fraction == vertical_open.interception_fraction
     oblique_periodic = ArchimedLight.compute_voxel_direction_response(
-        ground, rotated_direction(0.0), VoxelCPUBackend(rays_per_voxel=1, boundary=:periodic)
+        ground, rotated_direction(0.0), VoxelCPUBackend(rays_per_voxel=1)
     )
     oblique_open = ArchimedLight.compute_voxel_direction_response(
-        ground, rotated_direction(0.0), VoxelCPUBackend(rays_per_voxel=1, boundary=:open)
+        ground, rotated_direction(0.0), VoxelCPUBackend(rays_per_voxel=1);
+        options=LightOptions(toricity=false),
     )
     @test sum(oblique_open.interception_fraction) < sum(oblique_periodic.interception_fraction)
     @test oblique_open.escaped_weight > oblique_periodic.escaped_weight

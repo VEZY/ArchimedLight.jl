@@ -89,10 +89,9 @@ measurements, the [LOPEX93 database](https://teledetection.ipgp.jussieu.fr/optic
 the ANGERS leaf optical database, and spectra simulated with
 [PROSPECT-D](https://doi.org/10.1016/j.rse.2017.03.004). Store the species,
 leaf state, measurement geometry, wavelength grid, averaging spectrum, and
-date with calibrated inputs. The convenience constructors
-`voxel_java_parity_optics` (`0.15` PAR, `0.90` NIR) and
-`voxel_generic_green_leaf_optics` (`0.17`, `0.85`) are reproducibility and
-teaching values, not species calibrations.
+date with calibrated inputs. The convenience constructor
+`voxel_generic_green_leaf_optics` (`0.17` PAR, `0.85` NIR) supplies teaching
+values, not species calibrations.
 
 ## Internal-Source Transport
 
@@ -143,7 +142,7 @@ reached first, `converged` is false and the latest unprocessed order remains in
 The terminal energy invariant is checked independently for PAR and NIR:
 
 ```math
-E_\mathrm{external}+E_\mathrm{injected} =
+E_\mathrm{external} =
 E_\mathrm{foliage\ absorbed}+E_\mathrm{soil\ absorbed}+
 E_\mathrm{top}+E_\mathrm{side}+E_\mathrm{bottom}+E_\mathrm{unresolved}.
 ```

@@ -30,10 +30,7 @@
     @test voxel_absorptance(heterogeneous, :par) ≈ 1 .- par_r .- 0.05
     @test voxel_single_scattering_albedo(heterogeneous, :par, CartesianIndex(2, 1, 1)) ≈ 0.15
 
-    java = voxel_java_parity_optics(grid)
     generic = voxel_generic_green_leaf_optics(grid)
-    @test voxel_single_scattering_albedo(java, :par) == 0.15
-    @test voxel_single_scattering_albedo(java, :nir) == 0.90
     @test voxel_single_scattering_albedo(generic, :par) == 0.17
     @test voxel_single_scattering_albedo(generic, :nir) == 0.85
 
@@ -134,7 +131,7 @@ end
     ])
     quadrature = prepare_voxel_scattering_quadrature(turtle)
     grid = VoxelGrid((0, 0, 0), (1, 1, 1), fill(0.8, 1, 1, 1))
-    backend = VoxelCPUBackend(rays_per_voxel=1, g=0.5, boundary=:periodic, traversal=:dda)
+    backend = VoxelCPUBackend(rays_per_voxel=1, g=0.5, traversal=:dda)
     emitted = fill(1.0, 1, 1, 1)
     result = apply_voxel_scattering_transport(grid, emitted, quadrature, backend)
     transmission = exp(-0.5 * 0.8 * 0.5)
@@ -159,7 +156,7 @@ end
         grid,
         emitted,
         quadrature,
-        VoxelCPUBackend(rays_per_voxel=1, g=0.5, boundary=:periodic, traversal=:reference),
+        VoxelCPUBackend(rays_per_voxel=1, g=0.5, traversal=:reference),
     )
     @test reference.intercepted_energy ≈ result.intercepted_energy
     @test reference.escaped_top_energy ≈ result.escaped_top_energy
@@ -236,7 +233,8 @@ end
         grid,
         emitted,
         open_quadrature,
-        VoxelCPUBackend(rays_per_voxel=1, g=0.5, boundary=:open, traversal=:dda),
+        VoxelCPUBackend(rays_per_voxel=1, g=0.5, traversal=:dda);
+        options=LightOptions(toricity=false),
     )
     @test open_result.escaped_side_energy > 0
     @test open_result.escaped_top_energy == 0
@@ -246,12 +244,31 @@ end
         1.0;
         atol=1e-14,
     )
+    periodic_cache = prepare_voxel_scattering_transport(grid, open_quadrature, backend)
+    @test_throws ArgumentError apply_voxel_scattering_transport(
+        grid,
+        emitted,
+        open_quadrature,
+        backend;
+        options=LightOptions(toricity=false),
+        cache=periodic_cache,
+    )
+    open_options = LightOptions(toricity=false)
+    open_cache = prepare_voxel_scattering_transport(
+        grid, open_quadrature, backend; options=open_options,
+    )
+    cached_open = apply_voxel_scattering_transport(
+        grid, emitted, open_quadrature, backend; options=open_options, cache=open_cache,
+    )
+    @test cached_open.intercepted_energy ≈ open_result.intercepted_energy
+    @test cached_open.escaped_side_energy ≈ open_result.escaped_side_energy
 
     open_vertical = apply_voxel_scattering_transport(
         grid,
         emitted,
         quadrature,
-        VoxelCPUBackend(rays_per_voxel=1, g=0.5, boundary=:open, traversal=:dda),
+        VoxelCPUBackend(rays_per_voxel=1, g=0.5, traversal=:dda);
+        options=LightOptions(toricity=false),
     )
     @test open_vertical.escaped_top_energy > 0
     @test open_vertical.escaped_bottom_energy > 0
@@ -371,7 +388,7 @@ end
         ),
     ])
     fluxes = ArchimedLight.DirectionalFluxes([1], [100.0], [50.0])
-    backend = VoxelCPUBackend(rays_per_voxel=1, g=0.5, boundary=:periodic, traversal=:dda)
+    backend = VoxelCPUBackend(rays_per_voxel=1, g=0.5, traversal=:dda)
     first = compute_voxel_first_order(
         grid,
         turtle,
@@ -486,27 +503,17 @@ end
         duration_seconds=3600.0,
         ground=ground,
     )
-    for (band, incoming, injected) in (
-        (grounded.par, first.par_incoming_energy, first.par_injected_energy),
-        (grounded.nir, first.nir_incoming_energy, first.nir_injected_energy),
+    for (band, incoming) in (
+        (grounded.par, first.par_incoming_energy),
+        (grounded.nir, first.nir_incoming_energy),
     )
         accounted = sum(band.absorbed_energy) + band.ground_absorbed_energy +
                     band.escaped_top_energy + band.escaped_side_energy +
                     band.escaped_bottom_energy + band.unresolved_energy
-        @test isapprox(accounted, incoming + injected; atol=1e-7, rtol=1e-12)
+        @test isapprox(accounted, incoming; atol=1e-7, rtol=1e-12)
         @test band.relative_balance_residual <= 1e-12
     end
 
-    java = compute_voxel_scattering(
-        grid,
-        turtle,
-        first,
-        voxel_java_parity_optics(grid),
-        convergent_options,
-        backend;
-        duration_seconds=3600.0,
-    )
-    @test sum(java.nir.added_intercepted_energy) > sum(java.par.added_intercepted_energy)
 end
 
 @testitem "Voxel pipeline enables explicit scattering and preserves first order" tags=[:voxel, :scattering, :fast] begin
@@ -526,7 +533,7 @@ end
         scattering=false,
         radiation_timestep_minutes=5.0,
     )
-    optics = voxel_java_parity_optics(grid)
+    optics = VoxelOpticalProperties(grid; scattering_par=0.15, scattering_nir=0.90)
     ground = VoxelGroundOptics(grid; par_reflectance=0.1, nir_reflectance=0.3)
     plain = run_voxel_light_step(grid, row, disabled_options; backend=backend)
     ignored = run_voxel_light_step(
@@ -592,15 +599,42 @@ end
     @test_throws ArgumentError run_voxel_light_step(
         grid,
         row,
-        enabled_options;
-        backend=VoxelCPUBackend(rays_per_voxel=1, traversal=:java_reference),
-        optics=optics,
-    )
-    @test_throws ArgumentError run_voxel_light_step(
-        grid,
-        row,
         LightOptions(enabled_options; scattering_max_iter=0);
         backend=backend,
         optics=optics,
     )
+end
+
+@testitem "Voxel scattering uses LightOptions toricity with the default backend" tags=[:voxel, :scattering, :fast] begin
+    grid = VoxelGrid((0, 0, 0), (1, 1, 3), fill(0.4, 1, 1, 3))
+    options = LightOptions(
+        turtle_sectors=6,
+        all_in_turtle=false,
+        toricity=false,
+        scattering=true,
+        scattering_max_iter=20,
+        scattering_stop_ratio=1e-8,
+    )
+    row = (
+        step_duration=3600.0,
+        Ri_PAR_f=100.0,
+        Ri_NIR_f=50.0,
+        sun_azimuth=90.0,
+        sun_elevation=20.0,
+        direct_fraction=1.0,
+    )
+    optics = VoxelOpticalProperties(grid; scattering_par=0.5, scattering_nir=0.5)
+    open = run_voxel_light_step(grid, row, options; optics)
+    periodic = run_voxel_light_step(grid, row, LightOptions(options; toricity=true); optics)
+    @test open.scattering.par.escaped_side_energy > 0
+    @test periodic.scattering.par.escaped_side_energy == 0
+    @test sum(open.scattering.par.absorbed_energy) < sum(periodic.scattering.par.absorbed_energy)
+    for result in (open, periodic), band in (:par, :nir)
+        @test getproperty(result.scattering, band).relative_balance_residual <= 1e-12
+    end
+    series = run_voxel_light_series(grid, [row, row], options; optics)
+    @test all(result -> result.scattering.par.escaped_side_energy ≈
+                        open.scattering.par.escaped_side_energy, series)
+    @test all(result -> result.scattering.par.absorbed_energy ≈
+                        open.scattering.par.absorbed_energy, series)
 end

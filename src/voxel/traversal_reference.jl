@@ -1,5 +1,3 @@
-_voxel_is_periodic(boundary::Symbol) = boundary in (:periodic, :java_nontoric)
-
 function _normalise_voxel_transport_direction(direction)
     length(direction) == 3 || throw(ArgumentError("a voxel direction must have three components"))
     values = ntuple(i -> Float64(direction[i]), 3)
@@ -19,7 +17,7 @@ function _normalise_voxel_direction(direction)
     return normalised
 end
 
-function _canonical_voxel_origin(grid::VoxelGrid, origin, boundary::Symbol)
+function _canonical_voxel_origin(grid::VoxelGrid, origin, toricity::Bool)
     length(origin) == 3 || throw(ArgumentError("a voxel origin must have three coordinates"))
     values = ntuple(i -> Float64(origin[i]), 3)
     all(isfinite, values) || throw(ArgumentError("voxel origin coordinates must be finite"))
@@ -28,7 +26,7 @@ function _canonical_voxel_origin(grid::VoxelGrid, origin, boundary::Symbol)
     tolerance = 64eps(Float64) * max(scale, 1.0)
 
     x, y, z = values
-    if _voxel_is_periodic(boundary)
+    if toricity
         x = lo[1] + mod(x - lo[1], hi[1] - lo[1])
         y = lo[2] + mod(y - lo[2], hi[2] - lo[2])
     else
@@ -47,7 +45,7 @@ end
 
 _voxel_tolerance(value::Real) = 128eps(Float64) * max(abs(Float64(value)), 1.0)
 
-function _voxel_exit_time(grid::VoxelGrid, origin, direction, boundary::Symbol)
+function _voxel_exit_time(grid::VoxelGrid, origin, direction, toricity::Bool)
     lo, hi = grid.minimum, grid.maximum
     vertical, vertical_reason = if direction[3] < 0
         ((lo[3] - origin[3]) / direction[3], :bottom)
@@ -57,7 +55,7 @@ function _voxel_exit_time(grid::VoxelGrid, origin, direction, boundary::Symbol)
     vertical >= -_voxel_tolerance(vertical) ||
         throw(ArgumentError("ray cannot reach its vertical exit boundary"))
     vertical = max(vertical, 0.0)
-    if _voxel_is_periodic(boundary)
+    if toricity
         return vertical, vertical_reason
     end
 
@@ -117,9 +115,9 @@ function _voxel_axis_index(coordinate, minimum, spacing, count)
     return clamp(index, 1, count)
 end
 
-function _path_point(grid::VoxelGrid, origin, direction, time, boundary)
+function _path_point(grid::VoxelGrid, origin, direction, time, toricity::Bool)
     point = ntuple(i -> origin[i] + direction[i] * time, 3)
-    _voxel_is_periodic(boundary) || return point
+    toricity || return point
     lo, hi = grid.minimum, grid.maximum
     return (
         lo[1] + mod(point[1] - lo[1], hi[1] - lo[1]),
@@ -144,15 +142,13 @@ function _trace_voxel_ray_reference(
     grid::VoxelGrid,
     origin,
     direction,
-    boundary::Symbol;
+    toricity::Bool;
     allow_upward::Bool=false,
 )
-    boundary in (:periodic, :open, :java_nontoric) ||
-        throw(ArgumentError("unsupported voxel boundary mode: $boundary"))
     ray_direction = allow_upward ? _normalise_voxel_transport_direction(direction) :
                     _normalise_voxel_direction(direction)
-    ray_origin = _canonical_voxel_origin(grid, origin, boundary)
-    t_end, exit_reason = _voxel_exit_time(grid, ray_origin, ray_direction, boundary)
+    ray_origin = _canonical_voxel_origin(grid, origin, toricity)
+    t_end, exit_reason = _voxel_exit_time(grid, ray_origin, ray_direction, toricity)
     t_end <= _voxel_tolerance(t_end) && return VoxelRayPath(VoxelRaySegment{Float64}[], exit_reason)
 
     times = Float64[]
@@ -173,7 +169,7 @@ function _trace_voxel_ray_reference(
         t_enter = walls[interval]
         t_exit = walls[interval + 1]
         midpoint = (t_enter + t_exit) / 2
-        point = _path_point(grid, ray_origin, ray_direction, midpoint, boundary)
+        point = _path_point(grid, ray_origin, ray_direction, midpoint, toricity)
         index = ntuple(
             axis -> _voxel_axis_index(
                 point[axis], grid.minimum[axis], grid.voxel_size[axis], dimensions[axis]
@@ -183,81 +179,4 @@ function _trace_voxel_ray_reference(
         _append_voxel_segment!(segments, index, t_enter, t_exit)
     end
     return VoxelRayPath(segments, exit_reason)
-end
-
-function _java_float_direction(direction)
-    normalised = _normalise_voxel_direction(direction)
-    return ntuple(i -> Float64(Float32(normalised[i])), 3)
-end
-
-function _java_wall_distances!(distances, coordinate, component, minimum, spacing, dist_to_bottom)
-    component == 0 && return distances
-    delta = minimum - coordinate
-    delta -= spacing * trunc(Int, delta / spacing)
-    component > 0 && (delta = spacing - delta)
-    distance = abs(delta / component)
-    push!(distances, distance)
-    increment = abs(spacing / component)
-    while distance < dist_to_bottom
-        distance += increment
-        push!(distances, distance)
-    end
-    return distances
-end
-
-"""
-Reproduce the historical Java `Ray.crossVoxels` path, including its first-wall
-calculation and exact duplicate-segment behavior. This is a parity oracle only;
-new calculations should use `:reference` or `:dda`.
-"""
-function _trace_voxel_ray_java_reference(grid::VoxelGrid, origin, direction, boundary::Symbol)
-    boundary == :open &&
-        throw(ArgumentError("the Java reference traversal has no open-boundary geometry"))
-    ray_direction = _java_float_direction(direction)
-    ray_origin = ntuple(i -> Float64(origin[i]), 3)
-    dist_to_bottom = (grid.minimum[3] - ray_origin[3]) / ray_direction[3]
-    distances = Float64[dist_to_bottom]
-    for axis in 1:3
-        _java_wall_distances!(
-            distances,
-            ray_origin[axis],
-            ray_direction[axis],
-            grid.minimum[axis],
-            grid.voxel_size[axis],
-            dist_to_bottom,
-        )
-    end
-    distances = unique(sort!(filter(!iszero, distances)))
-    dimensions = size(grid)
-    cumulative = VoxelRaySegment{Float64}[]
-    previous_distance = 0.0
-    for distance in distances
-        midpoint = (previous_distance + distance) / 2
-        point = ntuple(axis -> ray_origin[axis] + ray_direction[axis] * midpoint, 3)
-        index = ntuple(
-            axis -> floor(Int, (point[axis] - grid.minimum[axis]) / grid.voxel_size[axis]) + 1,
-            3,
-        )
-        i, j, k = index
-        if !(1 <= i <= dimensions[1] && 1 <= j <= dimensions[2] && 1 <= k <= dimensions[3])
-            i = mod1(i, dimensions[1])
-            j = mod1(j, dimensions[2])
-            1 <= k <= dimensions[3] || break
-        end
-        push!(cumulative, VoxelRaySegment((i, j, k), distance, previous_distance, distance))
-        previous_distance = distance
-    end
-
-    segments = copy(cumulative)
-    for index in length(segments):-1:2
-        current = segments[index]
-        previous = cumulative[index - 1]
-        segments[index] = VoxelRaySegment(
-            current.index,
-            current.length - previous.length,
-            previous.t_exit,
-            current.t_exit,
-        )
-    end
-    return VoxelRayPath(segments, :bottom)
 end

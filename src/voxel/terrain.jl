@@ -724,12 +724,9 @@ end
 function _validate_terrain_for_grid(
     grid::VoxelGrid,
     terrain::AbstractVoxelTerrain,
-    boundary::Symbol,
+    toricity::Bool,
 )
     terrain isa NoVoxelTerrain && return terrain
-    boundary in (:open, :periodic) || throw(ArgumentError(
-        "terrain-aware voxel transport supports only :open and :periodic boundaries",
-    ))
     lower, upper = terrain_bounds(terrain)
     scale = maximum(ntuple(axis -> grid.maximum[axis] - grid.minimum[axis], 3))
     tolerance = 256eps(Float64) * max(scale, 1.0)
@@ -739,7 +736,7 @@ function _validate_terrain_for_grid(
     upper[3] < grid.maximum[3] - tolerance || throw(ArgumentError(
         "terrain must remain below the voxel-grid top boundary",
     ))
-    if boundary == :periodic
+    if toricity
         _terrain_periodic(terrain) || throw(ArgumentError(
             "periodic voxel boundaries require terrain constructed with periodic=true",
         ))
@@ -826,10 +823,10 @@ function _truncate_voxel_path_at_terrain(
     origin,
     direction,
     terrain::AbstractVoxelTerrain,
-    boundary::Symbol,
+    toricity::Bool,
 )
     terrain isa NoVoxelTerrain && return path
-    _validate_terrain_for_grid(grid, terrain, boundary)
+    _validate_terrain_for_grid(grid, terrain, toricity)
     surface_at_origin = terrain_elevation_at(terrain, origin[1], origin[2])
     origin_tolerance = 512eps(Float64) * max(abs(surface_at_origin), abs(origin[3]), 1.0)
     origin[3] >= surface_at_origin - origin_tolerance || throw(ArgumentError(

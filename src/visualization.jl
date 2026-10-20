@@ -603,7 +603,8 @@ Keywords:
 function lightplot! end
 
 """
-    voxelplot(grid, [terrain]; rays=(), quadrature=nothing, boundary=:open, kwargs...)
+    voxelplot(grid, [terrain]; rays=(), quadrature=nothing,
+              options=LightOptions(toricity=false), kwargs...)
 
 Makie plotting entry point for a [`VoxelGrid`](@ref) and its optional
 [`AbstractVoxelTerrain`](@ref). Load a Makie backend before calling it.
@@ -614,6 +615,9 @@ Each direction must point downward; the extension traces it with
 [`VoxelScatteringQuadrature`](@ref), terrain hits also display the corresponding
 Lambertian redistribution directions.
 
+Ray paths use `options.toricity`, as in the voxel simulation. Plots default to
+open horizontal boundaries; pass the simulation's `options` to show its paths.
+
 The most useful ArchimedLight-specific attributes are `pad_threshold`,
 `cutaway`, `show_voxels`, `show_lattice`, `show_terrain`, `show_rays`, and
 `show_normals`. `cutaway` accepts `:none` or `:front`; the latter hides the
@@ -623,7 +627,7 @@ function voxelplot end
 
 """
     voxelplot!(parent, grid, [terrain]; rays=(), quadrature=nothing,
-               boundary=:open, kwargs...)
+               options=LightOptions(toricity=false), kwargs...)
 
 In-place variant of [`voxelplot`](@ref). `parent` may be a Makie `LScene`,
 `Scene`, or another scene-like plotting parent.

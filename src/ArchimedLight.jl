@@ -140,7 +140,6 @@ export prepare_voxel_scattering_quadrature
 export prepare_voxel_scattering_transport
 export apply_voxel_scattering_transport
 export compute_voxel_scattering
-export voxel_java_parity_optics
 export voxel_generic_green_leaf_optics
 export voxel_single_scattering_albedo
 export voxel_absorptance

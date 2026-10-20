@@ -453,7 +453,7 @@ function read_voxel_terrain_scene(
         periodic=periodic,
         normal_mode=normal_mode,
     )
-    _validate_terrain_for_grid(grid, terrain, periodic ? :periodic : :open)
+    _validate_terrain_for_grid(grid, terrain, periodic)
     ground_distance = read_voxel_column(
         input.voxel_path,
         "ground_distance";

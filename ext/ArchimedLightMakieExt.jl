@@ -138,7 +138,7 @@ Makie.@recipe(VoxelPlot, payload) do scene
     attr = Attributes(
         rays=(),
         quadrature=nothing,
-        boundary=:open,
+        options=LightOptions(toricity=false),
         pad_threshold=0.0,
         cutaway=:none,
         voxel_alpha=0.35,
@@ -175,7 +175,7 @@ end
 const _VOXELPLOT_ATTRIBUTES = Makie.@DocumentedAttributes begin
     rays = ()
     quadrature = nothing
-    boundary = :open
+    options = LightOptions(toricity=false)
     pad_threshold = 0.0
     cutaway = :none
     voxel_alpha = 0.35
@@ -350,10 +350,10 @@ function _voxelplot_ray(ray, index::Integer, grid::VoxelGrid)
     return origin, unit_direction
 end
 
-function _voxelplot_segment_points(grid, origin, direction, segment, boundary)
+function _voxelplot_segment_points(grid, origin, direction, segment, toricity::Bool)
     start = [origin[axis] + segment.t_enter * direction[axis] for axis in 1:3]
     stop = [origin[axis] + segment.t_exit * direction[axis] for axis in 1:3]
-    if boundary == :periodic
+    if toricity
         midpoint_t = (segment.t_enter + segment.t_exit) / 2
         for axis in 1:2
             width = grid.maximum[axis] - grid.minimum[axis]
@@ -371,14 +371,11 @@ function _voxelplot_ray_geometry(
     grid::VoxelGrid,
     terrain::AbstractVoxelTerrain,
     rays,
-    boundary,
+    options::LightOptions,
     quadrature,
     normal_length,
     reflected_length,
 )
-    boundary in (:open, :periodic) || throw(ArgumentError(
-        "voxelplot boundary must be :open or :periodic",
-    ))
     quadrature === nothing || quadrature isa VoxelScatteringQuadrature ||
         throw(ArgumentError("voxelplot quadrature must be a VoxelScatteringQuadrature or nothing"))
     diagonal = sqrt(sum((grid.maximum[axis] - grid.minimum[axis])^2 for axis in 1:3))
@@ -397,7 +394,7 @@ function _voxelplot_ray_geometry(
             grid,
             origin,
             direction;
-            boundary=boundary,
+            options=options,
             terrain=terrain,
         )
         push!(ray_paths, path)
@@ -407,7 +404,7 @@ function _voxelplot_ray_geometry(
                 origin,
                 direction,
                 segment,
-                boundary,
+                options.toricity,
             )
             push!(ray_segments, start, stop)
         end
@@ -491,7 +488,7 @@ function Makie.plot!(plot::VoxelPlot)
     end
     map!(
         plot.attributes,
-        [:payload, :rays, :boundary, :quadrature, :normal_length, :reflected_length],
+        [:payload, :rays, :options, :quadrature, :normal_length, :reflected_length],
         [
             :voxel_ray_paths,
             :voxel_ray_segments,
@@ -502,13 +499,13 @@ function Makie.plot!(plot::VoxelPlot)
             :voxel_reflected_directions,
             :voxel_reflected_weights,
         ],
-    ) do payload, rays, boundary, quadrature, normal_length, reflected_length
+    ) do payload, rays, options, quadrature, normal_length, reflected_length
         current_grid, current_terrain = _voxelplot_grid_terrain(payload)
         _voxelplot_ray_geometry(
             current_grid,
             current_terrain,
             rays,
-            boundary,
+            options,
             quadrature,
             normal_length,
             reflected_length,
@@ -627,10 +624,8 @@ _voxelplot_kwargs(kwargs::NamedTuple) = haskey(kwargs, :cycle) ? kwargs : (; kwa
 
 function _validate_voxelplot_kwargs(grid::VoxelGrid, kwargs::NamedTuple)
     _voxelplot_pad(grid, get(kwargs, :cutaway, :none))
-    boundary = get(kwargs, :boundary, :open)
-    boundary in (:open, :periodic) || throw(ArgumentError(
-        "voxelplot boundary must be :open or :periodic",
-    ))
+    options = get(kwargs, :options, LightOptions(toricity=false))
+    options isa LightOptions || throw(ArgumentError("voxelplot options must be LightOptions"))
     quadrature = get(kwargs, :quadrature, nothing)
     quadrature === nothing || quadrature isa VoxelScatteringQuadrature || throw(ArgumentError(
         "voxelplot quadrature must be a VoxelScatteringQuadrature or nothing",

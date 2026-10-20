@@ -494,6 +494,8 @@ and optional ray paths computed by [`trace_voxel_ray`](@ref). Supplying a
 [`VoxelScatteringQuadrature`](@ref) adds the fixed-direction Lambertian
 redistribution at each terrain hit. Use `cutaway=:front` to inspect the
 interior without changing the source [`VoxelGrid`](@ref).
+Pass the simulation's `options` to use the same `LightOptions.toricity` for
+displayed ray paths. Plotting defaults to `LightOptions(toricity=false)`.
 
 ## Backend Types
 

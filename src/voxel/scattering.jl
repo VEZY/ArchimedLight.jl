@@ -103,7 +103,7 @@ function _voxel_ground_center(grid::VoxelGrid, i::Int, j::Int)
 end
 
 """
-    prepare_voxel_scattering_transport(grid, quadrature, backend)
+    prepare_voxel_scattering_transport(grid, quadrature, backend; options=LightOptions())
 
 Cache internal source-to-boundary DDA paths for occupied voxel centres and
 upward ground rays. Attenuation is deliberately not stored in the cache, so
@@ -113,14 +113,13 @@ function prepare_voxel_scattering_transport(
     grid::VoxelGrid,
     quadrature::VoxelScatteringQuadrature,
     backend::VoxelCPUBackend=VoxelCPUBackend(),
-    terrain::AbstractVoxelTerrain=NoVoxelTerrain(),
+    terrain::AbstractVoxelTerrain=NoVoxelTerrain();
+    options::LightOptions=LightOptions(),
 )
     _validate_voxel_scattering_quadrature(quadrature)
-    backend.boundary in (:periodic, :open) ||
-        throw(ArgumentError("voxel scattering supports only :periodic and :open boundaries"))
     backend.traversal in (:dda, :reference) ||
         throw(ArgumentError("voxel scattering supports only :dda and :reference traversal"))
-    _validate_terrain_for_grid(grid, terrain, backend.boundary)
+    _validate_terrain_for_grid(grid, terrain, options.toricity)
 
     source_paths = Dict{Tuple{Int,Int},VoxelRayPath{Float64}}()
     for index in CartesianIndices(grid.pad)
@@ -133,7 +132,7 @@ function prepare_voxel_scattering_transport(
                 grid,
                 origin,
                 quadrature.directions[direction_index];
-                boundary=backend.boundary,
+                toricity=options.toricity,
                 algorithm=backend.traversal,
                 terrain=terrain,
             )
@@ -151,7 +150,7 @@ function prepare_voxel_scattering_transport(
                 grid,
                 origin,
                 quadrature.directions[direction_index];
-                boundary=backend.boundary,
+                toricity=options.toricity,
                 algorithm=backend.traversal,
             )
         end
@@ -170,7 +169,7 @@ function prepare_voxel_scattering_transport(
                 grid,
                 origin,
                 direction;
-                boundary=backend.boundary,
+                toricity=options.toricity,
                 algorithm=backend.traversal,
                 terrain=terrain,
             )
@@ -181,6 +180,7 @@ function prepare_voxel_scattering_transport(
         _voxel_grid_fingerprint(grid),
         _terrain_geometry_fingerprint(terrain),
         backend,
+        options.toricity,
         _voxel_scattering_quadrature_fingerprint(quadrature),
         source_paths,
         ground_paths,
@@ -195,10 +195,13 @@ function _validate_voxel_scattering_cache(
     quadrature::VoxelScatteringQuadrature,
     backend::VoxelCPUBackend,
     terrain::AbstractVoxelTerrain,
-    cache::VoxelScatteringTransportCache,
+    cache::VoxelScatteringTransportCache;
+    options::LightOptions=LightOptions(),
 )
     cache.grid_fingerprint == _voxel_grid_fingerprint(grid) ||
         throw(ArgumentError("voxel scattering cache does not match the grid or PAD values"))
+    cache.toricity == options.toricity ||
+        throw(ArgumentError("voxel scattering cache uses different toricity"))
     cache.backend == backend ||
         throw(ArgumentError("voxel scattering cache uses different backend settings"))
     cache.terrain_fingerprint == _terrain_geometry_fingerprint(terrain) ||
@@ -285,6 +288,7 @@ function apply_voxel_scattering_transport(
     emitted::AbstractArray{<:Real,3},
     quadrature::VoxelScatteringQuadrature,
     backend::VoxelCPUBackend=VoxelCPUBackend();
+    options::LightOptions=LightOptions(),
     band::Symbol=:par,
     ground::Union{Nothing,VoxelGroundOptics}=nothing,
     initial_ground_energy::Union{Nothing,AbstractArray{<:Real,2}}=nothing,
@@ -312,8 +316,8 @@ function apply_voxel_scattering_transport(
     band in (:par, :nir) || throw(ArgumentError("band must be :par or :nir"))
 
     transport_cache = cache === nothing ?
-                      prepare_voxel_scattering_transport(grid, quadrature, backend, terrain) :
-                      _validate_voxel_scattering_cache(grid, quadrature, backend, terrain, cache)
+                      prepare_voxel_scattering_transport(grid, quadrature, backend, terrain; options=options) :
+                      _validate_voxel_scattering_cache(grid, quadrature, backend, terrain, cache; options=options)
     intercepted = zeros(Float64, size(grid))
     ground_incident = zeros(Float64, size(grid)[1:2])
     terrain_incident = zeros(Float64, terrain_patch_count(terrain))
@@ -487,7 +491,7 @@ function _validate_voxel_first_order_for_scattering(
     terrain::AbstractVoxelTerrain,
 )
     expected_patches = terrain_patch_count(terrain)
-    for (band, energy, bottom, terrain_energy, terrain_total, incoming, injected, escaped, top, side, lower) in (
+    for (band, energy, bottom, terrain_energy, terrain_total, incoming, escaped, top, side, lower) in (
         (
             :par,
             first.par_energy,
@@ -495,7 +499,6 @@ function _validate_voxel_first_order_for_scattering(
             first.par_terrain_energy,
             first.par_terrain_incident_energy,
             first.par_incoming_energy,
-            first.par_injected_energy,
             first.par_escaped_energy,
             first.par_escaped_top_energy,
             first.par_escaped_side_energy,
@@ -508,7 +511,6 @@ function _validate_voxel_first_order_for_scattering(
             first.nir_terrain_energy,
             first.nir_terrain_incident_energy,
             first.nir_incoming_energy,
-            first.nir_injected_energy,
             first.nir_escaped_energy,
             first.nir_escaped_top_energy,
             first.nir_escaped_side_energy,
@@ -532,11 +534,11 @@ function _validate_voxel_first_order_for_scattering(
         all(isfinite, terrain_energy) && all(>=(0), terrain_energy) || throw(ArgumentError(
             "first-order $band terrain energy must be finite and non-negative",
         ))
-        totals = (terrain_total, incoming, injected, escaped, top, side, lower)
+        totals = (terrain_total, incoming, escaped, top, side, lower)
         all(isfinite, totals) && all(>=(0), totals) || throw(ArgumentError(
             "first-order $band energy totals must be finite and non-negative",
         ))
-        scale = max(incoming + injected, 1.0)
+        scale = max(incoming, 1.0)
         isapprox(top + side + lower, escaped; atol=1e-9 * scale, rtol=1e-11) ||
             throw(ArgumentError("first-order $band boundary escape totals are inconsistent"))
         isapprox(sum(bottom), lower; atol=1e-9 * scale, rtol=1e-11) ||
@@ -545,7 +547,7 @@ function _validate_voxel_first_order_for_scattering(
             throw(ArgumentError("first-order $band terrain energy field is inconsistent"))
         isapprox(
             sum(energy) + escaped + terrain_total,
-            incoming + injected;
+            incoming;
             atol=1e-9 * scale,
             rtol=1e-11,
         ) ||
@@ -558,7 +560,6 @@ function _disabled_voxel_scattering_band(
     grid::VoxelGrid,
     first_energy,
     first_incoming,
-    first_injected,
     first_top,
     first_side,
     first_bottom,
@@ -603,7 +604,7 @@ function _disabled_voxel_scattering_band(
     end
     absorbed_flux = similar(absorbed)
     _voxel_flux_from_energy!(absorbed_flux, absorbed, grid, duration_seconds)
-    external = first_incoming + first_injected
+    external = first_incoming
     accounted = sum(absorbed) + ground_absorbed + first_top + first_side + escaped_bottom + unresolved
     residual = external - accounted
     relative = abs(residual) / max(external, eps(Float64))
@@ -634,7 +635,6 @@ function _compute_voxel_scattering_band(
     grid::VoxelGrid,
     first_energy,
     first_incoming,
-    first_injected,
     first_top,
     first_side,
     first_bottom,
@@ -655,7 +655,6 @@ function _compute_voxel_scattering_band(
         grid,
         first_energy,
         first_incoming,
-        first_injected,
         first_top,
         first_side,
         first_bottom,
@@ -707,6 +706,7 @@ function _compute_voxel_scattering_band(
             emitted,
             quadrature,
             backend;
+            options=options,
             band=band,
             ground=ground,
             initial_ground_energy=iteration == 1 ? initial_ground : nothing,
@@ -735,7 +735,7 @@ function _compute_voxel_scattering_band(
     unresolved = sum(current) + transport_unresolved
     absorbed_flux = similar(absorbed)
     _voxel_flux_from_energy!(absorbed_flux, absorbed, grid, duration_seconds)
-    external = Float64(first_incoming + first_injected)
+    external = Float64(first_incoming)
     accounted = sum(absorbed) + ground_absorbed + escaped_top + escaped_side + escaped_bottom + unresolved
     residual = external - accounted
     relative = abs(residual) / max(external, eps(Float64))
@@ -794,19 +794,18 @@ function compute_voxel_scattering(
     ground === nothing || terrain isa NoVoxelTerrain || throw(ArgumentError(
         "provide either legacy `ground` optics or a terrain, not both",
     ))
-    _validate_terrain_for_grid(grid, terrain, backend.boundary)
+    _validate_terrain_for_grid(grid, terrain, options.toricity)
     isfinite(duration_seconds) && duration_seconds >= 0 ||
         throw(ArgumentError("duration_seconds must be finite and non-negative"))
     _validate_voxel_first_order_for_scattering(grid, first, terrain)
     quadrature = prepare_voxel_scattering_quadrature(turtle)
     transport_cache = cache === nothing ?
-                      prepare_voxel_scattering_transport(grid, quadrature, backend, terrain) :
-                      _validate_voxel_scattering_cache(grid, quadrature, backend, terrain, cache)
+                      prepare_voxel_scattering_transport(grid, quadrature, backend, terrain; options=options) :
+                      _validate_voxel_scattering_cache(grid, quadrature, backend, terrain, cache; options=options)
     par = _compute_voxel_scattering_band(
         grid,
         first.par_energy,
         first.par_incoming_energy,
-        first.par_injected_energy,
         first.par_escaped_top_energy,
         first.par_escaped_side_energy,
         first.par_escaped_bottom_energy,
@@ -827,7 +826,6 @@ function compute_voxel_scattering(
         grid,
         first.nir_energy,
         first.nir_incoming_energy,
-        first.nir_injected_energy,
         first.nir_escaped_top_energy,
         first.nir_escaped_side_energy,
         first.nir_escaped_bottom_energy,
@@ -850,11 +848,12 @@ end
 function _dense_voxel_scattering_exchange(
     grid::VoxelGrid,
     quadrature::VoxelScatteringQuadrature,
-    backend::VoxelCPUBackend=VoxelCPUBackend(),
+    backend::VoxelCPUBackend=VoxelCPUBackend();
+    options::LightOptions=LightOptions(),
 )
     count = length(grid.pad)
     matrix = zeros(Float64, count, count)
-    cache = prepare_voxel_scattering_transport(grid, quadrature, backend)
+    cache = prepare_voxel_scattering_transport(grid, quadrature, backend; options=options)
     basis = zeros(Float64, size(grid))
     for source in eachindex(grid.pad)
         grid.pad[source] > 0 || continue
@@ -864,6 +863,7 @@ function _dense_voxel_scattering_exchange(
             basis,
             quadrature,
             backend;
+            options=options,
             cache=cache,
         )
         matrix[:, source] .= vec(result.intercepted_energy)

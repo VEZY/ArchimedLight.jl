@@ -12,21 +12,19 @@ function _trace_voxel_ray_dda(
     grid::VoxelGrid,
     origin,
     direction,
-    boundary::Symbol;
+    toricity::Bool;
     allow_upward::Bool=false,
 )
-    boundary in (:periodic, :open, :java_nontoric) ||
-        throw(ArgumentError("unsupported voxel boundary mode: $boundary"))
     ray_direction = allow_upward ? _normalise_voxel_transport_direction(direction) :
                     _normalise_voxel_direction(direction)
-    ray_origin = _canonical_voxel_origin(grid, origin, boundary)
-    t_end, exit_reason = _voxel_exit_time(grid, ray_origin, ray_direction, boundary)
+    ray_origin = _canonical_voxel_origin(grid, origin, toricity)
+    t_end, exit_reason = _voxel_exit_time(grid, ray_origin, ray_direction, toricity)
     tolerance = _voxel_tolerance(t_end)
     t_end <= tolerance && return VoxelRayPath(VoxelRaySegment{Float64}[], exit_reason)
 
     probe_time = min(t_end / 2, 256eps(Float64) * max(maximum(grid.maximum) - minimum(grid.minimum), 1.0))
     probe_time = max(probe_time, min(t_end / 2, tolerance))
-    probe = _path_point(grid, ray_origin, ray_direction, probe_time, boundary)
+    probe = _path_point(grid, ray_origin, ray_direction, probe_time, toricity)
     dimensions = size(grid)
     i = _voxel_axis_index(probe[1], grid.minimum[1], grid.voxel_size[1], dimensions[1])
     j = _voxel_axis_index(probe[2], grid.minimum[2], grid.voxel_size[2], dimensions[2])
@@ -90,14 +88,14 @@ function _trace_voxel_ray_dda(
         end
 
         if !(1 <= i <= dimensions[1])
-            if _voxel_is_periodic(boundary)
+            if toricity
                 i = mod1(i, dimensions[1])
             else
                 return VoxelRayPath(segments, :side)
             end
         end
         if !(1 <= j <= dimensions[2])
-            if _voxel_is_periodic(boundary)
+            if toricity
                 j = mod1(j, dimensions[2])
             else
                 return VoxelRayPath(segments, :side)
@@ -112,73 +110,65 @@ function _trace_voxel_transport_ray(
     grid::VoxelGrid,
     origin,
     direction;
-    boundary::Symbol=:periodic,
+    toricity::Bool=true,
     algorithm::Symbol=:dda,
     terrain::AbstractVoxelTerrain=NoVoxelTerrain(),
 )
     path = if algorithm == :dda
-        _trace_voxel_ray_dda(grid, origin, direction, boundary; allow_upward=true)
+        _trace_voxel_ray_dda(grid, origin, direction, toricity; allow_upward=true)
     elseif algorithm == :reference
-        _trace_voxel_ray_reference(grid, origin, direction, boundary; allow_upward=true)
+        _trace_voxel_ray_reference(grid, origin, direction, toricity; allow_upward=true)
     else
-        algorithm == :java_reference && throw(ArgumentError(
-            "the Java reference traversal does not support internal upward rays",
-        ))
         throw(ArgumentError("algorithm must be :dda or :reference for internal voxel transport"))
     end
     ray_direction = _normalise_voxel_transport_direction(direction)
-    ray_origin = _canonical_voxel_origin(grid, origin, boundary)
+    ray_origin = _canonical_voxel_origin(grid, origin, toricity)
     return _truncate_voxel_path_at_terrain(
         grid,
         path,
         ray_origin,
         ray_direction,
         terrain,
-        boundary,
+        toricity,
     )
 end
 
 """
     trace_voxel_ray(grid, origin, direction;
-                    boundary=:periodic, algorithm=:dda,
+                    options=LightOptions(), algorithm=:dda,
                     terrain=NoVoxelTerrain())
 
 Trace a normalized propagation ray through `grid`. `direction` is normalized
-internally and must point downward. `boundary=:periodic` wraps horizontally;
-`:open` terminates at the first horizontal exit. `algorithm=:reference` uses a
-correct sorted-plane implementation, while `:dda` uses the production streaming
-DDA. `:java_reference` is a compatibility oracle that preserves known Java
-wall-selection behavior.
+internally and must point downward. `options.toricity` controls horizontal
+wrapping; otherwise the ray terminates at the first horizontal exit.
+`algorithm=:reference` uses a sorted-plane implementation, while `:dda` uses
+production streaming DDA. This geometric primitive is also used by voxel
+interception and ray visualization.
 """
 function trace_voxel_ray(
     grid::VoxelGrid,
     origin,
     direction;
-    boundary::Symbol=:periodic,
+    options::LightOptions=LightOptions(),
     algorithm::Symbol=:dda,
     terrain::AbstractVoxelTerrain=NoVoxelTerrain(),
 )
-    if algorithm == :java_reference
-        terrain isa NoVoxelTerrain || throw(ArgumentError(
-            "terrain is not supported by the Java reference traversal",
-        ))
-        return _trace_voxel_ray_java_reference(grid, origin, direction, boundary)
-    end
+    toricity = options.toricity
     path = if algorithm == :dda
-        _trace_voxel_ray_dda(grid, origin, direction, boundary)
+        _trace_voxel_ray_dda(grid, origin, direction, toricity)
     elseif algorithm == :reference
-        _trace_voxel_ray_reference(grid, origin, direction, boundary)
+        _trace_voxel_ray_reference(grid, origin, direction, toricity)
     else
-        throw(ArgumentError("algorithm must be :dda, :reference, or :java_reference"))
+        throw(ArgumentError("algorithm must be :dda or :reference"))
     end
     ray_direction = _normalise_voxel_direction(direction)
-    ray_origin = _canonical_voxel_origin(grid, origin, boundary)
+    ray_origin = _canonical_voxel_origin(grid, origin, toricity)
     return _truncate_voxel_path_at_terrain(
         grid,
         path,
         ray_origin,
         ray_direction,
         terrain,
-        boundary,
+        toricity,
     )
 end

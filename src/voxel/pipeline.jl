@@ -1,4 +1,4 @@
-const VoxelScatteringCacheKey = Tuple{UInt,UInt,VoxelCPUBackend,UInt}
+const VoxelScatteringCacheKey = Tuple{UInt,UInt,VoxelCPUBackend,Bool,UInt}
 
 function _check_voxel_pipeline_options(
     grid::VoxelGrid,
@@ -11,7 +11,7 @@ function _check_voxel_pipeline_options(
     ground === nothing || terrain isa NoVoxelTerrain || throw(ArgumentError(
         "provide either legacy `ground` optics or a terrain, not both",
     ))
-    _validate_terrain_for_grid(grid, terrain, backend.boundary)
+    _validate_terrain_for_grid(grid, terrain, options.toricity)
     options.scattering || return nothing
     optics === nothing && throw(ArgumentError(
         "voxel scattering requires explicit `optics=VoxelOpticalProperties(...)`; " *
@@ -20,9 +20,6 @@ function _check_voxel_pipeline_options(
     optics.grid_size == size(grid) || throw(DimensionMismatch("voxel optics do not match the grid"))
     ground === nothing || ground.grid_size == size(grid)[1:2] ||
         throw(DimensionMismatch("ground optics do not match the voxel grid"))
-    backend.boundary in (:periodic, :open) || throw(ArgumentError(
-        "voxel scattering supports only :periodic and :open boundaries",
-    ))
     backend.traversal in (:dda, :reference) || throw(ArgumentError(
         "voxel scattering supports only :dda and :reference traversal",
     ))
@@ -42,18 +39,20 @@ function _voxel_scattering_cache_for_turtle!(
     turtle::TurtleGrid,
     backend::VoxelCPUBackend,
     terrain::AbstractVoxelTerrain,
+    options::LightOptions,
 )
     quadrature = prepare_voxel_scattering_quadrature(turtle)
     key = (
         _voxel_grid_fingerprint(grid),
         _terrain_geometry_fingerprint(terrain),
         backend,
+        options.toricity,
         _voxel_scattering_quadrature_fingerprint(quadrature),
     )
     cache = get!(cache_by_configuration, key) do
-        prepare_voxel_scattering_transport(grid, quadrature, backend, terrain)
+        prepare_voxel_scattering_transport(grid, quadrature, backend, terrain; options=options)
     end
-    return _validate_voxel_scattering_cache(grid, quadrature, backend, terrain, cache)
+    return _validate_voxel_scattering_cache(grid, quadrature, backend, terrain, cache; options=options)
 end
 
 function _voxel_cache_for_turtle!(
@@ -62,13 +61,14 @@ function _voxel_cache_for_turtle!(
     turtle::TurtleGrid,
     backend::VoxelCPUBackend,
     terrain::AbstractVoxelTerrain,
+    options::LightOptions,
 )
     directions = NTuple{3,Float64}[]
     responses = VoxelDirectionResponse{Float64}[]
     for sector in turtle.sectors
         direction = _normalise_voxel_direction(ntuple(i -> -Float64(sector.direction[i]), 3))
         response = get!(response_by_direction, direction) do
-            compute_voxel_direction_response(grid, direction, backend, terrain)
+            compute_voxel_direction_response(grid, direction, backend, terrain; options=options)
         end
         push!(directions, direction)
         push!(responses, response)
@@ -77,6 +77,7 @@ function _voxel_cache_for_turtle!(
         _voxel_grid_fingerprint(grid),
         _terrain_geometry_fingerprint(terrain),
         backend,
+        options.toricity,
         directions,
         responses,
     )
@@ -114,13 +115,14 @@ function _run_voxel_light_step_resolved(
         check_boundaries=check_boundaries,
         resolved_step=resolved,
     )
-    cache = _voxel_cache_for_turtle!(response_by_direction, grid, turtle, backend, terrain)
+    cache = _voxel_cache_for_turtle!(response_by_direction, grid, turtle, backend, terrain, options)
     first_order = compute_voxel_first_order(
         grid,
         turtle,
         fluxes,
         backend;
         duration_seconds=resolved.duration_seconds,
+        options=options,
         cache=cache,
         terrain=terrain,
     )
@@ -131,6 +133,7 @@ function _run_voxel_light_step_resolved(
             turtle,
             backend,
             terrain,
+            options,
         )
         compute_voxel_scattering(
             grid,

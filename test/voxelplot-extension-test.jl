@@ -103,7 +103,7 @@
 
     no_terrain_figure, _, no_terrain_plot = voxelplot(
         grid;
-        boundary=:periodic,
+        options=LightOptions(toricity=true),
         rays=[(origin=(1.8, 1.5, 4.0), direction=(1.0, 0.0, -1.0))],
     )
     @test isempty(Makie.to_value(no_terrain_plot[:voxel_hit_points]))

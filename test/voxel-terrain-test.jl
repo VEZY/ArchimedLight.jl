@@ -100,7 +100,7 @@ end
         grid,
         (0.5, 0.5, 3.0),
         (0, 0, -1);
-        boundary=:open,
+        options=LightOptions(toricity=false),
         algorithm=:dda,
         terrain=terrain,
     )
@@ -108,7 +108,7 @@ end
         grid,
         (0.5, 0.5, 3.0),
         (0, 0, -1);
-        boundary=:open,
+        options=LightOptions(toricity=false),
         algorithm=:reference,
         terrain=terrain,
     )
@@ -120,14 +120,16 @@ end
     @test [segment.length for segment in reference] ≈ [segment.length for segment in dda] atol=1e-14
     @test all(segment.index[3] != 1 for segment in dda)
 
-    backend = VoxelCPUBackend(rays_per_voxel=4, g=0.5, boundary=:open, traversal=:dda)
-    response = ArchimedLight.compute_voxel_direction_response(grid, (0, 0, -1), backend, terrain)
+    backend = VoxelCPUBackend(rays_per_voxel=4, g=0.5, traversal=:dda)
+    response = ArchimedLight.compute_voxel_direction_response(
+        grid, (0, 0, -1), backend, terrain; options=LightOptions(toricity=false),
+    )
     @test response.interception_fraction[1, 1, 1] == 0.0
     @test sum(response.interception_fraction) == 0.0
     @test response.terrain_incident_weight ≈ 1.0
     @test response.escaped_bottom_weight == 0.0
 
-    open_path = trace_voxel_ray(grid, (0.5, 0.5, 3.0), (0, 0, -1); boundary=:open)
+    open_path = trace_voxel_ray(grid, (0.5, 0.5, 3.0), (0, 0, -1); options=LightOptions(toricity=false))
     @test open_path.exit_reason == :bottom
     @test open_path.terrain_hit === nothing
     @test [segment.index for segment in open_path] == [(1, 1, 3), (1, 1, 2), (1, 1, 1)]
@@ -138,14 +140,14 @@ end
         side_grid,
         (0.9, 0.5, 2.0),
         (1.0, 0.0, -0.1);
-        boundary=:open,
+        options=LightOptions(toricity=false),
         terrain=side_terrain,
     )
     downward = trace_voxel_ray(
         side_grid,
         (0.5, 0.5, 2.0),
         (0.0, 0.0, -1.0);
-        boundary=:open,
+        options=LightOptions(toricity=false),
         terrain=side_terrain,
     )
     @test side.exit_reason == :side
@@ -156,7 +158,7 @@ end
         side_grid,
         (0.5, 0.5, 2.0),
         (0, 0, -1);
-        boundary=:open,
+        options=LightOptions(toricity=false),
         terrain=incomplete,
     )
     mesh_gap = TriangulatedTerrain(
@@ -168,7 +170,7 @@ end
         side_grid,
         (0.9, 0.9, 2.0),
         (0, 0, -1);
-        boundary=:open,
+        options=LightOptions(toricity=false),
         terrain=mesh_gap,
     )
 
@@ -178,14 +180,14 @@ end
         side_grid,
         (0.5, 0.5, 2.0),
         (0, 0, -1);
-        boundary=:periodic,
+        options=LightOptions(toricity=true),
         terrain=nonperiodic,
     )
     @test trace_voxel_ray(
         side_grid,
         (0.9, 0.5, 2.0),
         (0.5, 0, -1);
-        boundary=:periodic,
+        options=LightOptions(toricity=true),
         terrain=periodic,
     ).exit_reason == :terrain
 
@@ -200,7 +202,7 @@ end
         side_grid,
         (0.9, 0.5, 2.0),
         (0.5, 0, -1);
-        boundary=:periodic,
+        options=LightOptions(toricity=true),
         terrain=tiled_height,
     ).exit_reason == :terrain
 end
@@ -244,7 +246,8 @@ end
 
 @testitem "Terrain soil absorption, reflection, cache invalidation, and energy close" tags=[:voxel, :terrain, :scattering, :fast] begin
     grid = VoxelGrid((0, 0, 0), (1, 1, 3), reshape([0.0, 1.0, 0.0], 1, 1, 3))
-    backend = VoxelCPUBackend(rays_per_voxel=1, g=0.5, boundary=:open, traversal=:dda)
+    backend = VoxelCPUBackend(rays_per_voxel=1, g=0.5, traversal=:dda)
+    options = LightOptions(toricity=false)
     quadrature = VoxelScatteringQuadrature(
         [(0.0, 0.0, 1.0), (0.0, 0.0, -1.0)],
         [0.5, 0.5],
@@ -259,13 +262,14 @@ end
         black_optics;
         materials=Dict(1 => black_optics, 2 => black_optics),
     )
-    cache = prepare_voxel_scattering_transport(grid, quadrature, backend, terrain)
+    cache = prepare_voxel_scattering_transport(grid, quadrature, backend, terrain; options)
     @test sum(cache.terrain_direction_weights[1][2]) == 1.0
     black = apply_voxel_scattering_transport(
         grid,
         emitted,
         quadrature,
         backend;
+        options=options,
         band=:par,
         terrain=terrain,
         cache=cache,
@@ -283,6 +287,7 @@ end
         emitted,
         quadrature,
         backend;
+        options=options,
         band=:par,
         terrain=terrain,
         cache=cache,
@@ -299,6 +304,7 @@ end
         emitted,
         quadrature,
         backend;
+        options=options,
         terrain=terrain,
         cache=cache,
     )
@@ -315,6 +321,7 @@ end
         subterranean_emission,
         quadrature,
         backend;
+        options=options,
         terrain=subterranean_terrain,
     )
 end
@@ -466,7 +473,7 @@ end
 
 @testitem "Terrain pipeline closes complete PAR and NIR balances" tags=[:voxel, :terrain, :scattering, :fast] begin
     grid = VoxelGrid((0, 0, 0), (1, 1, 2), fill(0.5, 1, 1, 2))
-    backend = VoxelCPUBackend(rays_per_voxel=4, g=0.5, boundary=:open, traversal=:dda)
+    backend = VoxelCPUBackend(rays_per_voxel=4, g=0.5, traversal=:dda)
     soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.5)
     terrain = PlanarTerrain(grid, soil; elevation=0.0)
     optics = VoxelOpticalProperties(
@@ -487,6 +494,7 @@ end
     options = LightOptions(
         turtle_sectors=1,
         all_in_turtle=true,
+        toricity=false,
         scattering=true,
         scattering_max_iter=80,
         scattering_stop_ratio=1e-10,
@@ -509,14 +517,14 @@ end
     @test sum(result.first_order.nir_terrain_energy) ==
           result.first_order.nir_terrain_incident_energy
 
-    for (band, incoming, injected) in (
-        (result.scattering.par, result.first_order.par_incoming_energy, result.first_order.par_injected_energy),
-        (result.scattering.nir, result.first_order.nir_incoming_energy, result.first_order.nir_injected_energy),
+    for (band, incoming) in (
+        (result.scattering.par, result.first_order.par_incoming_energy),
+        (result.scattering.nir, result.first_order.nir_incoming_energy),
     )
         accounted = sum(band.absorbed_energy) + soil_absorbed_energy(band) +
                     band.escaped_top_energy + band.escaped_side_energy +
                     band.escaped_bottom_energy + band.unresolved_energy
-        @test isapprox(accounted, incoming + injected; atol=1e-7, rtol=1e-11)
+        @test isapprox(accounted, incoming; atol=1e-7, rtol=1e-11)
         @test band.escaped_bottom_energy == 0.0
         @test band.absolute_balance_residual <= 1e-7
         @test soil_reflected_energy(band) >= 0.0
