@@ -11,79 +11,16 @@ Pages = ["voxel_inputs.md"]
 Depth = 3
 ```
 
-## Try A Small Reproducible Example
+## Start With The Bundled Tree
 
-This bundled fixture uses the same format as Belinga but has only six cells.
-Its densities, individuals, and optical values are pedagogical. One PAD value
-is deliberately unknown; zero imputation is selected explicitly to demonstrate
-the preserved diagnostic.
+[One Tree, Two Input Files](voxel_tree_tutorial.md) is the complete runnable
+workflow: read a matching `.vox`/`.jsonl.gz` pair and PLY terrain, inspect the
+scene summaries, assign materials per individual and organ, then compare
+interception and absorbed energy. The example files are small and bundled
+under `examples/voxel_tree`; no Belinga data download is needed.
 
-```@example voxel_point_input
-using ArchimedLight
-
-fixture = joinpath(
-    pkgdir(ArchimedLight), "test", "fixtures", "voxel", "point_input", "mixed.jsonl.gz",
-)
-demo_input = read_voxel_point_input(fixture; missing_pad=:zero_with_diagnostics)
-demo_leaf = VoxelMaterial(
-    g=0.5,
-    par_reflectance=0.08, par_transmittance=0.07,
-    nir_reflectance=0.45, nir_transmittance=0.40,
-)
-demo_wood = VoxelMaterial(par_reflectance=0.10, nir_reflectance=0.30)
-demo_vegetation = VoxelVegetation(
-    demo_input;
-    mode=:point_proxy,
-    leaf=demo_leaf,
-    wood=demo_wood,
-    unknown=VoxelMaterial(),
-)
-(grid_size=size(demo_input.grid), missing_pad_cells=count(demo_input.missing_pad))
-```
-
-The following two-triangle PLY covers exactly this fixture's horizontal
-domain. It illustrates terrain input without requiring an external dataset.
-
-```@example voxel_point_input
-demo_ply = joinpath(mktempdir(), "soil.ply")
-write(demo_ply, """
-ply
-format ascii 1.0
-element vertex 4
-property double x
-property double y
-property double z
-element face 2
-property list uchar int vertex_indices
-end_header
-10 -2 0
-13 -2 0
-13 2 0
-10 2 0
-3 0 1 2
-3 0 2 3
-""")
-demo_soil = SoilOpticalProperties(par_reflectance=0.10, nir_reflectance=0.30)
-demo_terrain = read_ply_terrain(demo_ply, demo_soil)
-demo_options = LightOptions(
-    toricity=false, scattering=true, turtle_sectors=6, all_in_turtle=true,
-    scattering_max_iter=30, scattering_stop_ratio=1e-8,
-)
-demo_row = (
-    step_duration=3600.0, Ri_PAR_f=100.0, Ri_NIR_f=50.0,
-    sun_azimuth=180.0, sun_elevation=35.0, direct_fraction=0.5,
-)
-demo_result = run_voxel_light_step(
-    demo_vegetation, demo_row, demo_options;
-    backend=VoxelCPUBackend(rays_per_voxel=4),
-    terrain=demo_terrain,
-)
-voxel_component_values(demo_result)
-```
-
-The output retains wood, unknown organs, and unattributed vegetation
-(`individual_id=nothing`) alongside leaves. Each energy is in joules per
-step; `plant_area` is the equivalent proxy area in square metres.
+This page describes the input contract and the additional decisions needed
+for measured scenes, including unknown PAD and unattributed vegetation.
 
 ## Read A Merged JSONL.gz File
 
@@ -235,10 +172,6 @@ extinction. Leave `VoxelCPUBackend.g` at its default: this scalar is only the
 positive numerical reference used to reuse native transport for the mixture.
 For a plain `VoxelGrid`, the backend's `g` remains its projection coefficient.
 
-Set physical projection coefficients on `VoxelMaterial.g` in this workflow.
-The backend's positive `g` is an internal reference used to reuse the scalar
-transport engine; changing it does not change the mixed model's extinction.
-
 The default point-proxy allocation assigns the entire known PAD to the
 identified individuals wherever their point counts are nonzero. A cell with
 no identified points retains its full PAD as unattributed, unknown-organ
@@ -279,21 +212,17 @@ vegetation = VoxelVegetation(
     wood=wood,
     unknown=unknown,
     individuals=Dict(
-        "132" => (leaf=VoxelMaterial(
-            g=0.5,
-            par_reflectance=0.10,
-            par_transmittance=0.05,
-            nir_reflectance=0.40,
-            nir_transmittance=0.35,
-        ),),
+        "132" => (leaf=VoxelMaterial(leaf; par_reflectance=0.10),),
     ),
 )
 ```
 
-An omitted organ keeps its default material. An explicitly supplied
-`VoxelMaterial` replaces that organ's complete material: its omitted numeric
-keywords use the material constructor defaults rather than inheriting from
-the default leaf material. Keep all calibrated coefficients explicit.
+An omitted organ keeps its default material. `VoxelMaterial(leaf; ...)`
+copies the default leaf material and changes only the named coefficients.
+An explicitly supplied `VoxelMaterial` replaces that organ's complete
+material: `VoxelMaterial(...)` without a base uses constructor defaults for
+omitted numeric keywords. Unknown IDs and invalid optical coefficients are
+rejected rather than silently ignored.
 
 ## Run With A Separate Terrain
 

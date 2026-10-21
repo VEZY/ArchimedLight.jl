@@ -11,54 +11,10 @@ const _VOXEL_DOCS_SOIL_LITTER = SoilOpticalProperties(
     nir_reflectance=0.52,
 )
 
-function _voxel_docs_elevation(x, y)
-    broad_slope = 0.055x + 0.025y
-    central_mound = 0.52exp(-((x - 4.8)^2 + 0.7(y - 4.2)^2) / 5.5)
-    shallow_hollow = 0.28exp(-((x - 2.0)^2 + (y - 6.0)^2) / 2.0)
-    ripples = 0.13sinpi(x / 4) * cospi(y / 4)
-    # Keep the full terrain shape, but below the first trunk voxel so the
-    # terrain reads as the ground the tree emerges from rather than a surface
-    # hiding its base.
-    return 0.60 * (
-        0.42 + broad_slope + central_mound - shallow_hollow + ripples
-    )
-end
-
-function _voxel_docs_tree_pad(nx, ny, nz)
-    pad = zeros(nx, ny, nz)
-    tree_x, tree_y = 4.35, 4.65
-    for k in 1:nz, j in 1:ny, i in 1:nx
-        x, y, z = i - 0.5, j - 0.5, k - 0.5
-        ground = _voxel_docs_elevation(x, y)
-
-        # A one-voxel-wide lower column makes the tree silhouette explicit.
-        trunk = (x - tree_x)^2 + (y - tree_y)^2 <= 0.42^2 &&
-                z > ground + 0.10 && z <= 4.60
-
-        # An ellipsoid with a deterministic, slightly ruffled boundary gives
-        # the crown an organic outline without introducing randomness.
-        crown_metric = ((x - tree_x) / 2.55)^2 +
-                       ((y - tree_y) / 2.25)^2 +
-                       ((z - 6.30) / 2.40)^2
-        crown_irregularity = 0.10sin(1.7x + 0.7y + 0.4z) +
-                             0.07cos(1.2y - 1.1z)
-        boundary_hole = crown_metric > 0.62 && mod(5i + 3j + 7k, 17) == 0
-        crown = crown_metric + crown_irregularity <= 1.0 && !boundary_hole
-
-        crown_density = crown ?
-            1.02 + 0.68clamp(1.0 - crown_metric, 0.0, 1.0) : 0.0
-        trunk_density = trunk ? 0.34 : 0.0
-        # Give the trunk precedence where it enters the crown, otherwise its
-        # uppermost voxel inherits the green crown colour and shortens the
-        # apparent stem.
-        pad[i, j, k] = trunk ? trunk_density : crown_density
-    end
-    return pad
-end
+include(joinpath(@__DIR__, "..", "examples", "voxel_tree", "scene.jl"))
 
 function _voxel_docs_scene()
-    nx, ny, nz = 8, 8, 9
-    grid = VoxelGrid((0, 0, 0), (8, 8, 9), _voxel_docs_tree_pad(nx, ny, nz))
+    grid = read_voxel_grid(joinpath(@__DIR__, "..", "examples", "voxel_tree", "tree.vox"))
 
     x = collect(range(0.0, 8.0; length=17))
     y = collect(range(0.0, 8.0; length=17))

@@ -1,10 +1,13 @@
 """
     VoxelMaterial(; g=0.5, par_reflectance=0, par_transmittance=0,
                   nir_reflectance=0, nir_transmittance=0)
+    VoxelMaterial(base::VoxelMaterial; kwargs...)
 
 Constant projection coefficient and PAR/NIR optics of one voxel component.
 The default is a black absorber, a modelling simplification rather than a
 calibrated leaf or bark material. `g` must lie in `(0, 1]`.
+Use the copy constructor to override selected coefficients while retaining the
+other values, for example `VoxelMaterial(leaf; par_reflectance=0.1)`.
 """
 struct VoxelMaterial
     g::Float64
@@ -25,6 +28,16 @@ struct VoxelMaterial
             throw(ArgumentError("reflectance + transmittance must not exceed one"))
         return new(values...)
     end
+end
+
+function VoxelMaterial(base::VoxelMaterial;
+                       g::Real=base.g,
+                       par_reflectance::Real=base.par_reflectance,
+                       par_transmittance::Real=base.par_transmittance,
+                       nir_reflectance::Real=base.nir_reflectance,
+                       nir_transmittance::Real=base.nir_transmittance)
+    return VoxelMaterial(; g, par_reflectance, par_transmittance,
+                         nir_reflectance, nir_transmittance)
 end
 
 struct VoxelVegetationComponent

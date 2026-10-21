@@ -5,8 +5,10 @@ Use the voxel workflow when vegetation is available as plant area density
 ArchimedLight can retain individual identities and leaf/wood point fractions
 from a merged voxel export, while the terrain remains an independent surface.
 
-Start with [Run A Simulation](voxel_interception.md) for a small reproducible
-example. For an existing merged `.jsonl.gz` file and a PLY terrain, follow
+Start with [One Tree, Two Input Files](voxel_tree_tutorial.md) to read a small
+bundled `.vox`/`.jsonl.gz` pair, assign individual leaf/wood optics, and compare
+the outputs. [Run A Simulation](voxel_interception.md) builds a grid directly
+in Julia. For an existing merged `.jsonl.gz` file and a PLY terrain, follow
 [Input Files And Individuals](voxel_inputs.md) and
 [Terrain And Soil](voxel_terrain.md).
 
@@ -55,6 +57,9 @@ that distinction when comparing simulations or calibrating parameters.
 
 ## Find A Topic
 
+- [One Tree, Two Input Files](voxel_tree_tutorial.md): read the same tree from
+  `.vox` and JSONL.gz, compare generic PAD with individual/organ accounting,
+  and change one tree's optical properties.
 - [Run A Simulation](voxel_interception.md): build a grid, simulate one step,
   inspect energies, add scattering, and run a series.
 - [Input Files And Individuals](voxel_inputs.md): read the existing JSONL.gz

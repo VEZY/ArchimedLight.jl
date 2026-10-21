@@ -45,10 +45,11 @@ voxel_terrain_app()
 ```
 
 !!! note
-    The tree and terrain are deterministic pedagogical inputs. The brown
-    stem-like column is a visualization scaffold, not a separate woody-stem
-    optical model: ArchimedLight still interprets every non-zero cell as
-    participating PAD. Every ray segment, soil hit, local normal, and reflected
+    The tree and terrain are deterministic pedagogical inputs. This geometry
+    view loads the bundled PAD-only `tree.vox`. Its paired `tree.jsonl.gz`
+    adds the tree identity and leaf/wood proportions; the
+    [file-based tree tutorial](voxel_tree_tutorial.md) assigns separate wood
+    and leaf optics to this same scene. Every ray segment, soil hit, local normal, and reflected
     direction shown above is computed through `voxelplot`, `trace_voxel_ray`,
     and `terrain_lambertian_weights`; only the displayed ray energies are
     illustrative.

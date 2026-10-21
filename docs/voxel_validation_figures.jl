@@ -145,7 +145,9 @@ function generate()
     mkpath(OUTPUT); CairoMakie.activate!()
     profiles, budgets = physical_checks()
     terrain_data = terrain_figure(); physics_figure(profiles, budgets)
-    sources = [@__FILE__, joinpath(@__DIR__, "voxel_terrain_3d.jl")]
+    sources = [@__FILE__, joinpath(@__DIR__, "voxel_terrain_3d.jl"),
+        joinpath(ROOT, "examples", "voxel_tree", "scene.jl"),
+        joinpath(ROOT, "examples", "voxel_tree", "tree.vox")]
     append!(sources, filter(path -> endswith(path, ".jl"),
         readdir(joinpath(ROOT, "src", "voxel"); join=true)))
     provenance = Dict("head_sha"=>readchomp(`git -C $ROOT rev-parse HEAD`),

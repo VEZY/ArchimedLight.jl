@@ -16,6 +16,14 @@ CairoMakie.activate!(type="image/png")
 
 DocMeta.setdocmeta!(ArchimedLight, :DocTestSetup, :(using ArchimedLight); recursive=true)
 
+# Serve downloadable copies while keeping examples/ as the single data source.
+tree_example_assets = joinpath(@__DIR__, "src", "assets", "voxel-tree")
+mkpath(tree_example_assets)
+for name in ("tree.vox", "tree.jsonl.gz", "terrain.ply")
+    cp(joinpath(@__DIR__, "..", "examples", "voxel_tree", name),
+       joinpath(tree_example_assets, name); force=true)
+end
+
 # Update the videos:
 # include(joinpath(@__DIR__, "make_video", "make_video.jl"))
 
@@ -56,6 +64,7 @@ makedocs(;
         ],
         "Voxel Modelling" => [
             "Start Here" => "voxel_overview.md",
+            "One Tree, Two Input Files" => "voxel_tree_tutorial.md",
             "Run A Simulation" => "voxel_interception.md",
             "Input Files And Individuals" => "voxel_inputs.md",
             "Interception And Assumptions" => "theory_voxel_interception.md",

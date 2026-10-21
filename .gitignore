@@ -5,6 +5,7 @@
 /benchmark/plantsimengine/Manifest*.toml
 /docs/make_video/Manifest*.toml
 /docs/build/
+/docs/src/assets/voxel-tree/
 *.DS_Store
 *.mp4
 java_implementation/*
