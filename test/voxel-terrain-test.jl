@@ -74,20 +74,56 @@
     @test all(==(1), diagonal_hits)
     @test all(==(1), vertex_hits)
 
-    interpolated = HeightFieldTerrain(
+    hill = HeightFieldTerrain(
         [0.0, 1.0, 2.0],
         [0.0, 1.0, 2.0],
         [0.0 0.0 0.0; 0.0 0.5 0.0; 0.0 0.0 0.0],
-        soil;
-        normal_mode=:interpolated,
+        soil,
     )
-    @test intersect_terrain(interpolated, (0.8, 0.8, 2.0), (0, 0, -1), 3.0).normal[3] > 0
+    hill_hit = intersect_terrain(hill, (0.8, 0.8, 2.0), (0, 0, -1), 3.0)
+    @test hill_hit.normal == terrain_patch_normal(hill, hill_hit.patch_id)
 
     vertices = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
     mesh = TriangulatedTerrain(vertices, [(1, 2, 3)], soil)
     @test intersect_terrain(mesh, (0.2, 0.2, 1.0), (0, 0, -1), 2.0).patch_id == 1
     @test intersect_terrain(mesh, (0.2, 0.2, 1.0), (0, 0, -1)).distance == 1.0
     @test_throws ArgumentError TriangulatedTerrain(vertices, [(1, 2, 3)], soil; periodic=true)
+end
+
+@testitem "Terrain compacts orphan vertices without changing patches" tags=[:voxel, :terrain, :fast] begin
+    soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)
+    bright = SoilOpticalProperties(par_reflectance=0.7, nir_reflectance=0.8)
+    points = [(99.0, 99.0, 99.0), (0.0, 0.0, 0.0), (1.0, 0.0, 0.1),
+              (50.0, 50.0, 50.0), (1.0, 1.0, 0.2), (0.0, 1.0, 0.0)]
+    faces = [(2, 5, 6), (2, 3, 5)]
+    terrain = TriangulatedTerrain(points, faces, soil;
+        material_ids=[2, 1], materials=Dict(1 => soil, 2 => bright))
+    reference = TriangulatedTerrain(points[[2, 3, 5, 6]], [(1, 3, 4), (1, 2, 3)], soil;
+        material_ids=[2, 1], materials=Dict(1 => soil, 2 => bright))
+    @test terrain.vertices == reference.vertices
+    @test terrain.triangles == reference.triangles
+    @test terrain.material_ids == [2, 1]
+    @test terrain.facet_normals == reference.facet_normals
+    @test terrain_bounds(terrain) == terrain_bounds(reference)
+    @test ArchimedLight._terrain_geometry_fingerprint(terrain) ==
+          ArchimedLight._terrain_geometry_fingerprint(reference)
+    @test length(points) == 6
+    @test faces == [(2, 5, 6), (2, 3, 5)]
+    for patch in 1:2
+        point = terrain_patch_point(terrain, patch)
+        hit = intersect_terrain(terrain, (point[1], point[2], point[3] + 1), (0, 0, -1))
+        @test hit.patch_id == patch
+        @test hit.material_id == terrain.material_ids[patch]
+        @test hit.normal == terrain_patch_normal(terrain, patch)
+    end
+    invalid = copy(points)
+    invalid[1] = (NaN, 99.0, 99.0)
+    @test_throws ArgumentError TriangulatedTerrain(invalid, faces, soil)
+    @test_throws ArgumentError TriangulatedTerrain(points, [(2, 3, 7)], soil)
+    @test_throws ArgumentError TriangulatedTerrain(points, [(2, 3, 2)], soil)
+    @test_throws ArgumentError TriangulatedTerrain(
+        [(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0)], [(1, 2, 3)], soil,
+    )
 end
 
 @testitem "Terrain-aware DDA stops before subterranean voxels and classifies boundaries" tags=[:voxel, :terrain, :fast] begin

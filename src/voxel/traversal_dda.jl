@@ -1,6 +1,9 @@
-function _dda_first_boundary_time(origin, component, minimum, spacing, index)
+function _dda_first_boundary_time(origin, component, minimum, spacing)
     component == 0 && return Inf
-    boundary = component > 0 ? minimum + index * spacing : minimum + (index - 1) * spacing
+    # Plane times stay in unwrapped ray coordinates; only voxel indices wrap.
+    relative = (origin - minimum) / spacing
+    plane_index = component > 0 ? floor(Int, relative) + 1 : ceil(Int, relative) - 1
+    boundary = minimum + plane_index * spacing
     time = (boundary - origin) / component
     delta = spacing / abs(component)
     tolerance = _voxel_tolerance(time)
@@ -37,13 +40,13 @@ function _trace_voxel_ray_dda(
     delta_y = ray_direction[2] == 0 ? Inf : grid.voxel_size[2] / abs(ray_direction[2])
     delta_z = ray_direction[3] == 0 ? Inf : grid.voxel_size[3] / abs(ray_direction[3])
     next_x = _dda_first_boundary_time(
-        ray_origin[1], ray_direction[1], grid.minimum[1], grid.voxel_size[1], i
+        ray_origin[1], ray_direction[1], grid.minimum[1], grid.voxel_size[1]
     )
     next_y = _dda_first_boundary_time(
-        ray_origin[2], ray_direction[2], grid.minimum[2], grid.voxel_size[2], j
+        ray_origin[2], ray_direction[2], grid.minimum[2], grid.voxel_size[2]
     )
     next_z = _dda_first_boundary_time(
-        ray_origin[3], ray_direction[3], grid.minimum[3], grid.voxel_size[3], k
+        ray_origin[3], ray_direction[3], grid.minimum[3], grid.voxel_size[3]
     )
 
     crossing_rate = sum(

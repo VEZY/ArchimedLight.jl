@@ -141,8 +141,6 @@ struct TriangulatedTerrain{T<:AbstractFloat} <: AbstractVoxelTerrain
     material_ids::Vector{Int}
     materials::_SoilMaterialTable
     facet_normals::Vector{NTuple{3,T}}
-    vertex_normals::Vector{NTuple{3,T}}
-    normal_mode::Symbol
     bvh::TerrainBVH{T}
 end
 
@@ -163,22 +161,6 @@ function _triangle_geometry(vertices, triangle)
         "terrain triangles must have an upward-facing component; vertical/overhanging facets are unsupported",
     ))
     return normal, magnitude
-end
-
-function _terrain_vertex_normals(vertices, triangles, facet_normals)
-    accumulators = [(0.0, 0.0, 0.0) for _ in eachindex(vertices)]
-    for (triangle, normal) in zip(triangles, facet_normals)
-        _, area2 = _triangle_geometry(vertices, triangle)
-        for vertex_id in triangle
-            current = accumulators[vertex_id]
-            accumulators[vertex_id] = ntuple(axis -> current[axis] + area2 * normal[axis], 3)
-        end
-    end
-    result = NTuple{3,Float64}[]
-    for normal in accumulators
-        push!(result, _normalise_terrain_vector(normal, "terrain vertex normal"))
-    end
-    return result
 end
 
 function _triangle_bounds(vertices, triangle)
@@ -231,15 +213,11 @@ function TriangulatedTerrain(
     material_id::Integer=1,
     material_ids=nothing,
     materials=Dict(Int(material_id) => optics),
-    normal_mode::Symbol=:facet,
     periodic::Bool=false,
     leaf_size::Integer=8,
 )
     periodic && throw(ArgumentError(
         "periodic generic triangle meshes are not supported; use HeightFieldTerrain",
-    ))
-    normal_mode in (:facet, :interpolated) || throw(ArgumentError(
-        "terrain normal_mode must be :facet or :interpolated",
     ))
     points = NTuple{3,Float64}[]
     for (index, vertex) in enumerate(vertices)
@@ -262,10 +240,24 @@ function TriangulatedTerrain(
         push!(normals, normal)
     end
     isempty(faces) && throw(ArgumentError("a terrain mesh needs at least one triangle"))
+    # PLY exports can retain vertices orphaned by cropping or face filtering.
+    # Validate them above, then compact only vertex indices; patch order and
+    # material assignments remain those of the input triangles.
+    used = falses(length(points))
+    for face in faces, vertex in face
+        used[vertex] = true
+    end
+    if !all(used)
+        remap = zeros(Int, length(points))
+        for (index, vertex) in enumerate(findall(used))
+            remap[vertex] = index
+        end
+        points = points[used]
+        faces = [ntuple(axis -> remap[face[axis]], 3) for face in faces]
+    end
     table = _soil_material_table(materials)
     assignments = material_ids === nothing ? fill(Int(material_id), length(faces)) : material_ids
     ids = _validate_material_ids(assignments, table, length(faces))
-    vertex_normals = _terrain_vertex_normals(points, faces, normals)
     bvh = _build_terrain_bvh(points, faces; leaf_size=Int(leaf_size))
     return TriangulatedTerrain(
         points,
@@ -273,8 +265,6 @@ function TriangulatedTerrain(
         ids,
         table,
         normals,
-        vertex_normals,
-        normal_mode,
         bvh,
     )
 end
@@ -306,7 +296,6 @@ function HeightFieldTerrain(
     material_id::Integer=1,
     material_ids=nothing,
     materials=Dict(Int(material_id) => optics),
-    normal_mode::Symbol=:facet,
 )
     diagonal == :southwest_northeast || throw(ArgumentError(
         "only diagonal=:southwest_northeast is supported",
@@ -364,7 +353,6 @@ function HeightFieldTerrain(
         material_id=material_id,
         material_ids=assignments,
         materials=materials,
-        normal_mode=normal_mode,
         periodic=false,
     )
     return HeightFieldTerrain(xv, yv, z, diagonal, periodic, mesh)
@@ -522,29 +510,12 @@ function _ray_triangle_intersection(origin, direction, a, b, c, maximum_distance
     distance > ray_tolerance || return nothing
     isfinite(maximum_distance) && distance > maximum_distance + ray_tolerance && return nothing
     accepted_distance = isfinite(maximum_distance) ? min(distance, maximum_distance) : distance
-    return (
-        distance=accepted_distance,
-        u=clamp(u, 0.0, 1.0),
-        v=clamp(v, 0.0, 1.0),
-    )
-end
-
-function _interpolated_triangle_normal(terrain, triangle, u, v)
-    w = 1 - u - v
-    values = ntuple(
-        axis -> w * terrain.vertex_normals[triangle[1]][axis] +
-                u * terrain.vertex_normals[triangle[2]][axis] +
-                v * terrain.vertex_normals[triangle[3]][axis],
-        3,
-    )
-    normal = _normalise_terrain_vector(values, "interpolated terrain normal")
-    return normal[3] >= 0 ? normal : ntuple(axis -> -normal[axis], 3)
+    return (distance=accepted_distance,)
 end
 
 function _intersect_triangulated_base(terrain::TriangulatedTerrain, origin, direction, maximum_distance)
     best_distance = maximum_distance
     best_patch = 0
-    best_uv = (0.0, 0.0)
     stack = Int[1]
     bounds = terrain_bounds(terrain)
     geometry_scale = maximum(ntuple(axis -> bounds[2][axis] - bounds[1][axis], 3))
@@ -574,7 +545,6 @@ function _intersect_triangulated_base(terrain::TriangulatedTerrain, origin, dire
                    (abs(hit.distance - best_distance) <= tolerance && (best_patch == 0 || patch < best_patch))
                     best_distance = hit.distance
                     best_patch = patch
-                    best_uv = (hit.u, hit.v)
                 end
             end
         else
@@ -585,13 +555,10 @@ function _intersect_triangulated_base(terrain::TriangulatedTerrain, origin, dire
     end
     best_patch == 0 && return nothing
     point = ntuple(axis -> origin[axis] + best_distance * direction[axis], 3)
-    triangle = terrain.triangles[best_patch]
-    normal = terrain.normal_mode == :facet ? terrain.facet_normals[best_patch] :
-             _interpolated_triangle_normal(terrain, triangle, best_uv[1], best_uv[2])
     return TerrainHit(
         best_distance,
         point,
-        normal,
+        terrain.facet_normals[best_patch],
         best_patch,
         terrain.material_ids[best_patch],
     )
@@ -774,7 +741,7 @@ function _terrain_geometry_fingerprint(terrain::PlanarTerrain)
 end
 
 function _terrain_geometry_fingerprint(terrain::TriangulatedTerrain)
-    state = hash(:triangulated_terrain, hash(terrain.normal_mode))
+    state = hash(:triangulated_terrain)
     for vertex in terrain.vertices
         state = hash(vertex, state)
     end

@@ -284,7 +284,8 @@ for spectral averaging, parameter sources, equations, and limitations.
 
 ## Historical `.vox` Files And Series
 
-`read_voxel_grid` accepts `PAD` or `PadBVTotal` in historical files and ignores
+`read_voxel_grid` accepts `PAD`, `PadBVTotal`, or AMAPVox's
+`pad_attenuation_PPL_MLE` column and ignores
 additional result columns. Every 0-based grid coordinate must occur exactly
 once. `write_voxel_grid` can write either the grid alone or the grid plus a
 `VoxelFirstOrderResult`.
@@ -324,7 +325,7 @@ across a series. The cache key
 includes grid bounds, dimensions, all `PAD` values, the normalized direction,
 `G`, `options.toricity`, traversal, and ray sampling settings. A changed grid,
 toricity, or backend cannot silently reuse an incompatible explicit cache.
-With terrain, the key also includes surface geometry, topology, periodicity, normal mode, and
+With terrain, the key also includes surface geometry, topology, periodicity, and
 patch material assignment. Optical albedos and soil reflectance
 are applied during iteration rather than baked into geometric paths, so changing
 only optics does not require rebuilding those paths.

@@ -86,3 +86,36 @@
         @test_throws ErrorException read_ply_terrain(path, soil)
     end
 end
+
+@testitem "PLY terrain accepts orphan vertices and preserves patch identities" tags=[:voxel, :terrain, :fast] begin
+    import PlyIO
+
+    soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)
+    points = [(99.0, 99.0, 99.0), (0.0, 0.0, 0.0), (1.0, 0.0, 0.1),
+              (50.0, 50.0, 50.0), (1.0, 1.0, 0.2), (0.0, 1.0, 0.0)]
+    ply = PlyIO.Ply()
+    push!(ply, PlyIO.PlyElement("vertex",
+        (PlyIO.ArrayProperty(name, [point[axis] for point in points])
+         for (axis, name) in enumerate(("x", "y", "z")))...))
+    indices = PlyIO.ListProperty("vertex_indices", UInt8, Int32)
+    push!(indices, Int32[1, 4, 5])
+    push!(indices, Int32[1, 2, 4])
+    push!(ply, PlyIO.PlyElement("face", indices))
+    mktempdir() do directory
+        for ascii in (true, false)
+            path = joinpath(directory, "orphan-$ascii.ply")
+            PlyIO.save_ply(ply, path; ascii=ascii)
+            terrain = read_ply_terrain(path, soil; material_ids=[2, 1],
+                materials=Dict(1 => soil, 2 => SoilOpticalProperties(
+                    par_reflectance=0.7, nir_reflectance=0.8)))
+            @test terrain.vertices == points[[2, 3, 5, 6]]
+            @test terrain.triangles == [(1, 3, 4), (1, 2, 3)]
+            @test terrain.material_ids == [2, 1]
+            @test terrain_bounds(terrain) == ((0.0, 0.0, 0.0), (1.0, 1.0, 0.2))
+            hit = intersect_terrain(terrain, (0.25, 0.75, 1.0), (0, 0, -1))
+            @test hit.patch_id == 1
+            @test soil_optics(terrain, hit, :par) == 0.7
+            @test hit.normal == terrain_patch_normal(terrain, hit.patch_id)
+        end
+    end
+end

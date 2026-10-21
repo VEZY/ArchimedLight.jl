@@ -189,8 +189,8 @@ axis-aligned normals, which can bias both shadows and reflected radiation.
 ### Implemented Scope And Further Extensions
 
 The reference solver now supports finite planes, regular height fields,
-arbitrary non-periodic triangle meshes, exact intersections, facet or explicit
-interpolated normals, BVH acceleration, aligned AAIGrid/AMAPVox input, and
+arbitrary non-periodic triangle meshes, exact intersections, facet normals,
+BVH acceleration, aligned AAIGrid/AMAPVox input, and
 geometry-only cache invalidation. Open and periodic semantics are explicit;
 periodic canopy transport over non-periodic topography is rejected.
 

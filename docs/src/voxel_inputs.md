@@ -32,9 +32,8 @@ input = read_voxel_point_input("belinga3_1m_PAD_merged.jsonl.gz")
 
 The reader also accepts an uncompressed `.jsonl`. It retains PAD and
 individual/organ proportions while converting 0-based Cartesian input indices
-to the internal Julia array layout. Historical plain AMAPVox `.vox` files
-remain supported by `read_voxel_grid`; they do not contain the merged
-individual proportions.
+to the internal Julia array layout. Plain AMAPVox `.vox` files are supported
+by `read_voxel_grid`; they do not contain the merged individual proportions.
 
 The supplied Belinga file contains unknown PAD values. The default
 `missing_pad=:error` prevents treating unknown density as observed empty
@@ -52,6 +51,48 @@ input and results. Report this assumption with any output: the calculation can
 underestimate shading in those cells. It does not alter the source file.
 Omitted voxel records also remain unknown rather than becoming empty space.
 Point counts alone cannot reconstruct a missing PAD value.
+
+## Read An AMAPVox `.vox` File
+
+The reader accepts the parenthesized coordinate headers and PAD estimator in
+the supplied AMAPVox 2.4.2 export, as well as historical ARCHIMED files. Use a
+column name when choosing a specific PAD estimate:
+
+```julia
+grid = read_voxel_grid(
+    "canopy.vox";
+    pad_column="pad_attenuation_PPL_MLE",
+)
+```
+
+The default `pad_column=:auto` recognizes `PAD`, `PadBVTotal`, and
+`pad_attenuation_PPL_MLE`, ignoring case. If several are present, choose one
+explicitly rather than relying on column order. Additional numeric diagnostics
+remain available through `read_voxel_column(path, "column_name")`.
+
+Like null PAD in JSONL, NaN PAD in `.vox` is unknown density, not observed empty
+space. The supplied Belinga file contains such values. For an explicit
+zero-imputation sensitivity run, retain the diagnostic return:
+
+```julia
+loaded = read_voxel_grid(
+    "belinga3_1m_PAD.vox";
+    pad_column="pad_attenuation_PPL_MLE",
+    missing_pad=:zero_with_diagnostics,
+    return_diagnostics=true,
+)
+grid = loaded.grid
+unknown_pad = loaded.missing_pad
+producer_version = loaded.metadata["build-version"]
+```
+
+The ordinary return remains a `VoxelGrid`. With `return_diagnostics=true`, the
+reader returns a named tuple containing `grid`, the `missing_pad` Boolean mask,
+and `metadata`. Explicit zero imputation requires this diagnostic return so
+the unknown-cell mask cannot be lost during reading. Keep it with the outputs
+when reporting results; the simulation does not reconstruct the missing PAD.
+Infinite or negative PAD, duplicate indices, and missing grid rows remain
+errors.
 
 ## The Existing File Structure
 

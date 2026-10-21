@@ -24,7 +24,7 @@ than silently triangulated.
 `transform` explicitly maps file coordinates to the voxel reference frame;
 the default is identity. No translation, rescaling, CRS conversion, or terrain
 alignment is inferred. Additional keywords are passed to `TriangulatedTerrain`,
-including `normal_mode`, soil material assignments, and BVH `leaf_size`.
+including soil material assignments and BVH `leaf_size`.
 Generic triangular terrain cannot be periodic.
 """
 function read_ply_terrain(

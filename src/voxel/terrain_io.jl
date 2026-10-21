@@ -203,7 +203,6 @@ function _triangulated_raster_terrain(
     material_id,
     material_ids,
     materials,
-    normal_mode,
 )
     vertices = NTuple{3,Float64}[]
     for j in eachindex(y), i in eachindex(x)
@@ -238,7 +237,6 @@ function _triangulated_raster_terrain(
         material_id=material_id,
         material_ids=assignments,
         materials=materials,
-        normal_mode=normal_mode,
     )
 end
 
@@ -260,7 +258,6 @@ function height_field_terrain(
     material_id::Integer=1,
     material_ids=nothing,
     materials=Dict(Int(material_id) => optics),
-    normal_mode::Symbol=:facet,
 )
     x, y, elevation = _cell_centres_to_vertex_grid(
         aai.elevation,
@@ -287,7 +284,6 @@ function height_field_terrain(
             material_id=material_id,
             material_ids=expanded_material_ids,
             materials=materials,
-            normal_mode=normal_mode,
         )
     end
     periodic && throw(ArgumentError(
@@ -302,7 +298,6 @@ function height_field_terrain(
         material_id=material_id,
         material_ids=expanded_material_ids,
         materials=materials,
-        normal_mode=normal_mode,
     )
 end
 
@@ -442,7 +437,6 @@ function read_voxel_terrain_scene(
     validate_alignment::Bool=true,
     alignment_atol::Real=1e-6,
     alignment_rtol::Real=1e-8,
-    normal_mode::Symbol=:facet,
 )
     grid = read_voxel_grid(input.voxel_path)
     aai = read_aai_grid(input.dtm_path; crs=input.dtm_to_voxel.source_crs)
@@ -451,7 +445,6 @@ function read_voxel_terrain_scene(
         optics;
         transform=input.dtm_to_voxel,
         periodic=periodic,
-        normal_mode=normal_mode,
     )
     _validate_terrain_for_grid(grid, terrain, periodic)
     ground_distance = read_voxel_column(

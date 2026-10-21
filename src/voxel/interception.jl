@@ -306,7 +306,7 @@ function compute_voxel_first_order(
     for sector_index in 1:sector_count
         response = responses.responses[sector_index]
         par_scale = fluxes.par[sector_index] * area_time
-        nir_scale = fluxes.nir[sector_index] * area_time
+        nir_scale = options.nir_interception ? fluxes.nir[sector_index] * area_time : 0.0
         for index in eachindex(response.interception_fraction)
             fraction = response.interception_fraction[index]
             par_energy[index] += fraction * par_scale

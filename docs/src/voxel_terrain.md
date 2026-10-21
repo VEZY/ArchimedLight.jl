@@ -114,15 +114,12 @@ terrain = HeightFieldTerrain(
     [0.0 0.0 0.0;
      0.2 0.3 0.4;
      0.4 0.6 0.8],
-    soil;
-    normal_mode=:facet,
+    soil,
 )
 ```
 
-Ray intersections are exact triangle intersections. `normal_mode=:facet` is
-the scientific reference and returns one normal per triangle.
-`normal_mode=:interpolated` explicitly enables area-weighted vertex-normal
-interpolation.
+Ray intersections are exact triangle intersections. Each triangle has one
+upward facet normal, shared by interception, soil reflection, and visualization.
 
 ### Triangle Meshes
 
@@ -145,7 +142,8 @@ upward normal component and builds a
 bounding-volume hierarchy. Intersections along shared edges or vertices choose
 the smallest patch identifier at equal distance, making the result
 deterministic without duplicating energy. Returned normals always point from
-soil toward air (positive global z component).
+soil toward air (positive global z component). Unreferenced vertices are
+validated and then removed without changing triangle order or soil assignments.
 
 Generic triangle meshes are non-periodic. Use a periodic height field when the
 same terrain tile must repeat horizontally.
@@ -177,7 +175,6 @@ terrain = read_ply_terrain(
     "bare_earth.ply",
     soil;
     transform=dtm_to_voxel,
-    normal_mode=:facet,
 )
 ```
 
@@ -391,8 +388,8 @@ reference plane as measured terrain.
 ## Cache Semantics
 
 First-order response and scattering-path caches include a terrain fingerprint.
-It contains elevations/vertices, topology, patch material assignment, normal
-mode, bounds, and periodic tiling. Reusing a cache after any of those changes
+It contains elevations/vertices, topology, patch material assignment, bounds,
+and periodic tiling. Reusing a cache after any of those changes
 fails validation.
 
 PAR/NIR soil reflectance is deliberately excluded from the geometry

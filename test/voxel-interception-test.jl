@@ -106,6 +106,43 @@
     )
 end
 
+@testitem "Explicit voxel fluxes honor disabled NIR with and without a response cache" tags=[:voxel, :fast] begin
+    grid = VoxelGrid((0, 0, 0), (1, 1, 2), fill(0.4, 1, 1, 2))
+    turtle = ArchimedLight.TurtleGrid([
+        ArchimedLight.TurtleSector(1, (0.0, 0.0, 1.0), 0.5, :sky),
+        ArchimedLight.TurtleSector(2, (0.6, 0.0, 0.8), 0.5, :sky),
+    ])
+    fluxes = ArchimedLight.DirectionalFluxes([1, 2], [100.0, 40.0], [50.0, 20.0])
+    options = LightOptions(toricity=false, nir_interception=true, scattering=false)
+    no_nir = LightOptions(options; nir_interception=false)
+    backend = VoxelCPUBackend(rays_per_voxel=4)
+    soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.3)
+
+    for terrain in (NoVoxelTerrain(), PlanarTerrain(grid, soil; elevation=0.0))
+        responses = prepare_voxel_responses(grid, turtle, backend, terrain; options)
+        baseline = compute_voxel_first_order(
+            grid, turtle, fluxes, backend;
+            duration_seconds=1.0, options, terrain, cache=responses,
+        )
+        @test baseline.nir_incoming_energy > 0
+        @test sum(baseline.nir_energy) > 0
+        for cache in (nothing, responses)
+            result = compute_voxel_first_order(
+                grid, turtle, fluxes, backend;
+                duration_seconds=1.0, options=no_nir, terrain, cache,
+            )
+            for field in fieldnames(typeof(result))
+                value = getfield(result, field)
+                if startswith(string(field), "nir_")
+                    @test value isa AbstractArray ? all(iszero, value) : iszero(value)
+                elseif startswith(string(field), "par_")
+                    @test value == getfield(baseline, field)
+                end
+            end
+        end
+    end
+end
+
 @testitem "Voxel default backend honors LightOptions toricity in steps and series" tags=[:voxel, :fast] begin
     grid = VoxelGrid((0, 0, 0), (1, 1, 3), fill(0.4, 1, 1, 3))
     options = LightOptions(

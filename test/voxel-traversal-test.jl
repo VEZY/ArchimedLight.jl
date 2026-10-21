@@ -56,6 +56,40 @@
     @test_throws ArgumentError trace_voxel_ray(grid, (0.5, 0.5, 3.0), (1, 0, 0))
 end
 
+@testitem "Periodic voxel DDA starts on the correct side of boundary planes" tags=[:voxel, :fast] begin
+    options = LightOptions(toricity=true)
+
+    function check_boundary_path(grid, origin, direction, expected_first)
+        reference = trace_voxel_ray(grid, origin, direction; options, algorithm=:reference)
+        dda = trace_voxel_ray(grid, origin, direction; options, algorithm=:dda)
+        @test first(dda.segments).index == expected_first
+        @test [segment.index for segment in dda] == [segment.index for segment in reference]
+        @test [segment.length for segment in dda] ≈ [segment.length for segment in reference]
+        @test dda.exit_reason == reference.exit_reason == :bottom
+        @test sum(segment.length for segment in dda) ≈ 3sqrt(sum(abs2, direction))
+    end
+
+    # One cell must retain its full path; two cells used to be swapped silently,
+    # and three cells produced a negative first crossing time.
+    for count in 1:3
+        grid = VoxelGrid((-2, 4, 0), (-2 + count, 4 + count, 3), ones(count, count, 3))
+        for axis in 1:2, boundary in (grid.minimum, grid.maximum), step in (-1.0, 1.0)
+            origin = ntuple(i -> i == 3 ? 3.0 :
+                            i == axis ? boundary[i] : grid.minimum[i] + 0.5, 3)
+            direction = ntuple(i -> i == 3 ? -1.0 : i == axis ? step : 0.0, 3)
+            expected_first = ntuple(i -> i == 3 ? 3 : i == axis && step < 0 ? count : 1, 3)
+            check_boundary_path(grid, origin, direction, expected_first)
+        end
+        # Corner crossings must advance both horizontal indices together,
+        # including after more than one wrap through a one- or two-cell grid.
+        for x in (grid.minimum[1], grid.maximum[1]),
+            y in (grid.minimum[2], grid.maximum[2]), sx in (-1.0, 1.0), sy in (-1.0, 1.0)
+            expected_first = (sx < 0 ? count : 1, sy < 0 ? count : 1, 3)
+            check_boundary_path(grid, (x, y, 3.0), (sx, sy, -1.0), expected_first)
+        end
+    end
+end
+
 @testitem "Voxel DDA matches the reference on seeded rays" tags=[:voxel, :fast] begin
     using Random
 

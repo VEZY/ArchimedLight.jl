@@ -1,6 +1,6 @@
 # One Tree, Two Input Files
 
-This tutorial reads the same small tree from a plain AMAPVox `.vox` file and
+This tutorial reads the same small tree from a plain `.vox` file and
 from the merged `.jsonl.gz` format. Both contain exactly the same plant area
 density (`PAD`) on an 8 × 8 × 9 grid. The JSONL file additionally identifies
 the tree and separates leaf and wood point fractions. We use those fractions
