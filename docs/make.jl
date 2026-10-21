@@ -17,7 +17,7 @@ DocMeta.setdocmeta!(ArchimedLight, :DocTestSetup, :(using ArchimedLight); recurs
 home = (
     name="ArchimedLight.jl",
     text="Let there be light.",
-    tagline="Radiative transfer in 3D scenes.",
+    tagline="Radiation interception, absorption, and scattering in 3D scenes.",
     image="assets/archimedlight-logo.png",
     actions=[
         (text="Run your first simulation", link="getting_started.html", theme="brand"),
