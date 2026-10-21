@@ -2,46 +2,56 @@
 CurrentModule = ArchimedLight
 ```
 
-# Fast radiation transfer in 3D scenes
+# Fast radiative transfer in 3D scenes
 
 ArchimedLight.jl computes light interception and scattering in three-dimensional scenes, from individual organs or objects to crop canopies, using a fast radiation transfer model. Read an existing scene
 or build one in Julia, simulate its light environment, and inspect incident and
-absorbed radiation on each organ.
+absorbed radiation for each organ.
 
 ## Try it in your browser
 
-Here's a live example of a wheat plant in a field, with incident PAR irradiance coloured on the plant and ground.
-**This example is not precomputed; it runs the simulations live in your browser** like it would in a real-world scenario. Move the sun over a wheat plant created using ArchiCrop (Braud et al. 2026), then explore scattering, periodic boundaries (`toricity=true`), pixel resolution (lower is better) and number of sky sectors (higher is better).
+Here's a live example of a wheat plant in a field generated using ArchiCrop (Braud et al. 2026), with incident PAR irradiance coloured on the plant and ground.
+
+**This example is not precomputed; it runs the simulations live in your browser** like it would in a real-world scenario. Change the hour of simulation, explore the effect of light scattering, periodic boundaries (`toricity=true`), pixel resolution (lower is better), and number of sky sectors (higher is better).
 
 ```@raw html
 <figure id="live-wheat" data-state="preview">
   <div class="live-wheat-stage" aria-busy="false">
     <img class="live-wheat-preview" src="assets/live-wheat/preview.png"
       width="1280" height="720" loading="eager" fetchpriority="high"
-      alt="A three-dimensional wheat plant and its shadow on the ground, coloured by incident PAR irradiance, with controls for hour, resolution, scattering, toricity and sky sectors.">
+      alt="A three-dimensional wheat plant and its shadow on the ground, coloured by incident PAR irradiance, with controls for hour, resolution, scattering, toricity, and sky sectors.">
   </div>
   <figcaption class="live-wheat-caption">
     <span class="live-wheat-status" role="status" aria-live="polite"></span>
     <a class="live-wheat-open" href="assets/live-wheat/index.html" target="_blank" rel="noopener">Open the standalone demo</a>.
     All light calculations run in your browser.
   </figcaption>
-  <noscript><p>Enable JavaScript to interact with the scene. The preview remains available above.</p></noscript>
+  <noscript><p>Enable JavaScript to interact with the scene.</p></noscript>
 </figure>
 ```
 
 ```@raw html
 <details>
   <summary>About the example and more scenes</summary>
-  <p>This fixed benchmark wheat architecture has an unspecified cultivar.
-  Weather is interpolated from Montpellier estimates for 15 May 2025.
-  The browser runs a compiled specialization of the light calculations;
-  <a href="https://github.com/VEZY/ArchimedLight.jl/tree/main/docs/live_wheat">source, provenance and validation notes</a>
-  describe its scope and reproduction.</p>
+  <p>Weather was downloaded using PlantMeteo for the Montpellier location on 15 May 2025.
+  The browser runs ArchimedLight compiled to WASM.</p>
   <div class="archimed-animations">
-    <img src="assets/archimedlight_day_cycle_1.png" loading="lazy"
-      alt="Wheat scene coloured by incident PAR irradiance.">
-    <img src="assets/archimedlight_day_cycle_2.png" loading="lazy"
-      alt="Agrivoltaic wheat scene with shade from solar panels, coloured by incident PAR irradiance.">
+    <video autoplay loop muted playsinline
+           poster="assets/archimedlight_day_cycle_1.png"
+           preload="metadata"
+           style="max-width: 100%; height: auto;"
+           aria-label="Wheat scene coloured by incident PAR irradiance.">
+      <source src="assets/archimedlight_day_cycle_1.mp4" type="video/mp4">
+      Your browser does not support embedded video.
+    </video>
+    <video autoplay loop muted playsinline
+           poster="assets/archimedlight_day_cycle_2.png"
+           preload="metadata"
+           style="max-width: 100%; height: auto;"
+           aria-label="Agrivoltaic wheat scene with shade from solar panels, coloured by incident PAR irradiance.">
+      <source src="assets/archimedlight_day_cycle_2.mp4" type="video/mp4">
+      Your browser does not support embedded video.
+    </video>
   </div>
   <p>The day-cycle animations run the wheat and agrivoltaic wheat benchmark
   scenes every 30 minutes over a representative clear-sky day. About 2,500
@@ -53,7 +63,7 @@ Here's a live example of a wheat plant in a field, with incident PAR irradiance 
 
 ## Quick Start
 
-This tutorial uses 1 cm pixels instead of the default 1 mm pixels to keep the coffee simulation quick.
+This tutorial simulated a coffee plant in a 3D scene.
 
 ```@example home_quick_start
 using ArchimedLight
@@ -70,7 +80,7 @@ step.budget.absorbed_energy.total.par;
 nothing # hide
 ```
 
-The simulation results are grouped by quantity and waveband in `LightBudget`. When you attach those values back onto the scene, the default attribute names keep the standard ARCHIMED naming convention such as `Ri_PAR_f`, `Ri_PAR_q`, and `Ra_PAR_q`.
+The simulation results are returned as a `LightBudget`, grouped by quantity and waveband. You can then export the results and plot them easily. Look at the getting started page to see how.
 
 ## Learn More
 
