@@ -2,7 +2,6 @@ VOXEL SPACE
 #min_corner: 0.0 0.0 0.0
 #max_corner: 8.0 8.0 9.0
 #split: 8 8 9
-#LAD_TYPE: Spherical
 i j k PAD
 0 0 0 0.0
 0 0 1 0.0
