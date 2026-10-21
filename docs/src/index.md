@@ -8,49 +8,6 @@ ArchimedLight.jl computes light interception and scattering in three-dimensional
 or build one in Julia, simulate its light environment, and inspect incident and
 absorbed radiation for each organ.
 
-## Applications
-
-Explore how ArchimedLight is used to study light in measured plant architectures,
-mixed crops, and environments shaped by solar panels.
-
-```@raw html
-<section id="applications-gallery" class="applications-gallery" aria-label="ArchimedLight applications">
-  <div class="applications-toolbar">
-    <a href="applications/index.html">Browse all applications <span aria-hidden="true">→</span></a>
-    <div class="applications-controls" hidden>
-      <button type="button" class="applications-previous" aria-label="Previous applications" aria-controls="applications-track"><span aria-hidden="true">←</span></button>
-      <button type="button" class="applications-next" aria-label="Next applications" aria-controls="applications-track"><span aria-hidden="true">→</span></button>
-    </div>
-  </div>
-  <ul id="applications-track" class="applications-track" aria-label="Application examples" tabindex="0">
-    <li>
-      <a class="application-card" href="applications/intercropping.html">
-        <img src="assets/applications/intercropping.png" width="3600" height="3000" loading="lazy" alt="Three-dimensional wheat and maize canopies in an intercropping scene.">
-        <span class="application-card-body"><strong>Wheat–maize intercropping</strong><span>Oriane Braud</span></span>
-      </a>
-    </li>
-    <li>
-      <a class="application-card" href="applications/agrivoltaics.html">
-        <img src="assets/applications/agrivoltaics.png" width="1039" height="808" loading="lazy" alt="A crop canopy beneath an agrivoltaic solar-panel structure.">
-        <span class="application-card-body"><strong>Agrivoltaics</strong><span>Corentin Coutellier</span></span>
-      </a>
-    </li>
-    <li>
-      <a class="application-card" href="applications/rice.html">
-        <img src="assets/applications/rice.png" width="1170" height="858" loading="lazy" alt="A three-dimensional reconstruction of measured rice plants.">
-        <span class="application-card-body"><strong>Reconstructed rice</strong><span>Raphaël Pérez</span></span>
-      </a>
-    </li>
-    <li>
-      <a class="application-card" href="applications/oil-palm.html">
-        <img src="assets/applications/oil-palm.png" width="3600" height="1500" loading="lazy" alt="A three-dimensional oil-palm reconstruction built from field measurements.">
-        <span class="application-card-body"><strong>Oil-palm reconstructions</strong><span>JPCE · CIRAD–PT SMART</span></span>
-      </a>
-    </li>
-  </ul>
-</section>
-```
-
 ## Try it in your browser
 
 Here's a live example of a wheat plant in a field generated using ArchiCrop (Braud et al. 2026), with incident PAR irradiance coloured on the plant and ground.
@@ -102,6 +59,49 @@ Here's a live example of a wheat plant in a field generated using ArchiCrop (Bra
   Reproduce them with
   <a href="https://github.com/VEZY/ArchimedLight.jl/blob/main/docs/make_video/make_video.jl">docs/make_video/make_video.jl</a>.</p>
 </details>
+```
+
+## Applications
+
+Explore how ArchimedLight is used to study light in measured plant architectures,
+mixed crops, and environments shaped by solar panels.
+
+```@raw html
+<section id="applications-gallery" class="applications-gallery" aria-label="ArchimedLight applications">
+  <div class="applications-toolbar">
+    <a href="applications/index.html">Browse all applications <span aria-hidden="true">→</span></a>
+    <div class="applications-controls" hidden>
+      <button type="button" class="applications-previous" aria-label="Previous applications" aria-controls="applications-track"><span aria-hidden="true">←</span></button>
+      <button type="button" class="applications-next" aria-label="Next applications" aria-controls="applications-track"><span aria-hidden="true">→</span></button>
+    </div>
+  </div>
+  <ul id="applications-track" class="applications-track" aria-label="Application examples" tabindex="0">
+    <li>
+      <a class="application-card" href="applications/intercropping.html">
+        <img src="assets/applications/intercropping.png" width="3600" height="3000" loading="lazy" alt="Three-dimensional wheat and maize canopies in an intercropping scene.">
+        <span class="application-card-body"><strong>Wheat–maize intercropping</strong><span>Oriane Braud</span></span>
+      </a>
+    </li>
+    <li>
+      <a class="application-card" href="applications/agrivoltaics.html">
+        <img src="assets/applications/agrivoltaics.png" width="1039" height="808" loading="lazy" alt="A crop canopy beneath an agrivoltaic solar-panel structure.">
+        <span class="application-card-body"><strong>Agrivoltaics</strong><span>Corentin Coutellier</span></span>
+      </a>
+    </li>
+    <li>
+      <a class="application-card" href="applications/rice.html">
+        <img src="assets/applications/rice.png" width="1170" height="858" loading="lazy" alt="A three-dimensional reconstruction of measured rice plants.">
+        <span class="application-card-body"><strong>Reconstructed rice</strong><span>Raphaël Pérez</span></span>
+      </a>
+    </li>
+    <li>
+      <a class="application-card" href="applications/oil-palm.html">
+        <img src="assets/applications/oil-palm.png" width="3600" height="1500" loading="lazy" alt="A three-dimensional oil-palm reconstruction built from field measurements.">
+        <span class="application-card-body"><strong>Oil-palm reconstructions</strong><span>JPCE · CIRAD–PT SMART</span></span>
+      </a>
+    </li>
+  </ul>
+</section>
 ```
 
 ## Quick Start

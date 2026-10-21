@@ -28,6 +28,10 @@ light sequences, even when the overall panel coverage is similar. The study asks
 how much of that spatial and temporal variation needs to be retained when
 predicting crop performance.
 
+# Source code
+
+The code for this application is available at [FSPM2026_AgriPV_Design](https://github.com/VEZY/FSPM2026_AgriPV_Design).
+
 ## Reference
 
 Coutellier, C., Vezy, R., Braud, O., Assoa, Y. B., Christophe, A., Combes, D., and

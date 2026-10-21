@@ -26,6 +26,10 @@ The figure illustrates changes in row proportions and orientation. The same colo
 scale lets you compare the light distribution across all four scenes; the bright
 upper maize leaves and more shaded wheat show why spatial position matters.
 
+# Source code
+
+Reproducible code for this application is available at [ArchiCrop_for_STICS-IC_light](https://github.com/orianebro/ArchiCrop_for_STICS-IC_light).
+
 ## Research context and reference
 
 Braud, O., Pradal, C., Arsouze, T., Jaeger, M., Adam, M., and Vezy, R. (2026).
@@ -33,10 +37,6 @@ Braud, O., Pradal, C., Arsouze, T., Jaeger, M., Adam, M., and Vezy, R. (2026).
 approach to evaluate light interception formalisms in crop models.*
 FSPM 2026, Montpellier, France.
 [Conference programme](https://fspm2026.sciencesconf.org/program?lang=en).
-
-The conference abstract uses **CARIBU** as its reference 3D light model.
-The ArchimedLight renderings shown here are a separate application to the
-wheat–maize scenes; they are not the reference simulations reported in that abstract.
 
 To work with a similar scene, see [scene files and semantics](../reference_scene.md),
 [boundary conditions](../reference_config.md), and [light outputs](../outputs.md).
