@@ -16,8 +16,8 @@ DocMeta.setdocmeta!(ArchimedLight, :DocTestSetup, :(using ArchimedLight); recurs
 # Bonito supplies its static HTML writer and documentation theme.
 home = (
     name="ArchimedLight.jl",
-    text="Light in 3D plant scenes",
-    tagline="Simulate radiation interception and scattering from individual organs to crop canopies.",
+    text="Let there be light.",
+    tagline="Radiative transfer in 3D scenes.",
     image="assets/archimedlight-logo.png",
     actions=[
         (text="Run your first simulation", link="getting_started.html", theme="brand"),
