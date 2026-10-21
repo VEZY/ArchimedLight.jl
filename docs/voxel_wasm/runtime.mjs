@@ -37,7 +37,7 @@ export function validateScene(scene) {
     return {voxelCount, terrainCount, outputCount: voxelCount + terrainCount + 4};
 }
 
-export async function initialize(bytes, scene) {
+export async function initialize(bytes, scene, meteorology = null) {
     const counts = validateScene(scene);
     const compileStart = performance.now();
     const module = await WebAssembly.compile(bytes, {builtins: ['js-string']});
@@ -75,6 +75,41 @@ export async function initialize(bytes, scene) {
     const data = makeData(scene.rays_per_voxel);
     const preparationMilliseconds = performance.now() - preparationStart;
     const sceneStates = new Map([[scene.rays_per_voxel, data]]);
+    const weatherStates = new Map();
+    let weatherTransportMilliseconds = 0;
+    if (meteorology !== null) {
+        for (const name of ['make_weather', 'solve_hour', 'hour_snapshot']) {
+            if (typeof kernel[name] !== 'function') throw new Error('Missing hourly Wasm export: ' + name);
+        }
+        finiteArray(meteorology.weather, 'meteorology.weather', 3);
+        finiteArray(meteorology.site, 'meteorology.site');
+        if (meteorology.weather.length !== 72 || meteorology.site.length !== 4
+            || !Array.isArray(meteorology.skies) || meteorology.skies.length === 0) {
+            throw new Error('Expected 24 weather records, site [latitude, longitude, day of year, year] and sky quadratures');
+        }
+        const started = performance.now();
+        const weather = f64(meteorology.weather), site = f64(meteorology.site);
+        for (const sky of meteorology.skies) {
+            finiteArray(sky.sky_up, 'meteorology.skies.sky_up', 3);
+            if (!Number.isInteger(sky.sectors) || sky.sectors < 1
+                || sky.sky_up.length !== 3 * sky.sectors || weatherStates.has(sky.sectors)) {
+                throw new Error('Invalid or duplicate weather sky quadrature');
+            }
+            weatherStates.set(sky.sectors, kernel.make_weather(weather, site, f64(sky.sky_up)));
+        }
+        weatherTransportMilliseconds = performance.now() - started;
+    }
+
+    function prepareScene(rayCount) {
+        if (!Number.isInteger(rayCount) || rayCount < 1) throw new Error('Invalid case ray sampling');
+        let scenePreparationMilliseconds = 0;
+        if (!sceneStates.has(rayCount)) {
+            const sceneStarted = performance.now();
+            sceneStates.set(rayCount, makeData(rayCount));
+            scenePreparationMilliseconds = performance.now() - sceneStarted;
+        }
+        return {data: sceneStates.get(rayCount), scenePreparationMilliseconds};
+    }
 
     function prepareCase(reference) {
         finiteArray(reference.directions, 'case.directions', 3);
@@ -84,33 +119,49 @@ export async function initialize(bytes, scene) {
             throw new Error('Each direction needs a PAR flux and a positive duration');
         }
         const rayCount = reference.rays_per_voxel ?? scene.rays_per_voxel;
-        if (!Number.isInteger(rayCount) || rayCount < 1) throw new Error('Invalid case ray sampling');
-        let scenePreparationMilliseconds = 0;
-        if (!sceneStates.has(rayCount)) {
-            const sceneStarted = performance.now();
-            sceneStates.set(rayCount, makeData(rayCount));
-            scenePreparationMilliseconds = performance.now() - sceneStarted;
-        }
+        const preparedScene = prepareScene(rayCount);
         const started = performance.now();
         const directions = f64(reference.directions), flux = f64(reference.par_flux);
         const preparationMilliseconds = performance.now() - started;
-        return {data: sceneStates.get(rayCount), directions, flux, seconds: reference.seconds,
-            preparationMilliseconds, scenePreparationMilliseconds};
+        return {...preparedScene, directions, flux, seconds: reference.seconds, preparationMilliseconds};
     }
-    function solve(prepared) {
-        const started = performance.now();
-        const result = kernel.solve(prepared.data, prepared.directions, prepared.flux, prepared.seconds);
-        const solveMilliseconds = performance.now() - started;
+
+    function prepareHour(reference) {
+        if (!Number.isFinite(reference.hour) || reference.hour < 0 || reference.hour > 24
+            || !Number.isFinite(reference.seconds) || reference.seconds <= 0
+            || !weatherStates.has(reference.sectors)) {
+            throw new Error('Expected an hour between 0 and 24 UTC, positive duration and a prepared sky');
+        }
+        return {...prepareScene(reference.rays_per_voxel ?? scene.rays_per_voxel),
+            weather: weatherStates.get(reference.sectors), hour: reference.hour,
+            seconds: reference.seconds, preparationMilliseconds: 0};
+    }
+
+    function readback(result, solveMilliseconds) {
         const readbackStarted = performance.now();
         const values = new Float64Array(counts.outputCount);
         for (let index = 0; index < values.length; index++) values[index] = kernel.get_f64(result, index);
         return {values, solveMilliseconds, readbackMilliseconds: performance.now() - readbackStarted};
     }
-    return {prepareCase, solve, counts, imports, timing: {
+    function solve(prepared) {
+        const started = performance.now();
+        const result = kernel.solve(prepared.data, prepared.directions, prepared.flux, prepared.seconds);
+        return readback(result, performance.now() - started);
+    }
+    function solveHour(prepared) {
+        const started = performance.now();
+        const result = kernel.solve_hour(prepared.data, prepared.weather, prepared.hour, prepared.seconds);
+        const output = readback(result, performance.now() - started);
+        const snapshot = kernel.hour_snapshot(prepared.weather, prepared.hour);
+        output.snapshot = Array.from({length: 5}, (_, index) => kernel.get_f64(snapshot, index));
+        return output;
+    }
+    return {prepareCase, prepareHour, solve, solveHour, counts, imports, timing: {
         compile_milliseconds: compileMilliseconds,
         instantiate_milliseconds: instantiateMilliseconds,
         scene_transport_milliseconds: transportMilliseconds,
         scene_preparation_milliseconds: preparationMilliseconds,
+        weather_preparation_milliseconds: weatherTransportMilliseconds,
     }};
 }
 

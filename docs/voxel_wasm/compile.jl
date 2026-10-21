@@ -30,6 +30,12 @@ function run(; output_directory=joinpath(@__DIR__, "build"))
     diagnostics = WasmTarget.WasmDiagnostic[]
     entries = [
         (VoxelWasmKernel.solve, (VoxelWasmKernel.Data, Vector{Float64}, Vector{Float64}, Float64), "solve"),
+        (VoxelWasmKernel.make_weather,
+            (Vector{Float64}, Vector{Float64}, Vector{Float64}), "make_weather"),
+        (VoxelWasmKernel.solve_hour,
+            (VoxelWasmKernel.Data, VoxelWasmKernel.WeatherData, Float64, Float64), "solve_hour"),
+        (VoxelWasmKernel.hour_snapshot,
+            (VoxelWasmKernel.WeatherData, Float64), "hour_snapshot"),
         (VoxelWasmKernel.new_f64, (Int32,), "new_f64"),
         (VoxelWasmKernel.set_f64, (Vector{Float64}, Int32, Float64), "set_f64"),
         (VoxelWasmKernel.new_i32, (Int32,), "new_i32"),

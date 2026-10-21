@@ -12,6 +12,44 @@ struct Data
     backend::AL.VoxelCPUBackend
 end
 
+"""Raw hourly Montpellier weather and the shared native sky quadrature."""
+struct WeatherData
+    weather::NTuple{3,Vector{Float64}}
+    latitude::Float64
+    longitude::Float64
+    date::AL.Dates.Date
+    sky_up::Vector{AL.StaticArrays.SVector{3,Float64}}
+end
+
+function make_weather(weather::Vector{Float64}, site::Vector{Float64},
+                      sky_up_flat::Vector{Float64})
+    columns = (weather[1:3:end], weather[2:3:end], weather[3:3:end])
+    date = AL.Dates.Date(Int(site[4]), 1, 1) + AL.Dates.Day(Int(site[3]) - 1)
+    sky_up = Vector{AL.StaticArrays.SVector{3,Float64}}(undef, length(sky_up_flat) ÷ 3)
+    @inbounds for i in eachindex(sky_up)
+        k = 3i - 2
+        sky_up[i] = AL.StaticArrays.SVector{3,Float64}(
+            sky_up_flat[k], sky_up_flat[k + 1], sky_up_flat[k + 2])
+    end
+    return WeatherData(columns, site[1], site[2], date, sky_up)
+end
+
+# Same end-of-interval Open-Meteo clock contract as the wheat demonstration.
+# Interpolation, solar position, and the horizon treatment all remain native.
+function weather_snapshot(weather::WeatherData, hour::Float64)
+    h = round(hour * 60.0) / 60.0
+    return AL.interpolate_radiation(weather.weather[1], weather.weather[2], weather.weather[3], h;
+        latitude=weather.latitude, longitude=weather.longitude, date=weather.date,
+        utc_offset_hours=0.0, first_timestamp=0.0, interval_hours=1.0,
+        radiation_timestamp=:end)
+end
+
+function hour_snapshot(weather::WeatherData, hour::Float64)
+    forcing = weather_snapshot(weather, hour)
+    return Float64[forcing.RI_SW_f, forcing.RI_PAR_f, forcing.direct_fraction,
+                   forcing.sun_azimuth, forcing.sun_elevation]
+end
+
 """Decode native-preprocessed geometry; PAD is column-major and indices are 1-based."""
 function make_data(bounds::Vector{Float64}, dims::Vector{Int32}, pad::Vector{Float64},
                    vertices::Vector{Float64}, faces::Vector{Int32},
@@ -103,6 +141,39 @@ function solve(data::Data, propagation::Vector{Float64}, par::Vector{Float64}, s
     output[n + m + 3] = result.par_escaped_side_energy
     output[n + m + 4] = result.par_escaped_bottom_energy
     return output
+end
+
+"""Recompute the moving sun and diffuse forcing in WASM from the raw hourly weather."""
+function solve_hour(data::Data, weather::WeatherData, hour::Float64, seconds::Float64)
+    forcing = weather_snapshot(weather, hour)
+    n = length(weather.sky_up)
+    sun_up = AL._sun_direction(forcing.sun_azimuth, forcing.sun_elevation)
+    weights = AL._diffuse_weights_java_like(1.0 - forcing.direct_fraction,
+                                           weather.sky_up, sun_up)
+    has_sun = forcing.sun_elevation > 0.0
+    count = n + Int(has_sun)
+    propagation = Vector{Float64}(undef, 3count)
+    par = zeros(Float64, count)
+    diffuse_par = forcing.RI_PAR_f * (1.0 - forcing.direct_fraction)
+    direct_par = forcing.RI_PAR_f * forcing.direct_fraction
+    @inbounds for i in 1:n
+        direction = weather.sky_up[i]
+        k = 3i - 2
+        propagation[k] = -direction[1]
+        propagation[k + 1] = -direction[2]
+        propagation[k + 2] = -direction[3]
+        par[i] = diffuse_par * weights[i]
+        # Preserve the ordinary explicit-sun fallback for a below-horizon sun.
+        !has_sun && (par[i] += direct_par / n)
+    end
+    if has_sun
+        k = 3n + 1
+        propagation[k] = -sun_up[1]
+        propagation[k + 1] = -sun_up[2]
+        propagation[k + 2] = -sun_up[3]
+        par[count] = direct_par
+    end
+    return solve(data, propagation, par, seconds)
 end
 
 new_f64(n::Int32) = Vector{Float64}(undef, Int(n))

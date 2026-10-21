@@ -54,52 +54,56 @@ end
 
 function export_view(; directory=joinpath(@__DIR__, "build"),
                      reference_path=joinpath(directory, "native_reference.json"),
-                     colour_maximum::Real=40000.0)
+                     colour_maximum::Real=20000.0)
     reference_text = read(reference_path, String)
     reference = JSON3.read(reference_text)
     wasm = read(joinpath(directory, "voxel.wasm"))
+    runtime = read(joinpath(@__DIR__, "runtime.mjs"))
     verification = JSON3.read(read(joinpath(directory, "wasm_verification.json"), String))
     verification.passed === true || error("Run check_wasm.mjs successfully before exporting the view")
     verification.artifacts.wasm_sha256 == bytes2hex(sha256(wasm)) ||
         error("The verified Wasm module has changed; rerun check_wasm.mjs")
     verification.artifacts.input_sha256 == bytes2hex(sha256(codeunits(reference_text))) ||
         error("The verified native reference has changed; rerun check_wasm.mjs")
-    length(reference.cases) == 18 && length(verification.checks) == 18 ||
-        error("The view requires all 18 native/Wasm cases to pass")
+    verification.artifacts.runtime_sha256 == bytes2hex(sha256(runtime)) ||
+        error("The verified Wasm runtime has changed; rerun check_wasm.mjs")
+    length(reference.cases) == length(verification.checks) && length(reference.cases) >= 2 ||
+        error("The view requires every native/Wasm case to pass")
     sort!(String[case.name for case in reference.cases]) ==
         sort!(String[case.name for case in verification.checks]) ||
         error("The verified case names differ from the native references")
     length(verification.transitions) == 3 || error("Missing Wasm forcing transition checks")
     mesh, receiver_ids = scene_mesh(reference.scene)
     output_count = Int(reference.abi.output_length)
-    # Deliberately exclude expected/native output arrays from the browser.
-    cases = [(name=String(case.name), kind=String(case.kind), sectors=Int(case.sectors),
-        rays_per_voxel=Int(case.rays_per_voxel), seconds=Float64(case.seconds),
-        directions=Float64.(case.directions), par_flux=Float64.(case.par_flux)) for case in reference.cases]
+    # Deliberately exclude expected/native outputs and directional forcing
+    # tables. The numerical module computes weather and sun position at runtime.
     # Bonito may encode numeric vectors as typed arrays. JSON explicitly keeps
     # the ordinary array contract shared with the independent Node checker.
     scene_literal = Bonito.JSCode(JSON3.write(JSON3.write(reference.scene)))
-    cases_literal = Bonito.JSCode(JSON3.write(JSON3.write(cases)))
-    kinds = unique(case.kind for case in cases)
-    sectors = sort(unique(case.sectors for case in cases))
-    ray_counts = sort(unique(case.rays_per_voxel for case in cases))
-    runtime_url = "data:text/javascript;base64," * base64encode(read(joinpath(@__DIR__, "runtime.mjs")))
+    weather_literal = Bonito.JSCode(JSON3.write(JSON3.write(reference.meteorology)))
+    sectors = sort(unique(Int(case.sectors) for case in reference.cases))
+    ray_counts = sort(unique(Int(case.rays_per_voxel) for case in reference.cases))
+    durations = unique(Float64(case.seconds) for case in reference.cases)
+    length(durations) == 1 || error("The view expects one calculation duration")
+    duration = only(durations)
+    runtime_url = "data:text/javascript;base64," * base64encode(runtime)
     worker_source = "import {initialize} from " * JSON3.write(runtime_url) * ";\n" * raw"""
 let runtime;
 self.onmessage = async event => {
     const message = event.data;
     try {
         if (message.type === 'initialize') {
-            runtime = await initialize(message.bytes, message.scene);
+            runtime = await initialize(message.bytes, message.scene, message.meteorology);
             self.postMessage({type: 'ready', timing: runtime.timing});
         } else if (message.type === 'calculate') {
-            const prepared = runtime.prepareCase(message.input);
-            const result = runtime.solve(prepared);
+            const prepared = runtime.prepareHour(message.input);
+            const result = runtime.solveHour(prepared);
             if (!result.values.every(Number.isFinite)) throw new Error('Non-finite Wasm output');
             self.postMessage({type: 'result', values: result.values,
                 solveMilliseconds: result.solveMilliseconds,
                 setupMilliseconds: prepared.preparationMilliseconds + prepared.scenePreparationMilliseconds,
-                readbackMilliseconds: result.readbackMilliseconds}, [result.values.buffer]);
+                readbackMilliseconds: result.readbackMilliseconds,
+                snapshot: result.snapshot}, [result.values.buffer]);
         }
     } catch (error) {
         self.postMessage({type: 'error', message: error.message});
@@ -118,8 +122,11 @@ self.onmessage = async event => {
         label="Intercepted PAR energy (J per voxel or terrain triangle)")
 
     app = Bonito.App(; title="Voxel + terrain Wasm prototype") do session
-        forcing = Bonito.DOM.select((Bonito.DOM.option(kind; value=kind) for kind in kinds)...;
-            id="voxel-forcing", disabled=true)
+        hour_slider = Bonito.DOM.input(; id="voxel-hour", type="range", min="5", max="21",
+            step=string(1 / 12), value="12", disabled=true,
+            style="width:100%;accent-color:#b94c48")
+        hour_label = Bonito.DOM.output("12:00"; id="voxel-hour-label",
+            style="font-variant-numeric:tabular-nums;min-width:5em")
         sector_menu = Bonito.DOM.select((Bonito.DOM.option(string(n); value=string(n)) for n in sectors)...;
             id="voxel-sectors", disabled=true)
         sampling = Bonito.DOM.select((Bonito.DOM.option(string(n); value=string(n)) for n in ray_counts)...;
@@ -127,20 +134,24 @@ self.onmessage = async event => {
         status = Bonito.DOM.p("Loading Julia WebAssembly…"; id="voxel-status")
         page = Bonito.DOM.main(
             Bonito.DOM.h1("Voxel + terrain · live Wasm prototype"),
-            Bonito.DOM.p("Shared Julia first-order PAR calculations, finite scene, black vegetation and soil. Synthetic forcing; no weather or scattering in this prototype."),
-            Bonito.DOM.div(Bonito.DOM.label("Forcing ", forcing),
-                Bonito.DOM.label("Sky sectors ", sector_menu), Bonito.DOM.label("Rays per voxel ", sampling);
+            Bonito.DOM.p("Shared Julia first-order PAR calculations, finite scene, black vegetation and soil. Move the hour slider to change the illumination."),
+            Bonito.DOM.div(Bonito.DOM.label("Hour (UTC)"), hour_slider, hour_label;
+                style="display:grid;grid-template-columns:100px minmax(180px,1fr) 75px;align-items:center;gap:18px;margin-bottom:16px"),
+            Bonito.DOM.div(Bonito.DOM.label("Sky sectors ", sector_menu), Bonito.DOM.label("Rays per voxel ", sampling);
                 style="display:flex;flex-wrap:wrap;gap:22px"),
             status, figure,
             Bonito.DOM.p("Drag to rotate · scroll to zoom · right-drag to pan. Coordinates in metres. Occupied voxels remain visible when unlit."),
+            Bonito.DOM.p("15 May 2025 · interpolated Montpellier weather · same weather inputs as the wheat demo"),
             Bonito.DOM.p("The fixed colour scale shows energy per calculation element; voxel and terrain elements have different sizes.");
             style="font:16px system-ui,sans-serif;max-width:1080px;margin:auto;padding:18px")
         Bonito.on_document_load(session, js"""
         (async () => {
-            const status = $(status), forcing = $(forcing), sectors = $(sector_menu), sampling = $(sampling);
-            const controls = [forcing, sectors, sampling], receiverIDs = $(receiver_ids);
-            const cases = JSON.parse($(cases_literal)), scene = JSON.parse($(scene_literal));
+            const status = $(status), slider = $(hour_slider), hourLabel = $(hour_label);
+            const sectors = $(sector_menu), sampling = $(sampling);
+            const controls = [slider, sectors, sampling], receiverIDs = $(receiver_ids);
+            const meteorology = JSON.parse($(weather_literal)), scene = JSON.parse($(scene_literal));
             sampling.value = String($(last(ray_counts)));
+            sectors.value = String($(last(sectors)));
             let worker;
             try {
                 const meshes = await $(plot), mesh = meshes[0];
@@ -150,6 +161,11 @@ self.onmessage = async event => {
                 const indexBuffer = mesh.geometry.index;
                 const state = {ready:false, busy:true, runs:0, values:new Float64Array($(output_count))};
                 let current = null, queued = null, workerReady = false;
+                const updateLabel = () => {
+                    const minutes = Math.round(60 * Number(slider.value));
+                    hourLabel.textContent = String(Math.floor(minutes / 60)).padStart(2, '0') + ':'
+                        + String(minutes % 60).padStart(2, '0');
+                };
                 const fail = error => {
                     status.textContent = 'Calculation failed: ' + error.message;
                     status.style.color = '#b91c1c'; state.error = String(error); state.busy = false;
@@ -167,12 +183,12 @@ self.onmessage = async event => {
                 };
                 state.run = (options = {}) => {
                     if (state.error) return Promise.reject(new Error(state.error));
-                    if (options.kind !== undefined) forcing.value = options.kind;
+                    if (options.hour !== undefined) slider.value = String(options.hour);
                     if (options.sectors !== undefined) sectors.value = String(options.sectors);
                     if (options.raysPerVoxel !== undefined) sampling.value = String(options.raysPerVoxel);
-                    const input = cases.find(c => c.kind === forcing.value && c.sectors === Number(sectors.value)
-                        && c.rays_per_voxel === Number(sampling.value));
-                    if (!input) return Promise.reject(new Error('Unsupported forcing configuration'));
+                    updateLabel();
+                    const input = {hour:Number(slider.value), sectors:Number(sectors.value),
+                        rays_per_voxel:Number(sampling.value), seconds:$(duration)};
                     return new Promise((resolve,reject) => {
                         if (queued) queued.resolve({superseded:true});
                         queued = {resolve,reject,input}; dispatch();
@@ -195,23 +211,29 @@ self.onmessage = async event => {
                         colours.needsUpdate = true; mesh.visible = true;
                         state.runs++; state.ready = true; state.busy = false;
                         state.solveMilliseconds = message.solveMilliseconds;
-                        state.options = {kind:current.input.kind, sectors:current.input.sectors,
+                        state.options = {hour:current.input.hour, sectors:current.input.sectors,
                             raysPerVoxel:current.input.rays_per_voxel};
+                        state.snapshot = message.snapshot;
                         state.geometryStable = mesh.geometry.attributes.positions_transformed_f32c === positionBuffer
                             && mesh.geometry.index === indexBuffer;
                         status.dataset.values = JSON.stringify(Array.from(message.values));
                         status.dataset.geometryStable = String(state.geometryStable);
                         status.dataset.runs = String(state.runs);
+                        status.dataset.hour = String(current.input.hour);
+                        status.dataset.options = JSON.stringify(state.options);
+                        status.dataset.snapshot = JSON.stringify(message.snapshot);
                         status.textContent = 'Julia/Wasm: ' + message.solveMilliseconds.toFixed(2) + ' ms · setup: '
                             + message.setupMilliseconds.toFixed(2) + ' ms · duration: '
-                            + current.input.seconds + ' s · ' + current.input.name;
+                            + current.input.seconds + ' s · horizontal PAR: ' + message.snapshot[1].toFixed(1)
+                            + ' W m⁻² · sun elevation: ' + message.snapshot[4].toFixed(1) + '°';
                         const completed = current; current = null; completed.resolve(message.values); dispatch();
                     } else if (message.type === 'error') fail(new Error(message.message));
                 };
                 worker.onerror = event => fail(new Error(event.message || 'Worker failed'));
-                controls.forEach(control => control.addEventListener('change', () => state.run().catch(fail)));
+                slider.addEventListener('input', () => state.run().catch(fail));
+                [sectors, sampling].forEach(control => control.addEventListener('change', () => state.run().catch(fail)));
                 window.addEventListener('beforeunload', () => worker.terminate(), {once:true});
-                worker.postMessage({type:'initialize', bytes:$(wasm), scene});
+                worker.postMessage({type:'initialize', bytes:$(wasm), scene, meteorology});
             } catch (error) {
                 status.textContent = 'Initialization failed: ' + error.message;
                 window.voxelLightError = String(error.stack || error);
@@ -223,7 +245,7 @@ self.onmessage = async event => {
     end
     output = joinpath(directory, "index.html")
     Bonito.export_static(output, app)
-    return (path=output, vertices=length(receiver_ids), cases=length(cases),
+    return (path=output, vertices=length(receiver_ids), cases=length(reference.cases),
         colour_maximum=colour_maximum, expected_outputs_embedded=false)
 end
 

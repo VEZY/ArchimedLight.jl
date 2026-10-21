@@ -368,14 +368,20 @@ end
 end
 
 function _diffuse_weights_java_like(sky::SkyState, turtle::TurtleGrid, sky_ids::Vector{Int}, options::LightOptions)
-    n = length(sky_ids)
-    n == 0 && return Float64[]
-
+    isempty(sky_ids) && return Float64[]
     sun_up = _scene_local_sun_direction(sky, options)
+    directions = [turtle.sectors[i].direction for i in sky_ids]
+    _diffuse_weights_java_like(sky.diffuse_fraction, directions, sun_up)
+end
+
+# Container-independent quadrature also used by typed compiled adapters.
+function _diffuse_weights_java_like(diffuse_fraction::Float64, directions, sun_up)
+    n = length(directions)
+    n == 0 && return Float64[]
     raw = zeros(Float64, n)
     total = 0.0
-    for (k, i) in enumerate(sky_ids)
-        raw[k] = _diffuse_raw_weight_java_like(sky.diffuse_fraction, turtle.sectors[i].direction, sun_up)
+    for k in eachindex(directions)
+        raw[k] = _diffuse_raw_weight_java_like(diffuse_fraction, directions[k], sun_up)
         total += raw[k]
     end
 

@@ -17,7 +17,7 @@ function argument(name, fallback) {
     return arguments_[index + 1];
 }
 if (arguments_.includes('--help')) {
-    console.log('node check_wasm.mjs [--input build/native_reference.json] [--wasm build/voxel.wasm] [--receipt build/compile_receipt.json] [--report build/wasm_verification.json] [--samples 31] [--warmup 5]');
+    console.log('node check_wasm.mjs [--input build/native_reference.json] [--wasm build/voxel.wasm] [--receipt build/compile_receipt.json] [--report build/wasm_verification.json] [--samples 31] [--warmup 5] [--benchmark-hours 12,18.75]');
     process.exit(0);
 }
 const inputPath = path.resolve(directory, argument('--input', 'build/native_reference.json'));
@@ -26,8 +26,14 @@ const receiptPath = path.resolve(directory, argument('--receipt', path.join(path
 const reportPath = path.resolve(directory, argument('--report', 'build/wasm_verification.json'));
 const samples = Number(argument('--samples', '31'));
 const warmup = Number(argument('--warmup', '5'));
+const benchmarkHoursArgument = argument('--benchmark-hours', 'all');
+const benchmarkHours = benchmarkHoursArgument === 'all' ? null : benchmarkHoursArgument.split(',').map(Number);
 if (!Number.isInteger(samples) || samples < 5 || !Number.isInteger(warmup) || warmup < 1) {
     throw new Error('Use at least five benchmark samples and one warmup solve');
+}
+if (benchmarkHours !== null && (benchmarkHours.length === 0
+    || !benchmarkHours.every(hour => Number.isFinite(hour) && hour >= 0 && hour <= 24))) {
+    throw new Error('Benchmark hours must be a comma-separated list between 0 and 24');
 }
 const referenceBytes = fs.readFileSync(inputPath);
 const reference = JSON.parse(referenceBytes);
@@ -64,7 +70,7 @@ for (const [filename, expectedHash] of Object.entries(reference.provenance?.inpu
     const actualHash = sha256(fs.readFileSync(path.join(repository, 'examples/voxel_tree', filename)));
     if (actualHash !== expectedHash) throw new Error('Native reference input has changed: ' + filename);
 }
-const runtime = await initialize(bytes, reference.scene);
+const runtime = await initialize(bytes, reference.scene, reference.meteorology ?? null);
 if (reference.abi && (reference.abi.voxel_count !== runtime.counts.voxelCount
     || reference.abi.terrain_count !== runtime.counts.terrainCount
     || reference.abi.output_length !== runtime.counts.outputCount)) {
@@ -73,6 +79,28 @@ if (reference.abi && (reference.abi.voxel_count !== runtime.counts.voxelCount
 const tolerance = {absolute: 1e-9, relative: 1e-12};
 function verify(values, expected) {
     return compareOutput(values, expected, runtime.counts, tolerance.absolute, tolerance.relative);
+}
+function prepare(referenceCase) {
+    return referenceCase.hour === undefined ? runtime.prepareCase(referenceCase) : runtime.prepareHour(referenceCase);
+}
+function solve(prepared, referenceCase) {
+    return referenceCase.hour === undefined ? runtime.solve(prepared) : runtime.solveHour(prepared);
+}
+function verifySnapshot(actual, expected) {
+    if (expected === undefined) return {};
+    const names = ['horizontal_SW', 'horizontal_PAR', 'direct_fraction', 'sun_azimuth', 'sun_elevation'];
+    if (!Array.isArray(expected) || expected.length !== names.length || actual?.length !== names.length) {
+        throw new Error('Expected five native and Wasm hourly forcing diagnostics');
+    }
+    let maximumError = 0;
+    for (let index = 0; index < names.length; index++) {
+        const error = Math.abs(actual[index] - expected[index]);
+        if (!Number.isFinite(error) || error > tolerance.absolute + tolerance.relative * Math.abs(expected[index])) {
+            throw new Error(`Hourly ${names[index]} differs: Wasm ${actual[index]}, native ${expected[index]}`);
+        }
+        maximumError = Math.max(maximumError, error);
+    }
+    return {snapshot: actual, snapshot_values_checked: names.length, maximum_snapshot_absolute_error: maximumError};
 }
 function verifyBudget(values, expected) {
     const {voxelCount, terrainCount} = runtime.counts;
@@ -104,36 +132,41 @@ function timingSummary(values) {
 }
 const checks = [];
 for (const referenceCase of reference.cases) {
-    console.error(`Checking ${referenceCase.name} (${samples} warmed timing samples)…`);
-    const prepared = runtime.prepareCase(referenceCase);
-    const first = runtime.solve(prepared);
+    const benchmark = benchmarkHours === null || benchmarkHours.includes(referenceCase.hour);
+    console.error(`Checking ${referenceCase.name}${benchmark ? ` (${samples} warmed timing samples)` : ' (parity only)'}…`);
+    const prepared = prepare(referenceCase);
+    const first = solve(prepared, referenceCase);
     const parity = verify(first.values, referenceCase.expected);
     const budgetParity = verifyBudget(first.values, referenceCase.budget);
-    for (let index = 0; index < warmup; index++) {
-        verify(runtime.solve(prepared).values, referenceCase.expected);
+    const snapshotParity = verifySnapshot(first.snapshot, referenceCase.snapshot);
+    for (let index = 0; benchmark && index < warmup; index++) {
+        verify(solve(prepared, referenceCase).values, referenceCase.expected);
     }
     const solveTimes = [], readbackTimes = [];
-    for (let index = 0; index < samples; index++) {
-        const result = runtime.solve(prepared);
+    for (let index = 0; benchmark && index < samples; index++) {
+        const result = solve(prepared, referenceCase);
         // All samples are checked, so timings cannot conceal state drift.
         verify(result.values, referenceCase.expected);
         solveTimes.push(result.solveMilliseconds);
         readbackTimes.push(result.readbackMilliseconds);
     }
-    checks.push({name: referenceCase.name, directions: referenceCase.par_flux.length,
+    checks.push({name: referenceCase.name, hour: referenceCase.hour,
+        directions: referenceCase.par_flux?.length ?? null,
         rays_per_voxel: referenceCase.rays_per_voxel ?? reference.scene.rays_per_voxel,
-        seconds: referenceCase.seconds, ...parity, ...budgetParity,
-        scene_preparation_milliseconds: prepared.scenePreparationMilliseconds,
-        forcing_transport_milliseconds: prepared.preparationMilliseconds,
-        first_solve_milliseconds: first.solveMilliseconds,
-        warmed_solve: timingSummary(solveTimes), readback: timingSummary(readbackTimes),
+        seconds: referenceCase.seconds, ...parity, ...budgetParity, ...snapshotParity,
+        benchmark,
+        ...(benchmark ? {scene_preparation_milliseconds: prepared.scenePreparationMilliseconds,
+            forcing_transport_milliseconds: prepared.preparationMilliseconds,
+            first_solve_milliseconds: first.solveMilliseconds,
+            warmed_solve: timingSummary(solveTimes), readback: timingSummary(readbackTimes)} : {}),
         native_timing: referenceCase.native_timing ?? null});
 }
 // The same immutable scene is revisited with distinct forcing arrays. Repeating
 // the first case catches leaked accumulation or stale direction-dependent state.
-const transitionReferences = [reference.cases[0], reference.cases.at(-1), reference.cases[0]];
+const daylightCase = reference.cases.find(referenceCase => referenceCase.hour === 12) ?? reference.cases[0];
+const transitionReferences = [daylightCase, reference.cases.at(-1), daylightCase];
 const transitions = transitionReferences.map((referenceCase, index) => {
-    const result = runtime.solve(runtime.prepareCase(referenceCase));
+    const result = solve(prepare(referenceCase), referenceCase);
     return {step: index + 1, name: referenceCase.name, ...verify(result.values, referenceCase.expected)};
 });
 const report = {
@@ -151,7 +184,8 @@ const report = {
         kernel_source_sha256: sha256(fs.readFileSync(path.join(directory, 'kernel.jl'))),
         compiler_source_sha256: sha256(fs.readFileSync(path.join(directory, 'compile.jl')))},
     imports: runtime.imports, counts: runtime.counts, tolerance,
-    initialization: runtime.timing, warmup_solves_per_case: warmup,
+    initialization: runtime.timing, warmup_solves_per_benchmark_case: warmup,
+    benchmark_hours: benchmarkHours,
     checks, transitions,
 };
 fs.mkdirSync(path.dirname(reportPath), {recursive: true});
@@ -161,6 +195,6 @@ console.log(JSON.stringify({passed: true, report: reportPath, wasm_bytes: bytes.
     maximum_absolute_error: Math.max(...checks.map(check => check.max_absolute_error)),
     maximum_balance_error: Math.max(...checks.map(check => check.balance_absolute_error)),
     initialization: runtime.timing,
-    warmed_median_ms: checks.map(check => ({name: check.name,
+    warmed_median_ms: checks.filter(check => check.benchmark).map(check => ({name: check.name,
         wasm: check.warmed_solve.median_milliseconds,
         native: check.native_timing?.kernel?.median_ms ?? null}))}, null, 2));
