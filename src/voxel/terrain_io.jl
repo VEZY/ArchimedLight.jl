@@ -174,15 +174,37 @@ function _cell_centres_to_vertex_grid(
     return x, y, elevation
 end
 
-function _expanded_raster_material_ids(material_ids, ncols, nrows)
-    material_ids === nothing && return nothing
-    material_ids isa AbstractMatrix && size(material_ids) == (ncols, nrows) ||
-        return material_ids
-    expanded = Matrix{Int}(undef, ncols + 1, nrows + 1)
-    for j in 1:(nrows + 1), i in 1:(ncols + 1)
-        expanded[i, j] = Int(material_ids[clamp(i, 1, ncols), clamp(j, 1, nrows)])
+function _raster_material_grid(x, y, elevation, material_ids, aai::AAIGrid)
+    material_ids isa AbstractMatrix && size(material_ids) == (aai.ncols, aai.nrows) ||
+        return x, y, elevation, material_ids
+    if all(==(first(material_ids)), material_ids)
+        assignments = fill(Int(first(material_ids)), length(x) - 1, length(y) - 1)
+        return x, y, elevation, assignments
     end
-    return expanded
+    # Original raster-cell materials meet at pixel edges, whereas the terrain
+    # vertices lie at pixel centres. Include both so no facet crosses a material
+    # boundary. Interpolate on the existing triangles, not a bilinear surface.
+    refined_x = sort!(vcat(x, [aai.xllcorner + i * aai.cellsize for i in 1:(aai.ncols - 1)]))
+    refined_y = sort!(vcat(y, [aai.yllcorner + j * aai.cellsize for j in 1:(aai.nrows - 1)]))
+    refined_z = Matrix{Float64}(undef, length(refined_x), length(refined_y))
+    for j in eachindex(refined_y), i in eachindex(refined_x)
+        cell_i = clamp(searchsortedlast(x, refined_x[i]), 1, length(x) - 1)
+        cell_j = clamp(searchsortedlast(y, refined_y[j]), 1, length(y) - 1)
+        u = (refined_x[i] - x[cell_i]) / (x[cell_i + 1] - x[cell_i])
+        v = (refined_y[j] - y[cell_j]) / (y[cell_j + 1] - y[cell_j])
+        southwest = elevation[cell_i, cell_j]
+        northeast = elevation[cell_i + 1, cell_j + 1]
+        refined_z[i, j] = if v <= u
+            (1 - u) * southwest + (u - v) * elevation[cell_i + 1, cell_j] + v * northeast
+        else
+            (1 - v) * southwest + u * northeast + (v - u) * elevation[cell_i, cell_j + 1]
+        end
+    end
+    assignments = Matrix{Int}(undef, length(refined_x) - 1, length(refined_y) - 1)
+    for j in axes(assignments, 2), i in axes(assignments, 1)
+        assignments[i, j] = Int(material_ids[cld(i, 2), cld(j, 2)])
+    end
+    return refined_x, refined_y, refined_z, assignments
 end
 
 function _axis_aligned_height_transform(transform::TerrainCoordinateTransform)
@@ -246,7 +268,10 @@ end
 Convert AAIGrid cell-centre elevations to a continuous triangulated surface.
 Every centre remains an exact vertex; raster edges use constant nearest-cell
 extension over the outer half-cell. The same southwest-to-northeast diagonal
-is then used in every cell. Axis-aligned affine
+is then used in every cell. A raster-sized `material_ids` matrix applies to
+the original pixel footprints; heterogeneous IDs subdivide this same surface
+at pixel edges. Expanded surface-cell matrices and facet vectors retain their
+direct assignment semantics. Axis-aligned affine
 transforms retain a `HeightFieldTerrain`; rotations/shears produce an explicit
 `TriangulatedTerrain` and cannot be periodic.
 """
@@ -265,11 +290,7 @@ function height_field_terrain(
         aai.yllcorner,
         aai.cellsize,
     )
-    expanded_material_ids = _expanded_raster_material_ids(
-        material_ids,
-        aai.ncols,
-        aai.nrows,
-    )
+    x, y, elevation, patch_material_ids = _raster_material_grid(x, y, elevation, material_ids, aai)
     if _axis_aligned_height_transform(transform)
         matrix = transform.matrix
         transformed_x = [matrix[1, 1] * value + matrix[1, 4] for value in x]
@@ -282,7 +303,7 @@ function height_field_terrain(
             optics;
             periodic=periodic,
             material_id=material_id,
-            material_ids=expanded_material_ids,
+            material_ids=patch_material_ids,
             materials=materials,
         )
     end
@@ -296,7 +317,7 @@ function height_field_terrain(
         optics,
         transform;
         material_id=material_id,
-        material_ids=expanded_material_ids,
+        material_ids=patch_material_ids,
         materials=materials,
     )
 end

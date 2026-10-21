@@ -149,6 +149,9 @@ The solver stops when the newly intercepted order is smaller than
 floating-point floor. `scattering_max_iter` is a hard limit. If that limit is
 reached first, `converged` is false and the latest unprocessed order remains in
 `unresolved_energy`; it is never silently treated as absorption.
+The convergence decision also includes unresolved soil-to-soil reflection
+after the terrain transport's 128-bounce limit. Exhausting foliage orders alone
+does not establish convergence on a highly reflective concave terrain.
 
 The terminal energy invariant is checked independently for PAR and NIR:
 

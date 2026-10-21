@@ -45,6 +45,53 @@
     @test results[1].nir.total_intercepted_energy ≈ results[2].nir.total_intercepted_energy
 end
 
+@testitem "Voxel convergence includes unresolved terrain reflections" tags=[:voxel, :terrain, :scattering, :fast] begin
+    grid = VoxelGrid((0, 0, 0), (1, 1, 11), zeros(1, 1, 1))
+    optics = VoxelOpticalProperties(grid; scattering_par=0.0, scattering_nir=0.0)
+    backend = VoxelCPUBackend(rays_per_voxel=16)
+    row = (
+        step_duration=1.0, Ri_PAR_f=1.0, Ri_NIR_f=0.5,
+        sun_azimuth=90.0, sun_elevation=45.0, direct_fraction=0.5,
+    )
+    reflective_soil = SoilOpticalProperties(par_reflectance=0.99, nir_reflectance=0.99)
+    black_soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
+    # A deep periodic valley retains a significant tail after 128 soil bounces.
+    # Empty vegetation must not make that incomplete transport look converged.
+    valley(soil) = HeightFieldTerrain(
+        [0.0, 0.5, 1.0], [0.0, 1.0], [10.0 10.0; 0.0 0.0; 10.0 10.0],
+        soil; periodic=true,
+    )
+    cases = (
+        (terrain=valley(reflective_soil), converged=false),
+        (terrain=valley(black_soil), converged=true),
+        (terrain=PlanarTerrain(grid, reflective_soil; elevation=0.0, periodic=true), converged=true),
+    )
+    for sectors in (16, 46), case in cases
+        options = LightOptions(
+            toricity=true, turtle_sectors=sectors, all_in_turtle=true,
+            scattering=true, scattering_max_iter=10, scattering_stop_ratio=1e-8,
+        )
+        step = run_voxel_light_step(grid, row, options; backend, optics, terrain=case.terrain)
+        for band in (:par, :nir)
+            result = getproperty(step.scattering, band)
+            incoming = getproperty(step.first_order, Symbol(band, :_incoming_energy))
+            @test incoming > 0
+            @test result.converged == case.converged
+            @test result.iterations == 1
+            @test iszero(sum(result.total_intercepted_energy))
+            if case.converged
+                @test result.unresolved_energy == 0
+            else
+                @test result.unresolved_energy > 0.01incoming
+            end
+            accounted = sum(result.absorbed_energy) + result.ground_absorbed_energy +
+                        result.escaped_top_energy + result.escaped_side_energy +
+                        result.escaped_bottom_energy + result.unresolved_energy
+            @test accounted ≈ incoming atol=1e-12
+        end
+    end
+end
+
 @testitem "Terrain reflection launches within each patch's overlap with the grid" tags=[:voxel, :terrain, :scattering, :fast] begin
     grid = VoxelGrid((0, 0, 0), (1, 1, 2), zeros(1, 1, 2))
     soil = SoilOpticalProperties(par_reflectance=1.0, nir_reflectance=1.0)

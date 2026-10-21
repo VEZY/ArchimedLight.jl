@@ -13,9 +13,29 @@
   accounting, an optional Lambertian ground, reusable internal transport paths,
   convergence diagnostics, energy-balance residuals, tests, documentation, and
   CPU setup-versus-warmed benchmarks.
+- Add facet-based height-field and PLY triangle terrain, affine DTM import,
+  spatial soil materials, terrain-aware transport, and energy diagnostics.
+- Read merged AMAPVox/individual JSONL and JSONL.gz inputs with explicit
+  missing-PAD diagnostics. Allocate PAD conservatively among individuals,
+  foliage, wood, and unattributed vegetation in the `point_proxy` workflow.
+  Bundle matching small `.vox`/`.jsonl.gz` tree inputs, a PLY terrain, and a
+  dedicated voxel documentation section with runnable examples.
 
 ### Fixed
 
+- Respect raster-cell footprints for AAIGrid soil materials without changing
+  the interpolated terrain surface or shifting material boundaries by half a
+  cell.
+- Include unresolved soil-to-soil reflection energy in voxel convergence
+  diagnostics, including highly reflective concave terrain.
+- Preserve georeferenced voxel and terrain geometry precision when plotting,
+  with a common local rendering frame and `Axis3` as the default voxel axis.
+- Stop inferring spherical leaf-angle distribution provenance in `.vox`
+  exports: a PAD grid does not retain the input inversion's LAD metadata.
+- Handle periodic voxel rays starting exactly on a boundary, ignore unused PLY
+  vertices, honor `nir_interception=false` in low-level voxel calls, and read
+  AMAPVox 2.4.2 coordinate headers and named PAD estimators with explicit
+  handling of unknown PAD.
 - Keep fixed diffuse directional responses and their scattering graph cached
   when the explicit sun moves with `cache_radiation=true` and
   `all_in_turtle=false`. Replace only the current solar response, including

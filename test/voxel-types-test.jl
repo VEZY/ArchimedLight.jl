@@ -27,6 +27,23 @@
         @test restored.maximum == grid.maximum
         @test restored.voxel_size == grid.voxel_size
         @test restored.pad == grid.pad
+        @test !occursin("LAD_TYPE", read(path, String))
+
+        # Exporting a calculation with a non-default effective G must not
+        # invent a spherical LAD provenance claim either.
+        turtle = ArchimedLight.TurtleGrid([
+            ArchimedLight.TurtleSector(1, (0.0, 0.0, 1.0), 1.0, :sky),
+        ])
+        fluxes = ArchimedLight.DirectionalFluxes([1], [1.0], [0.5])
+        result = compute_voxel_first_order(
+            grid, turtle, fluxes, VoxelCPUBackend(g=0.7);
+            duration_seconds=1.0,
+            options=LightOptions(toricity=true),
+        )
+        write_voxel_grid(path, grid, result)
+        @test !occursin("LAD_TYPE", read(path, String))
+        @test read_voxel_grid(path).pad == grid.pad
+        @test read_voxel_column(path, "Ri_PAR_0_q") ≈ result.par_energy
 
         reordered = joinpath(directory, "reordered.vox")
         open(reordered, "w") do io

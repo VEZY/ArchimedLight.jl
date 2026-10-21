@@ -507,6 +507,97 @@ end
     end
 end
 
+@testitem "Raster soil materials retain their original pixel footprints" tags=[:voxel, :terrain, :io, :fast] begin
+    using LinearAlgebra: I
+
+    black = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
+    white = SoilOpticalProperties(par_reflectance=1.0, nir_reflectance=1.0)
+    materials = Dict(1 => black, 2 => white)
+    quadrature = VoxelScatteringQuadrature([(0.0, 0.0, 1.0), (0.0, 0.0, -1.0)], [0.5, 0.5])
+    backend = VoxelCPUBackend(rays_per_voxel=16)
+    options = LightOptions(toricity=false)
+    for dimensions in ((2, 1), (1, 2))
+        nx, ny = dimensions
+        aai = AAIGrid(nx, ny, 0.0, 0.0, 1.0, zeros(dimensions), nothing, nothing)
+        terrain = height_field_terrain(aai, black;
+            material_ids=reshape([1, 2], dimensions), materials)
+        for (coordinate, expected) in zip((0.25, 0.75, 1.25, 1.75), (1, 1, 2, 2))
+            origin = nx == 2 ? (coordinate, 0.25, 1.0) : (0.25, coordinate, 1.0)
+            @test intersect_terrain(terrain, origin, (0, 0, -1)).material_id == expected
+        end
+        grid = VoxelGrid((0, 0, 0), (nx, ny, 1), zeros(nx, ny, 1))
+        response = ArchimedLight.compute_voxel_direction_response(grid, (0, 0, -1), backend, terrain; options)
+        transport = apply_voxel_scattering_transport(grid, zeros(size(grid)), quadrature, backend;
+            options, terrain, initial_terrain_energy=response.terrain_incident_fraction)
+        @test response.incoming_weight == 2.0
+        @test transport.ground_absorbed_energy ≈ 1.0 atol=1e-12
+        @test transport.ground_reflected_energy ≈ 1.0 atol=1e-12
+        @test abs(transport.balance_residual) <= 1e-12
+    end
+
+    # Non-coplanar interior cells distinguish the original triangle surface
+    # from bilinear interpolation; the outer half-cells retain their extension.
+    aai = AAIGrid(3, 3, 0.0, 0.0, 1.0,
+        [0.2 0.8 0.3; 0.9 0.1 0.7; 0.4 0.6 0.5], nothing, nothing)
+    ids = [isodd(i + j) ? 1 : 2 for i in 1:3, j in 1:3]
+    original = height_field_terrain(aai, black)
+    refined = height_field_terrain(aai, black; material_ids=ids, materials)
+    uniform = height_field_terrain(aai, black; material_ids=fill(2, 3, 3), materials)
+    @test uniform.x == original.x && uniform.y == original.y
+    @test uniform.elevation == original.elevation
+    @test uniform.mesh.triangles == original.mesh.triangles
+    @test all(==(2), uniform.mesh.material_ids)
+    same_optics = height_field_terrain(aai, black;
+        material_ids=ids, materials=Dict(1 => black, 2 => black))
+    @test same_optics.x == refined.x && length(same_optics.x) > length(original.x)
+    @test same_optics.mesh.material_ids == refined.mesh.material_ids
+    @test terrain_bounds(refined) == terrain_bounds(original)
+    @test maximum(abs(terrain_elevation_at(refined, x, y) - terrain_elevation_at(original, x, y))
+        for x in range(0, 3; length=19), y in range(0, 3; length=19)) <= 1e-14
+    for i in 1:3, j in 1:3, dx in (0.25, 0.75), dy in (0.25, 0.75)
+        x, y = i - 1 + dx, j - 1 + dy
+        hit = intersect_terrain(refined, (x, y, 2.0), (0, 0, -1))
+        @test hit.material_id == ids[i, j]
+    end
+    for origin in ((0.3, 1.7, 2.0), (1.4, 0.4, 2.0), (2.2, 2.1, 2.0))
+        before = intersect_terrain(original, origin, (0.11, -0.09, -1.0))
+        after = intersect_terrain(refined, origin, (0.11, -0.09, -1.0))
+        @test all(isapprox.(after.point, before.point; atol=1e-14))
+        @test all(isapprox.(after.normal, before.normal; atol=1e-14))
+    end
+
+    matrix = Matrix{Float64}(I, 4, 4)
+    matrix[1:2, 1:2] .= [0.0 -1.0; 1.0 0.0]
+    matrix[1:3, 4] .= [10.0, 20.0, 0.25]
+    rotated = height_field_terrain(aai, black; material_ids=ids, materials,
+        transform=TerrainCoordinateTransform(matrix))
+    @test rotated isa TriangulatedTerrain
+    for i in 1:3, j in 1:3
+        x, y = i - 0.25, j - 0.25
+        hit = intersect_terrain(rotated, (10 - y, 20 + x, 3.0), (0, 0, -1))
+        @test hit.material_id == ids[i, j]
+        @test hit.point[3] ≈ terrain_elevation_at(original, x, y) + 0.25 atol=1e-14
+    end
+
+    flat = AAIGrid(2, 2, 0.0, 0.0, 1.0, zeros(2, 2), nothing, nothing)
+    periodic = height_field_terrain(flat, black;
+        material_ids=[1 2; 2 1], materials, periodic=true)
+    @test periodic.periodic
+    @test intersect_terrain(periodic, (2.75, -0.25, 1.0), (0, 0, -1), 2.0).material_id == 2
+    @test terrain_bounds(periodic) == ((0.0, 0.0, 0.0), (2.0, 2.0, 0.0))
+
+    # Existing assignments to the already-expanded patch grid or to individual
+    # facets keep their original geometry and ordering.
+    expanded_ids = [isodd(i + j) ? 1 : 2 for i in 1:4, j in 1:4]
+    expanded = height_field_terrain(aai, black; material_ids=expanded_ids, materials)
+    facet_ids = repeat(vec(expanded_ids); inner=2)
+    facets = height_field_terrain(aai, black; material_ids=facet_ids, materials)
+    @test expanded.x == facets.x == original.x
+    @test expanded.y == facets.y == original.y
+    @test expanded.elevation == facets.elevation == original.elevation
+    @test expanded.mesh.material_ids == facets.mesh.material_ids == facet_ids
+end
+
 @testitem "Terrain pipeline closes complete PAR and NIR balances" tags=[:voxel, :terrain, :scattering, :fast] begin
     grid = VoxelGrid((0, 0, 0), (1, 1, 2), fill(0.5, 1, 1, 2))
     backend = VoxelCPUBackend(rays_per_voxel=4, g=0.5, traversal=:dda)

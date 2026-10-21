@@ -103,8 +103,9 @@ workflow, including ray diagnostics and cached transport:
   the current ray intensity;
 - `toricity=false`: the ray leaves permanently at the first horizontal boundary.
 
-The backend only configures ray sampling and numerical traversal. Pass the same
-`options` to standalone ray tracing and `voxelplot` to inspect simulation paths.
+The backend configures ray sampling, numerical traversal, and the scalar-grid
+projection coefficient `g` (default `0.5`). Pass the same `options` to standalone
+ray tracing and `voxelplot` to inspect simulation paths.
 
 First-order illumination enters through the top and, for a finite scene, every
 upwind lateral face. Lateral ray weights include the face area projected onto
@@ -288,7 +289,11 @@ for spectral averaging, parameter sources, equations, and limitations.
 `pad_attenuation_PPL_MLE` column and ignores
 additional result columns. Every 0-based grid coordinate must occur exactly
 once. `write_voxel_grid` can write either the grid alone or the grid plus a
-`VoxelFirstOrderResult`.
+`VoxelFirstOrderResult`. The export does not add a `LAD_TYPE` header: a
+`VoxelGrid` stores PAD, not the leaf-angle distribution used to estimate it.
+Record the input inversion assumptions and the simulation's effective `g`
+separately; choosing `g=0.5` does not establish that the source PAD was inverted
+with a spherical distribution.
 
 ```@example voxel
 vox_path = joinpath(mktempdir(), "canopy.vox")

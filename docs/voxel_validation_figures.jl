@@ -146,6 +146,7 @@ function generate()
     profiles, budgets = physical_checks()
     terrain_data = terrain_figure(); physics_figure(profiles, budgets)
     sources = [@__FILE__, joinpath(@__DIR__, "voxel_terrain_3d.jl"),
+        joinpath(ROOT, "ext", "ArchimedLightMakieExt.jl"),
         joinpath(ROOT, "examples", "voxel_tree", "scene.jl"),
         joinpath(ROOT, "examples", "voxel_tree", "tree.vox")]
     append!(sources, filter(path -> endswith(path, ".jl"),

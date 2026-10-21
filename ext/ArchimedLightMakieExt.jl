@@ -225,7 +225,27 @@ end
 
 Makie.documented_attributes(::Type{<:VoxelPlot}) = _VOXELPLOT_ATTRIBUTES
 
-Makie.preferred_axis_type(::VoxelPlot) = Makie.LScene
+Makie.preferred_axis_type(::VoxelPlot) = Makie.Axis3
+
+function Makie.data_limits(plot::VoxelPlot)
+    grid, _ = _voxelplot_grid_terrain(Makie.to_value(plot[:payload]))
+    limits = GeometryBasics.Rect3d(
+        GeometryBasics.Point3d(grid.minimum),
+        GeometryBasics.Vec3d(grid.maximum .- grid.minimum),
+    )
+    # All primitives use a local frame before Float32 GPU conversion. Axis3's
+    # data limits omit child models, so restore their common GIS translation.
+    for child in plot.plots
+        child_limits = Makie.data_limits(child)
+        if all(isfinite, child_limits.origin) && all(isfinite, child_limits.widths)
+            limits = union(limits, GeometryBasics.Rect3d(
+                child_limits.origin + GeometryBasics.Vec3d(grid.minimum),
+                child_limits.widths,
+            ))
+        end
+    end
+    return limits
+end
 
 function _voxelplot_grid_terrain(payload)
     payload isa Tuple && length(payload) == 2 || throw(ArgumentError(
@@ -255,24 +275,24 @@ function _voxelplot_lattice(grid::VoxelGrid)
     xs = range(grid.minimum[1], grid.maximum[1]; length=nx + 1)
     ys = range(grid.minimum[2], grid.maximum[2]; length=ny + 1)
     zs = range(grid.minimum[3], grid.maximum[3]; length=nz + 1)
-    points = GeometryBasics.Point3f[]
+    points = GeometryBasics.Point3d[]
     for y in ys, z in zs
-        push!(points, GeometryBasics.Point3f(first(xs), y, z))
-        push!(points, GeometryBasics.Point3f(last(xs), y, z))
+        push!(points, GeometryBasics.Point3d(first(xs), y, z))
+        push!(points, GeometryBasics.Point3d(last(xs), y, z))
     end
     for x in xs, z in zs
-        push!(points, GeometryBasics.Point3f(x, first(ys), z))
-        push!(points, GeometryBasics.Point3f(x, last(ys), z))
+        push!(points, GeometryBasics.Point3d(x, first(ys), z))
+        push!(points, GeometryBasics.Point3d(x, last(ys), z))
     end
     for x in xs, y in ys
-        push!(points, GeometryBasics.Point3f(x, y, first(zs)))
-        push!(points, GeometryBasics.Point3f(x, y, last(zs)))
+        push!(points, GeometryBasics.Point3d(x, y, first(zs)))
+        push!(points, GeometryBasics.Point3d(x, y, last(zs)))
     end
     return points
 end
 
 _empty_voxel_terrain_mesh() = GeometryBasics.Mesh(
-    GeometryBasics.Point3f[],
+    GeometryBasics.Point3d[],
     GeometryBasics.TriangleFace{Int}[],
 )
 
@@ -280,7 +300,7 @@ function _planar_terrain_mesh(terrain::PlanarTerrain)
     nx, ny = terrain.cells
     dx = (terrain.x_bounds[2] - terrain.x_bounds[1]) / nx
     dy = (terrain.y_bounds[2] - terrain.y_bounds[1]) / ny
-    points = GeometryBasics.Point3f[]
+    points = GeometryBasics.Point3d[]
     faces = GeometryBasics.TriangleFace{Int}[]
     reflectance = Float32[]
     for j in 1:ny, i in 1:nx
@@ -289,10 +309,10 @@ function _planar_terrain_mesh(terrain::PlanarTerrain)
         y0 = terrain.y_bounds[1] + (j - 1) * dy
         y1 = y0 + dy
         base = length(points)
-        push!(points, GeometryBasics.Point3f(x0, y0, terrain.elevation))
-        push!(points, GeometryBasics.Point3f(x1, y0, terrain.elevation))
-        push!(points, GeometryBasics.Point3f(x1, y1, terrain.elevation))
-        push!(points, GeometryBasics.Point3f(x0, y1, terrain.elevation))
+        push!(points, GeometryBasics.Point3d(x0, y0, terrain.elevation))
+        push!(points, GeometryBasics.Point3d(x1, y0, terrain.elevation))
+        push!(points, GeometryBasics.Point3d(x1, y1, terrain.elevation))
+        push!(points, GeometryBasics.Point3d(x0, y1, terrain.elevation))
         push!(faces, GeometryBasics.TriangleFace{Int}(base + 1, base + 2, base + 3))
         push!(faces, GeometryBasics.TriangleFace{Int}(base + 1, base + 3, base + 4))
         patch_id = (j - 1) * nx + i
@@ -303,8 +323,8 @@ function _planar_terrain_mesh(terrain::PlanarTerrain)
 end
 
 function _triangulated_terrain_mesh(terrain::TriangulatedTerrain)
-    points = GeometryBasics.Point3f[
-        GeometryBasics.Point3f(point[1], point[2], point[3]) for point in terrain.vertices
+    points = GeometryBasics.Point3d[
+        GeometryBasics.Point3d(point[1], point[2], point[3]) for point in terrain.vertices
     ]
     faces = GeometryBasics.TriangleFace{Int}[
         GeometryBasics.TriangleFace{Int}(face[1], face[2], face[3]) for face in terrain.triangles
@@ -364,7 +384,7 @@ function _voxelplot_segment_points(grid, origin, direction, segment, toricity::B
             stop[axis] += shift
         end
     end
-    return GeometryBasics.Point3f(start...), GeometryBasics.Point3f(stop...)
+    return GeometryBasics.Point3d(start...), GeometryBasics.Point3d(stop...)
 end
 
 function _voxelplot_ray_geometry(
@@ -380,12 +400,12 @@ function _voxelplot_ray_geometry(
         throw(ArgumentError("voxelplot quadrature must be a VoxelScatteringQuadrature or nothing"))
     diagonal = sqrt(sum((grid.maximum[axis] - grid.minimum[axis])^2 for axis in 1:3))
     ray_paths = VoxelRayPath[]
-    ray_segments = GeometryBasics.Point3f[]
-    hit_points = GeometryBasics.Point3f[]
-    normal_origins = GeometryBasics.Point3f[]
-    normal_directions = GeometryBasics.Vec3f[]
-    reflected_origins = GeometryBasics.Point3f[]
-    reflected_directions = GeometryBasics.Vec3f[]
+    ray_segments = GeometryBasics.Point3d[]
+    hit_points = GeometryBasics.Point3d[]
+    normal_origins = GeometryBasics.Point3d[]
+    normal_directions = GeometryBasics.Vec3d[]
+    reflected_origins = GeometryBasics.Point3d[]
+    reflected_directions = GeometryBasics.Vec3d[]
     reflected_weights = Float32[]
 
     for (index, ray) in enumerate(rays)
@@ -410,10 +430,10 @@ function _voxelplot_ray_geometry(
         end
         hit = path.terrain_hit
         hit === nothing && continue
-        hit_point = GeometryBasics.Point3f(hit.point...)
+        hit_point = GeometryBasics.Point3d(hit.point...)
         push!(hit_points, hit_point)
         push!(normal_origins, hit_point)
-        push!(normal_directions, GeometryBasics.Vec3f(
+        push!(normal_directions, GeometryBasics.Vec3d(
             (diagonal * Float64(normal_length) * hit.normal[axis] for axis in 1:3)...,
         ))
         quadrature === nothing && continue
@@ -423,7 +443,7 @@ function _voxelplot_ray_geometry(
             reflected = quadrature.directions[direction_id]
             scale = diagonal * Float64(reflected_length) * weight / maximum_weight
             push!(reflected_origins, hit_point)
-            push!(reflected_directions, GeometryBasics.Vec3f(
+            push!(reflected_directions, GeometryBasics.Vec3d(
                 (scale * reflected[axis] for axis in 1:3)...,
             ))
             push!(reflected_weights, Float32(weight))
@@ -442,10 +462,16 @@ function _voxelplot_ray_geometry(
 end
 
 function Makie.plot!(plot::VoxelPlot)
-    grid, _ = _voxelplot_grid_terrain(Makie.to_value(plot[:payload]))
-    x = (Float32(grid.minimum[1]), Float32(grid.maximum[1]))
-    y = (Float32(grid.minimum[2]), Float32(grid.maximum[2]))
-    z = (Float32(grid.minimum[3]), Float32(grid.maximum[3]))
+    # Makie's voxel conversion stores bounds as Float32. Keep those local and
+    # carry georeferenced coordinates in its Float64 model translation instead.
+    map!(plot.attributes, :payload, [:voxel_x, :voxel_y, :voxel_z, :voxel_origin]) do payload
+        current_grid, _ = _voxelplot_grid_terrain(payload)
+        (ntuple(axis -> (0.0, current_grid.maximum[axis] - current_grid.minimum[axis]), 3)...,
+         GeometryBasics.Vec3d(current_grid.minimum))
+    end
+    # Each child owns its translation Observable, while the graph shares only
+    # the small origin value. This avoids model mutations in payload callbacks.
+    voxel_transform() = Makie.Transformation(plot; translation=map(identity, plot[:voxel_origin]))
 
     map!(plot.attributes, :payload, [:voxel_pad_full, :voxel_pad_front]) do payload
         current_grid, _ = _voxelplot_grid_terrain(payload)
@@ -484,7 +510,7 @@ function Makie.plot!(plot::VoxelPlot)
         faces = GeometryBasics.faces(terrain_mesh)
         # Empty terrains need no FaceView expansion during Makie conversion.
         face_values = isempty(faces) ? values : GeometryBasics.per_face(values, faces)
-        GeometryBasics.mesh(terrain_mesh; color=face_values)
+        GeometryBasics.mesh(terrain_mesh; pointtype=GeometryBasics.Point3d, color=face_values)
     end
     map!(
         plot.attributes,
@@ -519,11 +545,33 @@ function Makie.plot!(plot::VoxelPlot)
         diagonal * Float64(fraction)
     end
 
+    # Keep diagnostics in original coordinates, but upload every primitive in
+    # the same local frame. Axis3 composes its normalization and this translation
+    # in Float64 before the GPU sees a model matrix or any vertex positions.
+    for name in (:voxel_lattice, :voxel_ray_segments, :voxel_hit_points,
+                 :voxel_normal_origins, :voxel_reflected_origins)
+        map!(plot.attributes, [:payload, name], Symbol(name, :_local)) do payload, points
+            current_grid, _ = _voxelplot_grid_terrain(payload)
+            offset = GeometryBasics.Vec3d(current_grid.minimum)
+            GeometryBasics.Point3d[point - offset for point in points]
+        end
+    end
+    for name in (:voxel_terrain_mesh, :voxel_colored_terrain_mesh)
+        map!(plot.attributes, [:payload, name], Symbol(name, :_local)) do payload, mesh
+            current_grid, _ = _voxelplot_grid_terrain(payload)
+            offset = GeometryBasics.Vec3d(current_grid.minimum)
+            points = GeometryBasics.Point3d[
+                point - offset for point in GeometryBasics.coordinates(mesh)
+            ]
+            GeometryBasics.mesh(mesh; pointtype=GeometryBasics.Point3d, position=points)
+        end
+    end
+
     voxels!(
         plot,
-        x,
-        y,
-        z,
+        plot[:voxel_x],
+        plot[:voxel_y],
+        plot[:voxel_z],
         plot[:voxel_pad_full];
         is_air=plot[:voxel_is_air],
         colormap=plot[:voxel_colormap],
@@ -534,12 +582,13 @@ function Makie.plot!(plot::VoxelPlot)
         transparency=plot[:transparency],
         shading=plot[:shading],
         visible=plot[:voxel_full_visible],
+        transformation=voxel_transform(),
     )
     voxels!(
         plot,
-        x,
-        y,
-        z,
+        plot[:voxel_x],
+        plot[:voxel_y],
+        plot[:voxel_z],
         plot[:voxel_pad_front];
         is_air=plot[:voxel_is_air],
         colormap=plot[:voxel_colormap],
@@ -550,53 +599,59 @@ function Makie.plot!(plot::VoxelPlot)
         transparency=plot[:transparency],
         shading=plot[:shading],
         visible=plot[:voxel_front_visible],
+        transformation=voxel_transform(),
     )
     linesegments!(
         plot,
-        plot[:voxel_lattice];
+        plot[:voxel_lattice_local];
         color=plot[:lattice_color],
         linewidth=plot[:lattice_linewidth],
         transparency=true,
         visible=plot[:show_lattice],
+        transformation=voxel_transform(),
     )
     mesh!(
         plot,
-        plot[:voxel_colored_terrain_mesh];
+        plot[:voxel_colored_terrain_mesh_local];
         colormap=plot[:terrain_colormap],
         colorrange=plot[:terrain_colorrange],
         alpha=plot[:terrain_alpha],
         transparency=plot[:transparency],
         shading=plot[:shading],
         visible=plot[:show_terrain],
+        transformation=voxel_transform(),
     )
     wireframe!(
         plot,
-        plot[:voxel_terrain_mesh];
+        plot[:voxel_terrain_mesh_local];
         color=plot[:terrain_wireframe_color],
         linewidth=plot[:terrain_wireframe_linewidth],
         transparency=true,
         visible=plot[:show_terrain],
+        transformation=voxel_transform(),
     )
     linesegments!(
         plot,
-        plot[:voxel_ray_segments];
+        plot[:voxel_ray_segments_local];
         color=plot[:incoming_color],
         linewidth=plot[:incoming_linewidth],
         transparency=true,
         visible=plot[:show_rays],
+        transformation=voxel_transform(),
     )
     scatter!(
         plot,
-        plot[:voxel_hit_points];
+        plot[:voxel_hit_points_local];
         color=plot[:hit_color],
         markersize=13,
         strokecolor=:white,
         strokewidth=1,
         visible=plot[:show_rays],
+        transformation=voxel_transform(),
     )
     arrows3d!(
         plot,
-        plot[:voxel_reflected_origins],
+        plot[:voxel_reflected_origins_local],
         plot[:voxel_reflected_directions];
         color=plot[:voxel_reflected_weights],
         colormap=plot[:reflected_colormap],
@@ -604,14 +659,16 @@ function Makie.plot!(plot::VoxelPlot)
         markerscale=plot[:voxel_arrow_markerscale],
         transparency=true,
         visible=plot[:show_rays],
+        transformation=voxel_transform(),
     )
     arrows3d!(
         plot,
-        plot[:voxel_normal_origins],
+        plot[:voxel_normal_origins_local],
         plot[:voxel_normal_directions];
         color=plot[:normal_color],
         markerscale=plot[:voxel_arrow_markerscale],
         visible=plot[:show_normals],
+        transformation=voxel_transform(),
     )
     return plot
 end

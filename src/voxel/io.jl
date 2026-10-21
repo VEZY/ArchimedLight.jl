@@ -176,6 +176,8 @@ end
 Write a regular grid in historical `.vox` layout. When `result` is supplied,
 the file also contains first-order PAR/NIR energy (`J voxel⁻¹ step⁻¹`) and
 plant-area-normalized flux (`W m⁻² plant`).
+No leaf-angle distribution metadata is inferred from PAD or the simulation
+projection coefficient: `VoxelGrid` does not store that input provenance.
 """
 function write_voxel_grid(
     path::AbstractString,
@@ -188,7 +190,6 @@ function write_voxel_grid(
         println(io, "#min_corner: ", join(grid.minimum, ' '))
         println(io, "#max_corner: ", join(grid.maximum, ' '))
         println(io, "#split: ", join(size(grid), ' '))
-        println(io, "#LAD_TYPE: Spherical")
         if result === nothing
             println(io, "i j k PAD")
         else

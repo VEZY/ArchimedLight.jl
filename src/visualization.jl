@@ -608,6 +608,9 @@ function lightplot! end
 
 Makie plotting entry point for a [`VoxelGrid`](@ref) and its optional
 [`AbstractVoxelTerrain`](@ref). Load a Makie backend before calling it.
+The default axis is `Axis3`. Rendering uses a local coordinate frame with a
+Float64 translation so small features retain their precision at GIS offsets;
+ray diagnostics retain the original coordinates.
 
 `rays` is a collection of named tuples with `origin` and `direction` fields.
 Each direction must point downward; the extension traces it with
@@ -629,7 +632,8 @@ function voxelplot end
     voxelplot!(parent, grid, [terrain]; rays=(), quadrature=nothing,
                options=LightOptions(toricity=false), kwargs...)
 
-In-place variant of [`voxelplot`](@ref). `parent` may be a Makie `LScene`,
-`Scene`, or another scene-like plotting parent.
+In-place variant of [`voxelplot`](@ref). Prefer a Makie `Axis3` for georeferenced
+coordinates. `LScene` and `Scene` also work with local coordinates, but their
+WebGL camera/model conversion cannot preserve small features at large offsets.
 """
 function voxelplot! end

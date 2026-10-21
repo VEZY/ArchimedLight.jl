@@ -753,6 +753,9 @@ function _compute_voxel_scattering_band(
     end
 
     unresolved = sum(current) + transport_unresolved
+    # The terrain bounce limit can leave energy after foliage orders converge.
+    converged = converged && (unresolved < threshold ||
+                             unresolved <= 64eps(Float64) * max(source_reference, 1.0))
     absorbed_flux = similar(absorbed)
     _voxel_flux_from_energy!(absorbed_flux, absorbed, grid, duration_seconds)
     external = Float64(first_incoming)

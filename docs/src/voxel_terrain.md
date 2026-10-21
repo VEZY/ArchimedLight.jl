@@ -54,6 +54,14 @@ voxel_terrain_app()
     and `terrain_lambertian_weights`; only the displayed ray energies are
     illustrative.
 
+`voxelplot` keeps terrain, ray, and lattice coordinates in double precision.
+Voxel rendering uses local bounds with a shared placement in the original
+coordinate frame, so small cells remain distinct at large projected GIS
+coordinates. The default `Axis3` preserves this placement through WebGL's
+single-precision rendering. For an explicit `LScene` or `Scene`, use local
+coordinates: their camera/model conversion can still lose small features at
+large offsets. The transport and raw ray diagnostics retain the input frame.
+
 ## Construct A Terrain
 
 Soil is opaque in the initial model. Define its band reflectance explicitly;
@@ -249,7 +257,9 @@ distance above the patch to avoid immediate self-intersection.
 
 Soil-to-soil reflection on concave slopes is followed deterministically for up
 to 128 surface bounces. Any remaining numerical tail is retained as unresolved
-energy rather than silently converted to absorption.
+energy rather than silently converted to absorption. It also counts against
+the convergence criterion: `converged=false` when this tail exceeds the
+requested tolerance, even if no foliage scattering order remains.
 
 ## Run The Voxel Pipeline
 
@@ -281,7 +291,7 @@ compatibility aliases in the result containers.
 For each spectral band, the checked terminal invariant is:
 
 ```text
-external incoming + explicit compatibility injection
+external incoming
     == foliage absorption
      + soil absorption
      + unresolved scattering
@@ -324,6 +334,14 @@ constant nearest-cell extension over the outer half-cell. It then applies the
 fixed triangulation convention between those vertices. This preserves every
 authoritative cell-centre elevation while making horizontal coverage exactly
 equal to the raster extent. DTM and canopy voxel resolution may differ.
+
+When `material_ids` has the original raster shape `(ncols, nrows)`, each ID
+applies to that raster cell's full footprint, bounded by its original edges.
+For heterogeneous IDs, the surface is subdivided at those edges without
+changing its piecewise planar elevations. Material boundaries therefore stay
+aligned with the raster rather than shifting to the elevation samples at cell
+centres. Expanded surface-cell matrices and per-facet vectors still address the original
+centre-based triangulation directly.
 
 ### Coordinate Transformation And CRS
 
