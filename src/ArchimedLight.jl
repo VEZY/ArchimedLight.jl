@@ -15,6 +15,9 @@ using KernelAbstractions: @atomic, @index
 import Tables
 import YAML
 import CSV
+import JSON
+import CodecZlib
+import PlyIO
 
 include("types.jl")
 include("io.jl")
@@ -28,11 +31,14 @@ include("voxel/types.jl")
 include("voxel/terrain.jl")
 include("voxel/io.jl")
 include("voxel/terrain_io.jl")
+include("voxel/ply_io.jl")
+include("voxel/point_input.jl")
 include("voxel/traversal_reference.jl")
 include("voxel/traversal_dda.jl")
 include("voxel/interception.jl")
 include("voxel/scattering.jl")
 include("voxel/pipeline.jl")
+include("voxel/vegetation.jl")
 include("attach.jl")
 include("outputs.jl")
 include("plantsimengine.jl")
@@ -63,6 +69,8 @@ export SceneSummary
 export MeteoSummary
 export LightSimulation
 export VoxelGrid
+export VoxelPointInput, VoxelPointComponent
+export VoxelMaterial, VoxelVegetation, VoxelVegetationStepResult, VoxelComponentLight
 export AbstractVoxelTerrain
 export NoVoxelTerrain
 export TerrainHit
@@ -115,6 +123,7 @@ export summarize_scene
 export summarize_meteo
 export run_light
 export read_voxel_grid
+export read_voxel_point_input, read_ply_terrain, voxel_component_values
 export read_voxel_column
 export write_voxel_grid
 export read_aai_grid

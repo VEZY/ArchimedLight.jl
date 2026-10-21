@@ -225,9 +225,10 @@ function _accumulate_voxel_path_transport!(
         index = CartesianIndex(segment.index)
         density = grid.pad[index]
         if density > 0 && backend.g > 0
-            outgoing = incoming * exp(-backend.g * density * segment.length)
-            intercepted[index] += incoming - outgoing
-            incoming = outgoing
+            removed, incoming = _voxel_segment_energy(
+                incoming, backend.g * density * segment.length,
+            )
+            intercepted[index] += removed
         end
         last_index = segment.index
     end

@@ -16,8 +16,10 @@ Depth = 3
 The current [voxel workflow](voxel_interception.md) represents vegetation as plant area density
 (`PAD`) in a regular Cartesian grid. It computes first-order PAR and NIR
 interception with Beer–Lambert attenuation, then optional deterministic
-isotropic multiple scattering with explicit scalar or per-voxel optics. It
-supports a spherical leaf-angle distribution (`G = 0.5`), open or periodic
+isotropic multiple scattering with explicit scalar or per-voxel optics. Merged
+JSONL.gz inputs can supply point-proxy leaf, wood, and unknown-organ components
+per individual, including unattributed vegetation. The solver
+supports constant projection coefficients (spherical `G = 0.5` by default), open or periodic
 horizontal boundaries, continuous planar/height-field/triangle terrain with
 local-normal Lambertian soil reflection, and cached CPU DDA/BVH paths.
 Directional responses and internal transport paths can be reused over a
@@ -25,7 +27,7 @@ meteorological series.
 
 The current implementation deliberately does not infer unsupported physics.
 It does not yet include non-spherical leaf-angle distributions, anisotropic
-leaf scattering, separate vegetation material identities, adaptive grids, or
+leaf scattering, measured geometric component areas, adaptive grids, or
 GPU execution.
 
 Future extensions should preserve four properties of this baseline:
@@ -45,7 +47,7 @@ without considering their shared data requirements.
 | --- | --- | --- | --- |
 | 0 | Harden the CPU transport kernel | Current DDA/reference parity | Allocation-light reference kernel suitable for reuse and porting |
 | 1 | Add GPU execution | Stable matrix-free CPU kernels | Accelerated response construction and scattering without changing results |
-| 2 | Add structural and angular detail | Validated core solver | Multiple components, non-spherical LIDF, and anisotropic scattering |
+| 2 | Add structural and angular detail | Validated core solver | Measured component geometry, non-spherical LIDF, and anisotropic scattering |
 | 3 | Add alternative spatial representations | Stable material and backend interfaces | Point-cloud ingestion, non-uniform grids, or octrees where justified |
 
 The GPU prototype can begin before phase 3 is complete, but the public GPU
@@ -272,28 +274,21 @@ leaf orientation and optical properties.
 The first non-spherical implementation should be validated against analytical
 homogeneous-canopy cases before allowing voxel-specific distributions.
 
-## Multiple Vegetation Components
+## Beyond Point-Proxy Vegetation Components
 
-A single scalar `PAD` field cannot distinguish species, organs, living and dead
-material, or vegetation and woody elements. A future grid may store plant area
-density by component:
+The current [individual/organ workflow](voxel_inputs.md) partitions the total
+PAD using raw point proportions, retains unattributed vegetation, and accepts
+per-individual band optics and constant projection coefficients. Total
+extinction sums across components and intercepted energy is partitioned by
+those extinction contributions.
 
-```text
-PAD[component, i, j, k]
-```
-
-Each component can then define its own:
-
-- PAR and NIR reflectance and transmittance;
-- leaf-angle distribution;
-- scattering phase approximation;
-- output identity for coupling to physiological models.
-
-Within a mixed voxel, total extinction follows the sum of component extinction
-coefficients. Intercepted energy must then be partitioned among components in
-proportion to their contribution to that extinction. Tests should cover empty
-components, identical-component invariance, and mixtures with contrasting
-optical properties.
+Future extensions should distinguish that proxy from independently measured
+component areas, add direction-dependent projection only with an explicit
+angular model, and attach directional phase functions where supported by
+optical measurements. They should preserve identical-component invariance,
+unknown-organ identity, and conservation across attributed and unattributed
+components. A dense voxel-by-individual-by-direction tensor is not required
+for the present sparse mixtures.
 
 ## Dynamic Canopies And Model Coupling
 

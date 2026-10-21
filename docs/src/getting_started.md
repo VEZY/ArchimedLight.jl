@@ -2,6 +2,8 @@
 
 This page is the shortest path to your first light simulation.
 It uses the bundled coffee example from `example_2/`, which is also the source of the image on the home page.
+For plant area density grids and a separate terrain mesh, start with
+[Voxel Modelling](voxel_overview.md).
 Here is how to plot it:
 
 ```@setup getting_started

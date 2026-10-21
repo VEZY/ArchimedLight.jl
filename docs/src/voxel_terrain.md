@@ -149,6 +149,51 @@ soil toward air (positive global z component).
 Generic triangle meshes are non-periodic. Use a periodic height field when the
 same terrain tile must repeat horizontally.
 
+### PLY Terrain Meshes
+
+Load an existing triangulated digital terrain model directly into the same
+internal `TriangulatedTerrain` representation:
+
+```julia
+terrain = read_ply_terrain("bare_earth.ply", soil)
+```
+
+The reader supports PLY 1.0 ASCII and native-endian binary files. Vertex
+properties must include numeric `x`, `y`, and `z`. Each face must contain
+exactly three distinct valid vertex indices in `vertex_indices` or
+`vertex_index`; polygons require deliberate triangulation before import.
+The reader converts zero-based PLY face indices to Julia indices. It preserves
+the declared coordinate precision and ignores colour and stored normals for
+physics: soil reflectance comes from `soil`, and surface normals are computed
+from the triangles. Invalid/non-finite coordinates, degenerate or vertical
+facets, and unsupported binary byte order fail explicitly.
+
+An explicit `TerrainCoordinateTransform` can map the mesh into the voxel
+reference frame:
+
+```julia
+terrain = read_ply_terrain(
+    "bare_earth.ply",
+    soil;
+    transform=dtm_to_voxel,
+    normal_mode=:facet,
+)
+```
+
+The default transform is identity. There is no inferred translation, unit
+conversion, CRS reprojection, or scaling to match the canopy. The affine
+matrix has the same contract as the AAIGrid transform described below.
+Generic PLY terrain is non-periodic; use `LightOptions(toricity=false)`.
+
+!!! note "Import and scene coverage are separate checks"
+    The supplied `quadra1_mnt.ply` has 7,119 vertices and 14,184 triangles,
+    with bounds approximately X=17.03–43.93 m, Y=−36.52–−10.76 m, and
+    Z=−1.62–0.28 m. It covers a smaller area than the full Belinga JSONL grid
+    (X=0–60 m, Y=−53–7 m). Its mesh can be read, but running that full grid
+    with this terrain is rejected for incomplete horizontal coverage. Use
+    an authoritative terrain covering the grid, or prepare a deliberate
+    covered subset; the importer does not extrapolate missing topography.
+
 ## Boundaries And Domain Contract
 
 `NoVoxelTerrain()` is the default and preserves the historical open lower
@@ -367,6 +412,7 @@ terrain_patch_count, terrain_patch_point
 terrain_patch_normal, terrain_patch_material
 soil_optics, terrain_lambertian_weights
 AAIGrid, read_aai_grid, height_field_terrain
+read_ply_terrain
 TerrainCoordinateTransform
 VoxelTerrainSceneInput, VoxelTerrainScene
 read_voxel_column, read_voxel_terrain_scene

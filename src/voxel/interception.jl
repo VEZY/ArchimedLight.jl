@@ -56,6 +56,17 @@ function _voxel_grid_fingerprint(grid::VoxelGrid)
     return UInt(state)
 end
 
+# Keep both weak interception and very small transmission: subtracting either
+# tail from one loses it. Each branch evaluates only one exponential function.
+@inline function _voxel_segment_energy(incoming, optical_depth)
+    if optical_depth < 0.5
+        fraction = -expm1(-optical_depth)
+        return incoming * fraction, incoming * (1 - fraction)
+    end
+    transmission = exp(-optical_depth)
+    return incoming * (1 - transmission), incoming * transmission
+end
+
 function _voxel_path_for_backend(
     grid,
     origin,
@@ -120,10 +131,10 @@ function compute_voxel_direction_response(
             i, j, k = segment.index
             density = grid.pad[i, j, k]
             if density > 0 && backend.g > 0
-                transmission = exp(-backend.g * density * segment.length)
-                outgoing = transmission * incoming
-                interception[i, j, k] += incoming - outgoing
-                incoming = outgoing
+                intercepted, incoming = _voxel_segment_energy(
+                    incoming, backend.g * density * segment.length,
+                )
+                interception[i, j, k] += intercepted
             end
             last_index = segment.index
         end

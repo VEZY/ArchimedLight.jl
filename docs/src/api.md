@@ -144,6 +144,35 @@ PlantGeom.add_ground!(scene; z=0.0, nx=9, ny=9, xy_bounds=nothing, group="paveme
 write_scene(path, scene)
 ```
 
+## Voxel Inputs And Individual/Organ Mixtures
+
+Use the dedicated [Voxel Modelling](voxel_overview.md) section for workflows
+and model assumptions. The existing merged JSONL.gz format is read directly:
+
+```julia
+input = read_voxel_point_input(path; missing_pad=:error)
+leaf = VoxelMaterial(; g=0.5, par_reflectance=0.08, par_transmittance=0.07,
+                     nir_reflectance=0.45, nir_transmittance=0.40)
+vegetation = VoxelVegetation(input; mode=:point_proxy, leaf=leaf,
+                            wood=VoxelMaterial(), unknown=VoxelMaterial(),
+                            individuals=Dict(), identified_area_fraction=nothing)
+result = run_voxel_light_step(vegetation, meteo_row, options; terrain=terrain)
+series = run_voxel_light_series(vegetation, meteo, options; terrain=terrain)
+totals = voxel_component_values(result)
+```
+
+This is a call-shape reference; `path`, forcing, options, and terrain must be
+defined. The mode and default leaf material are explicit. Wood transmittance
+must be zero. `missing_pad=:zero_with_diagnostics` is the opt-in alternative
+for unknown densities. `VoxelVegetationStepResult` keeps the native result in
+`.light`, sparse `VoxelComponentLight` records in `.components`, and the
+original `.missing_pad` mask. Aggregation retains `individual_id=nothing`
+for unattributed vegetation. Energies are joules per step; component
+`plant_area` is proxy area in square metres.
+
+See [Input Files And Individuals](voxel_inputs.md) for an executable example,
+the actual file fields, material overrides, and coverage assumptions.
+
 ## Voxel Terrain API
 
 The voxel workflow has an independent continuous terrain interface. Use
@@ -160,6 +189,15 @@ terrain = height_field_terrain(aai, soil; transform=dtm_to_voxel)
 input = VoxelTerrainSceneInput(voxel_path, dtm_path; dtm_to_voxel=dtm_to_voxel)
 scene = read_voxel_terrain_scene(input, soil)
 ```
+
+An existing triangle PLY is converted directly to the internal terrain mesh:
+
+```julia
+terrain = read_ply_terrain(ply_path, soil; transform=dtm_to_voxel)
+```
+
+The transform defaults to identity. No CRS conversion, translation, or domain
+extension is inferred; triangulated PLY terrain is non-periodic.
 
 See [Voxel Terrain And Soil](voxel_terrain.md) for coordinate, coverage,
 periodicity, `ground_distance`, cache, and energy-balance contracts.

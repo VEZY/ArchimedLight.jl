@@ -6,7 +6,7 @@ The voxel solver separates three processes that are easy to conflate:
    `PAD`, the projection coefficient `G`, and path length;
 2. **scattering** re-emits a fraction of intercepted radiation into new
    directions;
-3. **absorption** is the remaining terminal fraction retained by foliage.
+3. **absorption** is the remaining terminal fraction retained by vegetation.
 
 This distinction matters because intercepted energy can be intercepted again
 after scattering. Total intercepted energy is therefore a transfer diagnostic,
@@ -46,13 +46,24 @@ its optical arrays. Conversely, optical transmittance acts only after plant
 material has intercepted radiation.
 
 `VoxelOpticalProperties` accepts scalar coefficients without allocating dense
-fields, or arrays aligned exactly with `grid.pad`. The first implementation
-uses dense effective coefficients rather than a material-index table. Mixed
-species, senescent foliage, and woody area must therefore be represented by
-effective per-voxel `PAD`, reflectance, and transmittance fields. An
-area-weighted optical mixture is a practical approximation when the components
-share the same geometric projection model; distinct geometry or leaf-angle
-distributions require a richer future representation.
+fields, or arrays aligned exactly with `grid.pad`. For a plain `VoxelGrid`,
+these are effective properties of the material represented in each cell.
+
+The [individual/organ workflow](voxel_inputs.md) instead resolves explicit
+`VoxelMaterial` definitions and component proxy densities. With constant
+component projection coefficients, the existing isotropic solver is reused
+through total extinction and extinction-weighted band optics:
+
+```math
+\omega_{v,b}^{eff}=
+\frac{\sum_c\kappa_{v,c}\omega_{c,b}}{\sum_c\kappa_{v,c}}.
+```
+
+This is exact for the declared homogeneous mixture and constant projection
+model; it does not resolve organ positions or directional phase functions.
+Component interception and absorption are recovered with the same extinction
+weights, rather than by weighting the final absorbed total by area alone.
+See [Interception And Assumptions](theory_voxel_interception.md).
 
 ## Operational Wavebands And Spectral Averaging
 
@@ -177,11 +188,12 @@ horizontal lower-boundary API; it is mutually exclusive with `terrain`.
 
 ## Scope And Limitations
 
-The CPU reference solver supports spherical LIDF, isotropic foliage scattering,
-open or horizontally periodic regular grids, scalar or dense effective optical
-fields, and Lambertian planar, height-field, or triangle terrain. It does not yet model specular
+The CPU reference solver supports constant projection coefficients, isotropic
+vegetation scattering, open or horizontally periodic regular grids, scalar or
+dense effective optical fields, point-proxy individual/organ mixtures, and
+Lambertian planar, height-field, or triangle terrain. It does not yet model specular
 reflection, polarized light, fluorescence, wavelength-resolved transport,
-anisotropic leaf phase functions, separate vegetation material identities, adaptive
+anisotropic leaf phase functions, non-spherical angular leaf distributions, adaptive
 voxels, or GPU execution.
 
 The isotropic assumption uses only ``\rho+\tau`` during redistribution. The

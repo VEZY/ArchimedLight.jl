@@ -1,0 +1,352 @@
+# Voxel Input Files And Individuals
+
+Use the existing merged AMAPVox/individual JSON Lines format directly, as in
+`belinga3_1m_PAD_merged.jsonl.gz`. Each decompressed line contains one JSON
+object: a metadata header followed by voxel records. gzip changes storage
+size, not the data model. No conversion to an ArchimedLight-specific exchange
+schema is required.
+
+```@contents
+Pages = ["voxel_inputs.md"]
+Depth = 3
+```
+
+## Try A Small Reproducible Example
+
+This bundled fixture uses the same format as Belinga but has only six cells.
+Its densities, individuals, and optical values are pedagogical. One PAD value
+is deliberately unknown; zero imputation is selected explicitly to demonstrate
+the preserved diagnostic.
+
+```@example voxel_point_input
+using ArchimedLight
+
+fixture = joinpath(
+    pkgdir(ArchimedLight), "test", "fixtures", "voxel", "point_input", "mixed.jsonl.gz",
+)
+demo_input = read_voxel_point_input(fixture; missing_pad=:zero_with_diagnostics)
+demo_leaf = VoxelMaterial(
+    g=0.5,
+    par_reflectance=0.08, par_transmittance=0.07,
+    nir_reflectance=0.45, nir_transmittance=0.40,
+)
+demo_wood = VoxelMaterial(par_reflectance=0.10, nir_reflectance=0.30)
+demo_vegetation = VoxelVegetation(
+    demo_input;
+    mode=:point_proxy,
+    leaf=demo_leaf,
+    wood=demo_wood,
+    unknown=VoxelMaterial(),
+)
+(grid_size=size(demo_input.grid), missing_pad_cells=count(demo_input.missing_pad))
+```
+
+The following two-triangle PLY covers exactly this fixture's horizontal
+domain. It illustrates terrain input without requiring an external dataset.
+
+```@example voxel_point_input
+demo_ply = joinpath(mktempdir(), "soil.ply")
+write(demo_ply, """
+ply
+format ascii 1.0
+element vertex 4
+property double x
+property double y
+property double z
+element face 2
+property list uchar int vertex_indices
+end_header
+10 -2 0
+13 -2 0
+13 2 0
+10 2 0
+3 0 1 2
+3 0 2 3
+""")
+demo_soil = SoilOpticalProperties(par_reflectance=0.10, nir_reflectance=0.30)
+demo_terrain = read_ply_terrain(demo_ply, demo_soil)
+demo_options = LightOptions(
+    toricity=false, scattering=true, turtle_sectors=6, all_in_turtle=true,
+    scattering_max_iter=30, scattering_stop_ratio=1e-8,
+)
+demo_row = (
+    step_duration=3600.0, Ri_PAR_f=100.0, Ri_NIR_f=50.0,
+    sun_azimuth=180.0, sun_elevation=35.0, direct_fraction=0.5,
+)
+demo_result = run_voxel_light_step(
+    demo_vegetation, demo_row, demo_options;
+    backend=VoxelCPUBackend(rays_per_voxel=4),
+    terrain=demo_terrain,
+)
+voxel_component_values(demo_result)
+```
+
+The output retains wood, unknown organs, and unattributed vegetation
+(`individual_id=nothing`) alongside leaves. Each energy is in joules per
+step; `plant_area` is the equivalent proxy area in square metres.
+
+## Read A Merged JSONL.gz File
+
+```julia
+using ArchimedLight
+
+input = read_voxel_point_input("belinga3_1m_PAD_merged.jsonl.gz")
+```
+
+The reader also accepts an uncompressed `.jsonl`. It retains PAD and
+individual/organ proportions while converting 0-based Cartesian input indices
+to the internal Julia array layout. Historical plain AMAPVox `.vox` files
+remain supported by `read_voxel_grid`; they do not contain the merged
+individual proportions.
+
+The supplied Belinga file contains unknown PAD values. The default
+`missing_pad=:error` prevents treating unknown density as observed empty
+space. For an explicit sensitivity run, choose:
+
+```julia
+input = read_voxel_point_input(
+    "belinga3_1m_PAD_merged.jsonl.gz";
+    missing_pad=:zero_with_diagnostics,
+)
+```
+
+This substitutes zero for transport while retaining a missing-PAD mask in the
+input and results. Report this assumption with any output: the calculation can
+underestimate shading in those cells. It does not alter the source file.
+Omitted voxel records also remain unknown rather than becoming empty space.
+Point counts alone cannot reconstruct a missing PAD value.
+
+## The Existing File Structure
+
+The metadata record uses `record_type="metadata"` and
+`schema_version="1.0"`. The important fields are:
+
+| Field | Meaning |
+| --- | --- |
+| `min_corner` | Lower XYZ corner of the grid |
+| `resolution` | XYZ cell widths |
+| `split` | Number of cells along X, Y, Z |
+| `voxel_indexing` | Exporter's index convention |
+| `point_filter` | Selection applied before computing point fractions |
+| `foliage_classes` | Mapping of class codes to wood, foliage, and unknown |
+| `voxel_source`, `las_source` | Producer's source paths for provenance |
+| `original_amapvox_columns` | Available diagnostics in voxel records |
+
+In the Belinga example, `min_corner` is `[0,-53,-5]`, `resolution` is
+`[1,1,1]`, and `split` is `[60,60,65]`. Coordinates must be supplied in a
+consistent metric reference frame with Z upwards. Source paths are provenance,
+not additional files that the reader opens automatically. The metadata does
+not supply an authoritative CRS or an independent PAD surface convention;
+record that information alongside the simulation when it is known.
+
+The following is a voxel from the supplied file. Additional AMAPVox diagnostic
+columns are omitted from this displayed excerpt:
+
+```json
+{
+  "record_type": "voxel",
+  "i": 19,
+  "j": 25,
+  "k": 6,
+  "amapvox": {
+    "ground_distance": 6.5,
+    "pad_attenuation_PPL_MLE": 0.0026008
+  },
+  "point_count": 7,
+  "trees": [
+    {
+      "tree_id": 132,
+      "point_count": 2,
+      "point_ratio": 0.2857142857143,
+      "foliage_ratio": 1,
+      "wood_ratio": 0,
+      "unknown_ratio": 0
+    },
+    {
+      "tree_id": 129,
+      "point_count": 5,
+      "point_ratio": 0.7142857142857,
+      "foliage_ratio": 1,
+      "wood_ratio": 0,
+      "unknown_ratio": 0
+    }
+  ]
+}
+```
+
+`amapvox.pad_attenuation_PPL_MLE` is the density used by this workflow, in
+``\mathrm{m^2\,m^{-3}}``. Every `(i,j,k)` refers to the cell with lower corner
+`min_corner + (i,j,k) .* resolution`. File indices start at zero; users do not
+need to reproduce the old Java linear ordering in Julia.
+
+`point_ratio` is the individual's fraction of the voxel's retained points.
+`foliage_ratio`, `wood_ratio`, and `unknown_ratio` are conditional fractions
+within that individual. They sum to one within export precision. The reader
+checks counts, ratios, coordinates, and duplicates rather than accepting a
+malformed mixture silently. Small decimal export-rounding differences are
+distinct from substantial count/ratio disagreements.
+
+!!! warning "The fractions describe the filtered points"
+    The example's `point_filter` includes `treeID > 0`. Its `point_count` is
+    therefore not a census of all vegetation returns. The ratios cannot
+    reveal what fraction of total plant area belongs to unlabelled returns,
+    or their leaf/wood composition.
+
+## Build A Point-Proxy Vegetation Model
+
+The file contains observations; optical parameters remain separate. Explicitly
+select `mode=:point_proxy` to acknowledge the assumption that point fractions
+can approximate component area fractions:
+
+```julia
+# Pedagogical optical values; these are not a Belinga calibration.
+leaf = VoxelMaterial(
+    g=0.5,
+    par_reflectance=0.08,
+    par_transmittance=0.07,
+    nir_reflectance=0.45,
+    nir_transmittance=0.40,
+)
+wood = VoxelMaterial(
+    g=0.5,
+    par_reflectance=0.10,
+    nir_reflectance=0.30,
+)
+unknown = VoxelMaterial(g=0.5) # explicit black-material simplification
+
+vegetation = VoxelVegetation(
+    input;
+    mode=:point_proxy,
+    leaf=leaf,
+    wood=wood,
+    unknown=unknown,
+)
+```
+
+`leaf` is required. The material constructor defaults to zero reflectance and
+transmittance, so omitted wood/unknown optics mean black material. They are
+conveniences, not species-independent physical measurements. `g` is a
+constant effective projection coefficient in `(0,1]`. Every band requires
+non-negative reflectance and transmittance whose sum is at most one. Wood
+transmittance must be zero; wood reflectance can be nonzero.
+
+For a `VoxelVegetation` model, change `VoxelMaterial.g` to change physical
+extinction. Leave `VoxelCPUBackend.g` at its default: this scalar is only the
+positive numerical reference used to reuse native transport for the mixture.
+For a plain `VoxelGrid`, the backend's `g` remains its projection coefficient.
+
+Set physical projection coefficients on `VoxelMaterial.g` in this workflow.
+The backend's positive `g` is an internal reference used to reuse the scalar
+transport engine; changing it does not change the mixed model's extinction.
+
+The default point-proxy allocation assigns the entire known PAD to the
+identified individuals wherever their point counts are nonzero. A cell with
+no identified points retains its full PAD as unattributed, unknown-organ
+vegetation. Unknown organs of identified trees retain their tree identity.
+
+If independent information supports a lower attributed fraction, provide
+`identified_area_fraction` as a scalar or grid-shaped array in `[0,1]`:
+
+```julia
+vegetation = VoxelVegetation(
+    input;
+    mode=:point_proxy,
+    leaf=leaf,
+    wood=wood,
+    unknown=unknown,
+    identified_area_fraction=coverage,
+)
+```
+
+Here `coverage` is an explicitly supplied hypothesis, not a value inferred
+from the JSONL point counts. It must be zero where no identified points
+exist. The remainder stays in an unattributed unknown-organ component and
+continues intercepting radiation. See
+[Interception And Assumptions](theory_voxel_interception.md) for the equations
+and scientific limits.
+
+### Parameters Per Individual
+
+The model accepts optical/projection replacements by individual ID, independently
+of species. IDs read from numeric `tree_id` values are represented by strings
+for parameter lookup:
+
+```julia
+vegetation = VoxelVegetation(
+    input;
+    mode=:point_proxy,
+    leaf=leaf,
+    wood=wood,
+    unknown=unknown,
+    individuals=Dict(
+        "132" => (leaf=VoxelMaterial(
+            g=0.5,
+            par_reflectance=0.10,
+            par_transmittance=0.05,
+            nir_reflectance=0.40,
+            nir_transmittance=0.35,
+        ),),
+    ),
+)
+```
+
+An omitted organ keeps its default material. An explicitly supplied
+`VoxelMaterial` replaces that organ's complete material: its omitted numeric
+keywords use the material constructor defaults rather than inheriting from
+the default leaf material. Keep all calibrated coefficients explicit.
+
+## Run With A Separate Terrain
+
+```julia
+soil = SoilOpticalProperties(par_reflectance=0.10, nir_reflectance=0.30)
+terrain = read_ply_terrain("terrain_covering_the_voxel_grid.ply", soil)
+options = LightOptions(toricity=false, scattering=true)
+
+result = run_voxel_light_step(
+    vegetation,
+    meteo_row,
+    options;
+    terrain=terrain,
+)
+```
+
+`meteo_row` follows the same meteorological contract as the
+[in-memory voxel example](voxel_interception.md). PLY vertices must already
+share the grid's coordinate frame, or be transformed explicitly. The solver
+checks terrain/domain compatibility and rejects a terrain with insufficient
+coverage; it does not translate, extend, or invent a ground surface.
+
+!!! warning "The supplied PLY covers only part of the Belinga grid"
+    `quadra1_mnt.ply` spans approximately X=17.03–43.93 m and
+    Y=−36.52–−10.76 m, whereas the full JSONL grid spans X=0–60 m and
+    Y=−53–7 m. Reading that PLY is valid, but using it as the terrain of the
+    complete grid is rejected. Supply a DTM covering the domain or deliberately
+    prepare a covered grid subset. No coordinate shift or automatic padding
+    can supply the missing measured terrain.
+
+The underlying voxel result is available as `result.light`. Component records
+in `result.components` retain their voxel, individual identity, organ, proxy
+plant area, first-order intercepted energy, total intercepted energy, and
+absorbed energy for PAR and NIR. The missing-PAD mask remains available as
+`result.missing_pad`. Use `voxel_component_values(result)` to aggregate
+energies by individual and organ, including unattributed vegetation.
+
+For APAR, select absorbed PAR of the `leaf` records. Wood and unknown-organ
+absorption belongs to the scene energy balance but is not leaf APAR.
+
+`run_voxel_light_series(vegetation, meteo, options; terrain=terrain)` returns
+one mixed result per step and reuses the underlying voxel response and
+scattering caches across the series.
+
+## Inspect Assumptions Before Interpreting Results
+
+Keep the export filter, PAD inversion convention, any unknown-PAD imputation,
+point-to-area assumption, optional attributed fraction, material coefficients,
+terrain transform, and boundary setting with the run. The existing file does
+not supply all those model assumptions. Calibration should not be presented
+as if they were measured by the JSONL export.
+
+For physical equations and comparison with triangle scenes, continue with
+[Interception And Assumptions](theory_voxel_interception.md). For PLY formats,
+coordinate handling, and terrain validation, see
+[Terrain And Soil](voxel_terrain.md).

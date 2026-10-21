@@ -1,10 +1,15 @@
-# Voxel Light Interception And Scattering
+# Run A Voxel Simulation
 
 Use the voxel workflow when vegetation is represented by plant area density
 (`PAD`) in a regular 3D grid rather than by triangles. It reuses ArchimedLight's
 meteorology, sky discretization, and directional irradiances, then applies
 Beer–Lambert attenuation inside each voxel, with optional deterministic
 multiple scattering.
+
+For merged JSONL.gz inputs with per-individual leaf/wood proportions, see
+[Input Files And Individuals](voxel_inputs.md). For the model assumptions and
+their differences from triangle scenes, see
+[Interception And Assumptions](theory_voxel_interception.md).
 
 ```@contents
 Pages = ["voxel_interception.md"]
@@ -128,8 +133,8 @@ For a path of length ``\ell`` through a voxel, the transmitted fraction is
 T = \exp(-G\,PAD\,\ell).
 ```
 
-The initial implementation supports spherical leaf-angle distributions only,
-with `G = 0.5` by default. `VoxelGrid` rejects negative and non-finite `PAD`
+The scalar-grid workflow uses a constant projection coefficient, with the
+spherical leaf-angle assumption `G = 0.5` by default. `VoxelGrid` rejects negative and non-finite `PAD`
 values. A zero-`PAD` voxel intercepts no light and its plant-area-normalized
 flux is reported as zero.
 
@@ -209,7 +214,7 @@ scattered_step = run_voxel_light_step(
 )
 ```
 
-Reflectance and transmittance are leaf-scale fractions of intercepted energy.
+Reflectance and transmittance are material-scale fractions of intercepted energy.
 Their sum is the single-scattering albedo ``\omega``; the foliage absorptance
 is ``1-\omega``. Geometric gaps remain controlled by `PAD` and are not leaf
 transmittance.
@@ -324,14 +329,21 @@ patch material assignment. Optical albedos and soil reflectance
 are applied during iteration rather than baked into geometric paths, so changing
 only optics does not require rebuilding those paths.
 
+For an individual/organ model, a change to component densities or projection
+coefficients changes the equivalent extinction field and therefore invalidates
+attenuated responses. Changing only component band optics preserves those
+paths. The mixed workflow uses the existing cache checks rather than keeping
+a separate transport implementation.
+
 ## Current Limitations
 
 !!! warning
-    The voxel workflow currently supports spherical LIDF, isotropic foliage
-    scattering, effective optical fields on regular Cartesian voxels,
+    The voxel workflow currently supports constant projection coefficients,
+    isotropic vegetation scattering, effective optical fields and
+    point-proxy individual/organ mixtures on regular Cartesian voxels,
     planar/height-field/triangle Lambertian terrain, and CPU execution.
-    Specular or anisotropic scattering, separate vegetation material
-    identities, adaptive grids, wavelength-resolved transport, and GPU
+    Specular or anisotropic scattering, non-spherical angular leaf distributions,
+    adaptive grids, wavelength-resolved transport, and GPU
     execution are not implemented. Internal foliage emission uses the voxel
     centre (or the above-surface part of a terrain-straddling voxel) as a
     deterministic sub-voxel approximation; terrain emission uses the centroid

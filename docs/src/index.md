@@ -75,6 +75,7 @@ The simulation results are grouped by quantity and waveband in `LightBudget`. Wh
 ## Learn More
 
 - [Getting Started](getting_started.md): run your first simulation.
+- [Voxel Modelling](voxel_overview.md): work with PAD grids, individual leaf/wood mixtures, and terrain instead of organ meshes.
 - [File-Based Workflow](tutorial_files.md) and [Interactive Workflow](tutorial_interactive.md): load a scene or build one in memory.
 - [Model Pipeline](theory_pipeline.md) and [Evaluation](evaluation.md): understand the methods and their validation.
 - [PlantSimEngine Coupling](plantsimengine.md): connect light to other plant processes.
