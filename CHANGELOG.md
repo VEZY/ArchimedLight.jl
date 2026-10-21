@@ -15,6 +15,9 @@
   CPU setup-versus-warmed benchmarks.
 - Add facet-based height-field and PLY triangle terrain, affine DTM import,
   spatial soil materials, terrain-aware transport, and energy diagnostics.
+- Report cumulative incident, absorbed and reflected scattering energy per
+  terrain patch, preserving aggregate soil budgets and older positional result
+  constructors.
 - Read merged AMAPVox/individual JSONL and JSONL.gz inputs with explicit
   missing-PAD diagnostics. Allocate PAD conservatively among individuals,
   foliage, wood, and unattributed vegetation in the `point_proxy` workflow.
@@ -23,6 +26,8 @@
 
 ### Fixed
 
+- Keep clipped terrain source-point calculations type-stable without changing
+  their geometry or equations.
 - Respect raster-cell footprints for AAIGrid soil materials without changing
   the interpolated terrain surface or shifting material boundaries by half a
   cell.

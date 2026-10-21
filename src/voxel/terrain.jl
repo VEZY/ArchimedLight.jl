@@ -796,7 +796,10 @@ function _clip_terrain_polygon(polygon, axis::Int, bound::Float64, keep_above::B
         inside = keep_above ? point[axis] >= bound : point[axis] <= bound
         if inside != previous_inside
             fraction = (bound - previous[axis]) / (point[axis] - previous[axis])
-            push!(clipped, ntuple(i -> previous[i] + fraction * (point[i] - previous[i]), 3))
+            intersection = let previous = previous
+                ntuple(i -> previous[i] + fraction * (point[i] - previous[i]), 3)
+            end
+            push!(clipped, intersection)
         end
         inside && push!(clipped, point)
         previous, previous_inside = point, inside
@@ -821,11 +824,16 @@ function _terrain_polygon_centroid(polygon)
         second, third = polygon[i], polygon[i + 1]
         weight = abs((second[1] - first[1]) * (third[2] - first[2]) -
                      (second[2] - first[2]) * (third[1] - first[1]))
-        weighted = ntuple(axis -> weighted[axis] +
-                                  weight * (first[axis] + second[axis] + third[axis]) / 3, 3)
+        weighted = let weighted = weighted
+            ntuple(axis -> weighted[axis] +
+                           weight * (first[axis] + second[axis] + third[axis]) / 3, 3)
+        end
         area += weight
     end
-    return area > 0 ? ntuple(axis -> weighted[axis] / area, 3) : nothing
+    area > 0 || return nothing
+    return let weighted = weighted, area = area
+        ntuple(axis -> weighted[axis] / area, 3)
+    end
 end
 
 function _terrain_patch_emission_point(grid::VoxelGrid, terrain::PlanarTerrain, patch_id::Integer)
@@ -842,7 +850,8 @@ end
 
 function _terrain_patch_emission_point(grid::VoxelGrid, terrain::TriangulatedTerrain, patch_id::Integer)
     patch = _check_terrain_patch(terrain, patch_id)
-    points = [terrain.vertices[vertex] for vertex in terrain.triangles[patch]]
+    v1, v2, v3 = terrain.triangles[patch]
+    points = (terrain.vertices[v1], terrain.vertices[v2], terrain.vertices[v3])
     all(grid.minimum[axis] <= point[axis] <= grid.maximum[axis]
         for point in points for axis in 1:2) && return terrain_patch_point(terrain, patch)
     return _terrain_polygon_centroid(_clip_terrain_xy(points, grid.minimum, grid.maximum))
@@ -881,7 +890,8 @@ function _terrain_exposed_source_point(grid, index, terrain::TriangulatedTerrain
             continue
         end
         for patch in terrain.bvh.leaves[node]
-            points = [terrain.vertices[vertex] for vertex in terrain.triangles[patch]]
+            v1, v2, v3 = terrain.triangles[patch]
+            points = (terrain.vertices[v1], terrain.vertices[v2], terrain.vertices[v3])
             polygon = _clip_terrain_xy(points, lower, upper)
             polygon = _clip_terrain_polygon(polygon, 3, upper[3] - tolerance, false)
             point = _terrain_polygon_centroid(polygon)

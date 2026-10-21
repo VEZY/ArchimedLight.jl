@@ -52,7 +52,7 @@ function scene_mesh(scene)
     return GB.Mesh(points, faces), receiver_ids
 end
 
-function export_view(; directory=joinpath(@__DIR__, "build"),
+function export_view(; directory=joinpath(@__DIR__, "build", "scattering"),
                      reference_path=joinpath(directory, "native_reference.json"),
                      colour_maximum::Real=20000.0)
     reference_text = read(reference_path, String)
@@ -103,8 +103,9 @@ self.onmessage = async event => {
             self.postMessage({type: 'result', values: result.values,
                 solveMilliseconds: result.solveMilliseconds,
                 setupMilliseconds: prepared.preparationMilliseconds + prepared.scenePreparationMilliseconds,
-                skyPreparationMilliseconds: result.skyPreparationMilliseconds,
-                skyPrepared: result.skyPrepared, cacheBefore: result.cacheBefore,
+                responsePreparationMilliseconds: result.responsePreparationMilliseconds,
+                skyPrepared: result.skyPrepared, scatteringPrepared: result.scatteringPrepared,
+                diagnostics: result.diagnostics, cacheBefore: result.cacheBefore,
                 cacheAfter: result.cacheAfter, cache: runtime.cacheStats(),
                 readbackMilliseconds: result.readbackMilliseconds,
                 snapshot: result.snapshot}, [result.values.buffer]);
@@ -135,6 +136,7 @@ self.onmessage = async event => {
             id="voxel-sectors", disabled=true)
         sampling = Bonito.DOM.select((Bonito.DOM.option(string(n); value=string(n)) for n in ray_counts)...;
             id="voxel-sampling", disabled=true)
+        scattering = Bonito.DOM.input(; id="voxel-scattering", type="checkbox", disabled=true)
         status_line_style = "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0"
         status_summary = Bonito.DOM.div("Loading Julia WebAssembly…";
             id="voxel-status-summary", style=status_line_style)
@@ -146,23 +148,25 @@ self.onmessage = async event => {
             style="display:grid;grid-template-rows:1.5em 1.5em;line-height:1.5;height:3em;margin:1em 0")
         page = Bonito.DOM.main(
             Bonito.DOM.h1("Voxel + terrain · live Wasm prototype"),
-            Bonito.DOM.p("Shared Julia first-order PAR calculations, finite scene, black vegetation and soil. Move the hour slider to change the illumination."),
+            Bonito.DOM.p("Shared Julia PAR interception with optional scattering, finite scene and black soil. Move the hour slider to change the illumination."),
             Bonito.DOM.div(Bonito.DOM.label("Hour (UTC)"), hour_slider, hour_label;
                 style="display:grid;grid-template-columns:100px minmax(180px,1fr) 75px;align-items:center;gap:18px;margin-bottom:16px"),
-            Bonito.DOM.div(Bonito.DOM.label("Sky sectors ", sector_menu), Bonito.DOM.label("Rays per voxel ", sampling);
+            Bonito.DOM.div(Bonito.DOM.label("Sky sectors ", sector_menu), Bonito.DOM.label("Rays per voxel ", sampling),
+                Bonito.DOM.label(scattering, " Scattering");
                 style="display:flex;flex-wrap:wrap;gap:22px"),
             status, figure,
             Bonito.DOM.p("Drag to rotate · scroll to zoom · right-drag to pan. Coordinates in metres. Occupied voxels remain visible when unlit."),
             Bonito.DOM.p("15 May 2025 · interpolated Montpellier weather · same weather inputs as the wheat demo"),
             Bonito.DOM.p("The fixed sky is prepared once per sky/sampling setting. Each daylight update traces the moving sun; night needs no ray tracing."),
-            Bonito.DOM.p("The fixed colour scale shows energy per calculation element; voxel and terrain elements have different sizes.");
+            Bonito.DOM.p("Illustrative leaf PAR optics: reflectance 0.08, transmittance 0.07; wood is black. Voxel mixtures use point proportions. Isotropic scattering; these are not calibrated species parameters."),
+            Bonito.DOM.p("The fixed colour scale shows total intercepted energy per voxel and processed incident energy per terrain triangle, including repeated interactions when scattering is enabled. Elements have different sizes.");
             style="font:16px system-ui,sans-serif;max-width:1080px;margin:auto;padding:18px")
         Bonito.on_document_load(session, js"""
         (async () => {
             const status = $(status), statusSummary = $(status_summary), statusDetails = $(status_details);
             const slider = $(hour_slider), hourLabel = $(hour_label);
-            const sectors = $(sector_menu), sampling = $(sampling);
-            const controls = [slider, sectors, sampling], receiverIDs = $(receiver_ids);
+            const sectors = $(sector_menu), sampling = $(sampling), scattering = $(scattering);
+            const controls = [slider, sectors, sampling, scattering], receiverIDs = $(receiver_ids);
             const meteorology = JSON.parse($(weather_literal)), scene = JSON.parse($(scene_literal));
             sampling.value = String($(last(ray_counts)));
             sectors.value = String($(last(sectors)));
@@ -187,7 +191,7 @@ self.onmessage = async event => {
                         + String(minutes % 60).padStart(2, '0');
                 };
                 const fail = error => {
-                    showStatus('Calculation failed: ' + error.message);
+                    showStatus('Calculation failed: ' + error.message, '');
                     status.style.color = '#b91c1c'; state.error = String(error); state.busy = false;
                     state.ready = false; mesh.visible = false;
                     controls.forEach(control => {control.disabled = true;});
@@ -206,9 +210,10 @@ self.onmessage = async event => {
                     if (options.hour !== undefined) slider.value = String(options.hour);
                     if (options.sectors !== undefined) sectors.value = String(options.sectors);
                     if (options.raysPerVoxel !== undefined) sampling.value = String(options.raysPerVoxel);
+                    if (options.scattering !== undefined) scattering.checked = Boolean(options.scattering);
                     updateLabel();
                     const input = {hour:Number(slider.value), sectors:Number(sectors.value),
-                        rays_per_voxel:Number(sampling.value), seconds:$(duration)};
+                        rays_per_voxel:Number(sampling.value), seconds:$(duration), scattering:scattering.checked};
                     return new Promise((resolve,reject) => {
                         if (queued) queued.resolve({superseded:true});
                         queued = {resolve,reject,input}; dispatch();
@@ -231,10 +236,11 @@ self.onmessage = async event => {
                         colours.needsUpdate = true; mesh.visible = true;
                         state.runs++; state.ready = true; state.busy = false;
                         state.solveMilliseconds = message.solveMilliseconds;
-                        state.skyPreparationMilliseconds = message.skyPreparationMilliseconds;
+                        state.responsePreparationMilliseconds = message.responsePreparationMilliseconds;
+                        state.diagnostics = message.diagnostics;
                         state.cache = message.cache;
                         state.options = {hour:current.input.hour, sectors:current.input.sectors,
-                            raysPerVoxel:current.input.rays_per_voxel};
+                            raysPerVoxel:current.input.rays_per_voxel, scattering:current.input.scattering};
                         state.snapshot = message.snapshot;
                         state.geometryStable = mesh.geometry.attributes.positions_transformed_f32c === positionBuffer
                             && mesh.geometry.index === indexBuffer;
@@ -248,22 +254,28 @@ self.onmessage = async event => {
                         status.dataset.cacheBefore = JSON.stringify(message.cacheBefore);
                         status.dataset.cacheAfter = JSON.stringify(message.cacheAfter);
                         status.dataset.solveMilliseconds = String(message.solveMilliseconds);
-                        status.dataset.skyPreparationMilliseconds = String(message.skyPreparationMilliseconds);
+                        status.dataset.responsePreparationMilliseconds = String(message.responsePreparationMilliseconds);
+                        status.dataset.diagnostics = JSON.stringify(message.diagnostics);
                         status.dataset.setupMilliseconds = String(message.setupMilliseconds);
                         status.dataset.readbackMilliseconds = String(message.readbackMilliseconds);
-                        const setupStatus = message.skyPrepared
-                            ? ' · initial sky setup: ' + message.skyPreparationMilliseconds.toFixed(2) + ' ms'
+                        const setupKind = [message.skyPrepared ? 'sky' : '',
+                            message.scatteringPrepared ? 'scattering' : ''].filter(Boolean).join(' + ');
+                        const setupStatus = setupKind
+                            ? ' · initial ' + setupKind + ' setup: ' + message.responsePreparationMilliseconds.toFixed(2) + ' ms'
+                            : '';
+                        const convergenceStatus = current.input.scattering && !message.diagnostics.converged
+                            ? ' · not converged; unresolved: ' + message.diagnostics.unresolved.toExponential(2) + ' J'
                             : '';
                         showStatus('Julia/Wasm live: ' + message.solveMilliseconds.toFixed(2) + ' ms' + setupStatus,
                             'Duration: ' + current.input.seconds + ' s · horizontal PAR: '
                             + message.snapshot[1].toFixed(1) + ' W m⁻² · sun elevation: '
-                            + message.snapshot[4].toFixed(1) + '°');
+                            + message.snapshot[4].toFixed(1) + '°' + convergenceStatus);
                         const completed = current; current = null; completed.resolve(message.values); dispatch();
                     } else if (message.type === 'error') fail(new Error(message.message));
                 };
                 worker.onerror = event => fail(new Error(event.message || 'Worker failed'));
                 slider.addEventListener('input', () => state.run().catch(fail));
-                [sectors, sampling].forEach(control => control.addEventListener('change', () => state.run().catch(fail)));
+                [sectors, sampling, scattering].forEach(control => control.addEventListener('change', () => state.run().catch(fail)));
                 window.addEventListener('beforeunload', () => worker.terminate(), {once:true});
                 worker.postMessage({type:'initialize', bytes:$(wasm), scene, meteorology});
             } catch (error) {

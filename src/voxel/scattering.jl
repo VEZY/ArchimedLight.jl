@@ -15,8 +15,12 @@ function _validate_voxel_scattering_quadrature(quadrature::VoxelScatteringQuadra
     total = 0.0
     for index in eachindex(quadrature.directions)
         direction = _normalise_voxel_transport_direction(quadrature.directions[index])
-        all(isapprox.(direction, quadrature.directions[index]; atol=64eps(Float64), rtol=0)) ||
-            throw(ArgumentError("voxel scattering quadrature directions must be normalized"))
+        for axis in 1:3
+            isapprox(direction[axis], quadrature.directions[index][axis];
+                atol=64eps(Float64), rtol=0) || throw(ArgumentError(
+                "voxel scattering quadrature directions must be normalized",
+            ))
+        end
         weight = Float64(quadrature.weights[index])
         isfinite(weight) && weight >= 0 || throw(ArgumentError(
             "voxel scattering quadrature weights must be finite and non-negative",
@@ -116,9 +120,8 @@ function prepare_voxel_scattering_transport(
     _validate_terrain_for_grid(grid, terrain, options.toricity)
 
     source_paths = Dict{Tuple{Int,Int},VoxelRayPath{Float64}}()
-    for index in CartesianIndices(grid.pad)
+    for (source_id, index) in enumerate(CartesianIndices(grid.pad))
         grid.pad[index] > 0 || continue
-        source_id = LinearIndices(grid.pad)[index]
         origin = _voxel_scattering_source_point(grid, index, terrain)
         origin === nothing && continue
         for direction_index in eachindex(quadrature.directions)
@@ -135,9 +138,8 @@ function prepare_voxel_scattering_transport(
 
     ground_paths = Dict{Tuple{Int,Int},VoxelRayPath{Float64}}()
     nx, ny, _ = size(grid)
-    for j in 1:ny, i in 1:nx
-        ground_id = LinearIndices((nx, ny))[i, j]
-        origin = _voxel_ground_center(grid, i, j)
+    for (ground_id, index) in enumerate(CartesianIndices((nx, ny)))
+        origin = _voxel_ground_center(grid, index[1], index[2])
         for direction_index in eachindex(quadrature.directions)
             quadrature.directions[direction_index][3] > 0 || continue
             ground_paths[(ground_id, direction_index)] = _trace_voxel_transport_ray(
@@ -335,9 +337,32 @@ function _apply_voxel_scattering_transport(
     terrain::AbstractVoxelTerrain=NoVoxelTerrain(),
     initial_terrain_energy::Union{Nothing,AbstractVector{<:Real}}=nothing,
 )
+    return _apply_voxel_scattering_transport(
+        grid, emitted, quadrature, backend, transport_cache,
+        band, ground, initial_ground_energy, terrain, initial_terrain_energy,
+    )
+end
+
+# Internal orders pass nullable source arrays as values, without constructing
+# a new keyword-tuple type when the first-order sources become `nothing`.
+function _apply_voxel_scattering_transport(
+    grid::VoxelGrid,
+    emitted::AbstractArray{<:Real,3},
+    quadrature::VoxelScatteringQuadrature,
+    backend::VoxelCPUBackend,
+    transport_cache::VoxelScatteringTransportCache,
+    band::Symbol,
+    ground::Union{Nothing,VoxelGroundOptics},
+    initial_ground_energy::Union{Nothing,AbstractArray{<:Real,2}},
+    terrain::AbstractVoxelTerrain,
+    initial_terrain_energy::Union{Nothing,AbstractVector{<:Real}},
+)
     intercepted = zeros(Float64, size(grid))
     ground_incident = zeros(Float64, size(grid)[1:2])
     terrain_incident = zeros(Float64, terrain_patch_count(terrain))
+    terrain_incident_total = zeros(Float64, length(terrain_incident))
+    terrain_absorbed = zeros(Float64, length(terrain_incident))
+    terrain_reflected = zeros(Float64, length(terrain_incident))
     if initial_ground_energy !== nothing
         for index in eachindex(initial_ground_energy)
             value = Float64(initial_ground_energy[index])
@@ -363,7 +388,7 @@ function _apply_voxel_scattering_transport(
     escaped_top = 0.0
     escaped_side = 0.0
     emitted_total = 0.0
-    for index in CartesianIndices(grid.pad)
+    for (source_id, index) in enumerate(CartesianIndices(grid.pad))
         energy = Float64(emitted[index])
         isfinite(energy) && energy >= 0 ||
             throw(ArgumentError("emitted voxel energy must be finite and non-negative"))
@@ -371,7 +396,6 @@ function _apply_voxel_scattering_transport(
         grid.pad[index] > 0 ||
             throw(ArgumentError("non-zero scattering energy was assigned to empty voxel $index"))
         emitted_total += energy
-        source_id = LinearIndices(grid.pad)[index]
         haskey(transport_cache.source_paths, (source_id, first(eachindex(quadrature.directions)))) ||
             throw(ArgumentError(
                 "non-zero scattering energy was assigned to fully subterranean voxel $index",
@@ -416,11 +440,9 @@ function _apply_voxel_scattering_transport(
 
         direction_indices, ground_weights = _ground_lambertian_weights(quadrature)
         secondary_ground = zeros(Float64, size(ground_incident))
-        nx, ny = size(ground_incident)
-        for index in CartesianIndices(reflected_by_cell)
+        for (ground_id, index) in enumerate(CartesianIndices(reflected_by_cell))
             reflected = reflected_by_cell[index]
             reflected == 0 && continue
-            ground_id = LinearIndices((nx, ny))[index]
             for (direction_index, weight) in zip(direction_indices, ground_weights)
                 path = transport_cache.ground_paths[(ground_id, direction_index)]
                 escaped = _accumulate_voxel_path_transport!(
@@ -452,6 +474,9 @@ function _apply_voxel_scattering_transport(
                 incident == 0 && continue
                 coefficient = _soil_patch_reflectance(terrain, patch_id, band)
                 reflected = coefficient * incident
+                terrain_incident_total[patch_id] += incident
+                terrain_absorbed[patch_id] += incident - reflected
+                terrain_reflected[patch_id] += reflected
                 ground_absorbed += incident - reflected
                 ground_reflected += reflected
                 reflected == 0 && continue
@@ -499,6 +524,9 @@ function _apply_voxel_scattering_transport(
         escaped_bottom,
         terrain_unresolved,
         residual,
+        terrain_incident_total,
+        terrain_absorbed,
+        terrain_reflected,
     )
 end
 
@@ -602,6 +630,9 @@ function _disabled_voxel_scattering_band(
     ground_absorbed = 0.0
     ground_reflected = 0.0
     escaped_bottom = first_bottom
+    terrain_incident = zeros(Float64, terrain_patch_count(terrain))
+    terrain_absorbed = zeros(Float64, length(terrain_incident))
+    terrain_reflected = zeros(Float64, length(terrain_incident))
     if ground !== nothing
         escaped_bottom = 0.0
         reflectance = _ground_band_field(ground, band)
@@ -618,6 +649,9 @@ function _disabled_voxel_scattering_band(
         for patch_id in eachindex(first_terrain_by_patch)
             incident = first_terrain_by_patch[patch_id]
             reflected = incident * _soil_patch_reflectance(terrain, patch_id, band)
+            terrain_incident[patch_id] = incident
+            terrain_absorbed[patch_id] = incident - reflected
+            terrain_reflected[patch_id] = reflected
             ground_reflected += reflected
             ground_absorbed += incident - reflected
         end
@@ -649,6 +683,9 @@ function _disabled_voxel_scattering_band(
         abs(residual),
         relative,
         Float64[sum(first_energy)],
+        terrain_incident,
+        terrain_absorbed,
+        terrain_reflected,
     )
 end
 
@@ -704,6 +741,9 @@ function _compute_voxel_scattering_band(
     scattered_total = 0.0
     ground_absorbed = 0.0
     ground_reflected = 0.0
+    terrain_incident = zeros(Float64, terrain_patch_count(terrain))
+    terrain_absorbed = zeros(Float64, length(terrain_incident))
+    terrain_reflected = zeros(Float64, length(terrain_incident))
     escaped_top = Float64(first_top)
     escaped_side = Float64(first_side)
     escaped_bottom = ground === nothing && terrain isa NoVoxelTerrain ? Float64(first_bottom) : 0.0
@@ -727,15 +767,18 @@ function _compute_voxel_scattering_band(
             emitted,
             quadrature,
             backend,
-            cache;
-            band=band,
-            ground=ground,
-            initial_ground_energy=iteration == 1 ? initial_ground : nothing,
-            terrain=terrain,
-            initial_terrain_energy=iteration == 1 ? initial_terrain : nothing,
+            cache,
+            band,
+            ground,
+            iteration == 1 ? initial_ground : nothing,
+            terrain,
+            iteration == 1 ? initial_terrain : nothing,
         )
         ground_absorbed += transport.ground_absorbed_energy
         ground_reflected += transport.ground_reflected_energy
+        terrain_incident .+= transport.terrain_incident_energy
+        terrain_absorbed .+= transport.terrain_absorbed_energy
+        terrain_reflected .+= transport.terrain_reflected_energy
         escaped_top += transport.escaped_top_energy
         escaped_side += transport.escaped_side_energy
         escaped_bottom += transport.escaped_bottom_energy
@@ -782,6 +825,9 @@ function _compute_voxel_scattering_band(
         abs(residual),
         relative,
         order_totals,
+        terrain_incident,
+        terrain_absorbed,
+        terrain_reflected,
     )
 end
 

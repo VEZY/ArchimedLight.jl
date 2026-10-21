@@ -111,6 +111,11 @@ end
     @test sum(quadrature.weights[1:2:end]) == 0.5
     @test sum(quadrature.weights[2:2:end]) == 0.5
     @test quadrature.weights == [0.125, 0.125, 0.375, 0.375]
+    @test (@inferred ArchimedLight._validate_voxel_scattering_quadrature(quadrature)) === quadrature
+    for direction in ((0.7, 0.0, 0.8), (0.6, 0.1, 0.8), (0.6, 0.0, 0.9))
+        unnormalized = VoxelScatteringQuadrature([direction], [1.0])
+        @test_throws ArgumentError ArchimedLight._validate_voxel_scattering_quadrature(unnormalized)
+    end
 
     no_sky = ArchimedLight.TurtleGrid([sectors[end]])
     @test_throws ArgumentError prepare_voxel_scattering_quadrature(no_sky)

@@ -10,7 +10,7 @@ function finiteArray(values, name, multiple = 1) {
 }
 
 export function validateScene(scene) {
-    for (const name of ['bounds', 'dims', 'pad', 'vertices', 'triangles',
+    for (const name of ['bounds', 'dims', 'pad', 'par_reflectance', 'par_transmittance', 'vertices', 'triangles',
         'normals', 'bvh_bounds', 'bvh_links', 'bvh_leaves']) {
         const multiple = ['vertices', 'triangles', 'normals'].includes(name) ? 3
             : name === 'bvh_bounds' ? 6 : name === 'bvh_links' ? 2 : 1;
@@ -23,6 +23,11 @@ export function validateScene(scene) {
     const voxelCount = scene.dims.reduce((product, value) => product * value, 1);
     const terrainCount = scene.triangles.length / 3;
     if (scene.pad.length !== voxelCount) throw new Error('PAD length differs from grid dimensions');
+    if (scene.par_reflectance.length !== voxelCount || scene.par_transmittance.length !== voxelCount
+        || scene.par_reflectance.some((value, index) => value < 0 || scene.par_transmittance[index] < 0
+            || value + scene.par_transmittance[index] > 1)) {
+        throw new Error('Expected one valid PAR reflectance/transmittance pair per voxel');
+    }
     if (!scene.triangles.every(index => Number.isInteger(index)
         && index >= 1 && index <= scene.vertices.length / 3)) {
         throw new Error('Terrain triangles must contain valid one-based vertex indices');
@@ -34,7 +39,7 @@ export function validateScene(scene) {
     }
     if (!Number.isInteger(scene.rays_per_voxel) || scene.rays_per_voxel < 1
         || !Number.isFinite(scene.g)) throw new Error('Invalid ray sampling or G parameter');
-    return {voxelCount, terrainCount, outputCount: voxelCount + terrainCount + 4};
+    return {voxelCount, terrainCount, outputCount: voxelCount + terrainCount + 10};
 }
 
 export async function initialize(bytes, scene, meteorology = null) {
@@ -65,13 +70,14 @@ export async function initialize(bytes, scene, meteorology = null) {
     }
     const transportStart = performance.now();
     const bounds = f64(scene.bounds), dims = i32(scene.dims), pad = f64(scene.pad);
+    const parReflectance = f64(scene.par_reflectance), parTransmittance = f64(scene.par_transmittance);
     const vertices = f64(scene.vertices), triangles = i32(scene.triangles);
     const normals = f64(scene.normals), bvhBounds = f64(scene.bvh_bounds);
     const bvhLinks = i32(scene.bvh_links), bvhLeaves = i32(scene.bvh_leaves);
     const transportMilliseconds = performance.now() - transportStart;
     const preparationStart = performance.now();
     const makeData = rayCount => kernel.make_data(bounds, dims, pad, vertices, triangles,
-        rayCount, scene.g, normals, bvhBounds, bvhLinks, bvhLeaves);
+        rayCount, scene.g, normals, bvhBounds, bvhLinks, bvhLeaves, parReflectance, parTransmittance);
     const data = makeData(scene.rays_per_voxel);
     const preparationMilliseconds = performance.now() - preparationStart;
     const sceneStates = new Map([[scene.rays_per_voxel, data]]);
@@ -95,11 +101,17 @@ export async function initialize(bytes, scene, meteorology = null) {
         const weather = f64(meteorology.weather), site = f64(meteorology.site);
         for (const sky of meteorology.skies) {
             finiteArray(sky.sky_up, 'meteorology.skies.sky_up', 3);
+            finiteArray(sky.scattering_directions, 'meteorology.skies.scattering_directions', 3);
+            finiteArray(sky.scattering_weights, 'meteorology.skies.scattering_weights');
             if (!Number.isInteger(sky.sectors) || sky.sectors < 1
-                || sky.sky_up.length !== 3 * sky.sectors || weatherStates.has(sky.sectors)) {
+                || sky.sky_up.length !== 3 * sky.sectors || weatherStates.has(sky.sectors)
+                || sky.scattering_weights.length === 0
+                || sky.scattering_directions.length !== 3 * sky.scattering_weights.length
+                || sky.scattering_weights.some(value => value < 0)) {
                 throw new Error('Invalid or duplicate weather sky quadrature');
             }
-            weatherStates.set(sky.sectors, kernel.make_weather(weather, site, f64(sky.sky_up)));
+            weatherStates.set(sky.sectors, kernel.make_weather(weather, site, f64(sky.sky_up),
+                f64(sky.scattering_directions), f64(sky.scattering_weights)));
         }
         weatherTransportMilliseconds = performance.now() - started;
     }
@@ -123,11 +135,16 @@ export async function initialize(bytes, scene, meteorology = null) {
             throw new Error('Each direction needs a PAR flux and a positive duration');
         }
         const rayCount = reference.rays_per_voxel ?? scene.rays_per_voxel;
+        const scattering = reference.scattering ?? false;
+        if (typeof scattering !== 'boolean' || !weatherStates.has(reference.sectors)) {
+            throw new Error('Explicit forcing requires a boolean scattering option and a prepared sky');
+        }
         const preparedScene = prepareScene(rayCount);
         const started = performance.now();
         const directions = f64(reference.directions), flux = f64(reference.par_flux);
         const preparationMilliseconds = performance.now() - started;
-        return {...preparedScene, directions, flux, seconds: reference.seconds, preparationMilliseconds};
+        return {...preparedScene, weather: weatherStates.get(reference.sectors),
+            directions, flux, seconds: reference.seconds, scattering, preparationMilliseconds};
     }
 
     function prepareHour(reference) {
@@ -137,6 +154,8 @@ export async function initialize(bytes, scene, meteorology = null) {
             throw new Error('Expected an hour between 0 and 24 UTC, positive duration and a prepared sky');
         }
         const rayCount = reference.rays_per_voxel ?? scene.rays_per_voxel;
+        const scattering = reference.scattering ?? false;
+        if (typeof scattering !== 'boolean') throw new Error('Scattering must be a boolean');
         const preparedScene = prepareScene(rayCount);
         const weather = weatherStates.get(reference.sectors);
         const key = `${reference.sectors}:${rayCount}`;
@@ -147,41 +166,48 @@ export async function initialize(bytes, scene, meteorology = null) {
             preparationMilliseconds = performance.now() - started;
         }
         return {...preparedScene, weather, state: hourStates.get(key), hour: reference.hour,
-            seconds: reference.seconds, preparationMilliseconds};
+            seconds: reference.seconds, scattering, preparationMilliseconds};
     }
 
     function readback(result, solveMilliseconds) {
         const readbackStarted = performance.now();
         const values = new Float64Array(counts.outputCount);
         for (let index = 0; index < values.length; index++) values[index] = kernel.get_f64(result, index);
-        return {values, solveMilliseconds, readbackMilliseconds: performance.now() - readbackStarted};
+        const offset = counts.voxelCount + counts.terrainCount;
+        return {values, solveMilliseconds, readbackMilliseconds: performance.now() - readbackStarted,
+            diagnostics: {absorbedVoxel: values[offset + 4], absorbedSoil: values[offset + 5],
+                unresolved: values[offset + 6], iterations: values[offset + 7],
+                converged: values[offset + 8] === 1, scatteringEnabled: values[offset + 9] === 1}};
     }
     function solve(prepared) {
         const started = performance.now();
-        const result = kernel.solve(prepared.data, prepared.directions, prepared.flux, prepared.seconds);
+        const result = kernel.solve(prepared.data, prepared.weather,
+            prepared.directions, prepared.flux, prepared.seconds, prepared.scattering);
         return readback(result, performance.now() - started);
     }
     function solveHour(prepared) {
         const cacheBefore = stateStats(prepared.state);
         const setupStarted = performance.now();
-        const skyPrepared = kernel.prepare_hour(prepared.state, prepared.hour) !== 0;
-        const skyPreparationMilliseconds = performance.now() - setupStarted;
+        kernel.prepare_hour(prepared.state, prepared.hour, prepared.scattering);
+        const responsePreparationMilliseconds = performance.now() - setupStarted;
+        const cachePrepared = stateStats(prepared.state);
         const started = performance.now();
-        const result = kernel.solve_hour_cached(prepared.state, prepared.hour, prepared.seconds);
+        const result = kernel.solve_hour_cached(prepared.state, prepared.hour, prepared.seconds, prepared.scattering);
         const output = readback(result, performance.now() - started);
         const snapshot = kernel.hour_snapshot(prepared.weather, prepared.hour);
         output.snapshot = Array.from({length: 5}, (_, index) => kernel.get_f64(snapshot, index));
-        output.skyPreparationMilliseconds = skyPreparationMilliseconds;
-        output.skyPrepared = skyPrepared;
+        output.responsePreparationMilliseconds = responsePreparationMilliseconds;
+        output.skyPrepared = cachePrepared.skyBuilds !== cacheBefore.skyBuilds;
+        output.scatteringPrepared = cachePrepared.scatteringBuilds !== cacheBefore.scatteringBuilds;
         output.cacheBefore = cacheBefore;
         output.cacheAfter = stateStats(prepared.state);
         return output;
     }
     function stateStats(state) {
         const vector = kernel.state_stats(state);
-        const values = Array.from({length: 5}, (_, index) => kernel.get_f64(vector, index));
+        const values = Array.from({length: 6}, (_, index) => kernel.get_f64(vector, index));
         return {skyBuilds: values[0], sunTraces: values[1], solves: values[2],
-            nightSkips: values[3], skyReady: values[4] !== 0};
+            nightSkips: values[3], skyReady: values[4] !== 0, scatteringBuilds: values[5]};
     }
     function cacheStats() {
         return {sceneStates: sceneStates.size, weatherStates: weatherStates.size,
@@ -202,6 +228,8 @@ export function outputNames({voxelCount, terrainCount}) {
         ...Array.from({length: voxelCount}, (_, index) => `voxel_energy[${index + 1}]`),
         ...Array.from({length: terrainCount}, (_, index) => `terrain_energy[${index + 1}]`),
         'incoming_energy', 'escape_top', 'escape_side', 'escape_bottom',
+        'absorbed_voxel_energy', 'absorbed_soil_energy', 'unresolved_energy',
+        'scattering_iterations', 'scattering_converged', 'scattering_enabled',
     ];
 }
 
@@ -226,8 +254,14 @@ export function compareOutput(values, expected, counts, absoluteTolerance = 1e-9
     }
     const incomingIndex = counts.voxelCount + counts.terrainCount;
     const incoming = values[incomingIndex];
-    let accounted = 0;
-    for (let index = 0; index < values.length; index++) if (index !== incomingIndex) accounted += values[index];
+    if (!Number.isInteger(values[incomingIndex + 7])
+        || ![0, 1].includes(values[incomingIndex + 8]) || ![0, 1].includes(values[incomingIndex + 9])) {
+        throw new Error('Scattering iterations and flags must be integers with boolean flags');
+    }
+    // Displayed interception includes repeated interactions after scattering.
+    // Conservation therefore uses absorption, escapes and unresolved energy.
+    const accounted = values.slice(incomingIndex + 1, incomingIndex + 7)
+        .reduce((total, value) => total + value, 0);
     const balanceError = Math.abs(incoming - accounted);
     if (balanceError > absoluteTolerance + relativeTolerance * Math.abs(incoming)) {
         throw new Error(`PAR balance differs by ${balanceError} J (incoming ${incoming} J)`);

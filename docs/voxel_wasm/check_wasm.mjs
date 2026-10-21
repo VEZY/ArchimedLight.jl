@@ -17,13 +17,13 @@ function argument(name, fallback) {
     return arguments_[index + 1];
 }
 if (arguments_.includes('--help')) {
-    console.log('node check_wasm.mjs [--input build/native_reference.json] [--wasm build/voxel.wasm] [--receipt build/compile_receipt.json] [--report build/wasm_verification.json] [--samples 31] [--warmup 5] [--benchmark-hours 12,18.75]');
+    console.log('node check_wasm.mjs [--input build/scattering/native_reference.json] [--wasm build/scattering/voxel.wasm] [--receipt build/scattering/compile_receipt.json] [--report build/scattering/wasm_verification.json] [--samples 31] [--warmup 5] [--benchmark-hours 12,18.75]');
     process.exit(0);
 }
-const inputPath = path.resolve(directory, argument('--input', 'build/native_reference.json'));
-const wasmPath = path.resolve(directory, argument('--wasm', 'build/voxel.wasm'));
+const inputPath = path.resolve(directory, argument('--input', 'build/scattering/native_reference.json'));
+const wasmPath = path.resolve(directory, argument('--wasm', 'build/scattering/voxel.wasm'));
 const receiptPath = path.resolve(directory, argument('--receipt', path.join(path.dirname(wasmPath), 'compile_receipt.json')));
-const reportPath = path.resolve(directory, argument('--report', 'build/wasm_verification.json'));
+const reportPath = path.resolve(directory, argument('--report', 'build/scattering/wasm_verification.json'));
 const samples = Number(argument('--samples', '31'));
 const warmup = Number(argument('--warmup', '5'));
 const benchmarkHoursArgument = argument('--benchmark-hours', 'all');
@@ -50,8 +50,8 @@ for (const [filename, expectedHash] of Object.entries(receipt.source_sha256 ?? {
         throw new Error(`Compiled source has changed: ${filename}; rebuild the Wasm module`);
     }
 }
-if (reference.schema_version !== 1 || reference.phase !== 'par_first_order_with_terrain') {
-    throw new Error('Expected version 1 PAR first-order voxel/terrain native references');
+if (reference.schema_version !== 2 || reference.phase !== 'par_interception_with_scattering_and_terrain') {
+    throw new Error('Expected version 2 PAR voxel/terrain references with optional scattering');
 }
 if (Object.keys(reference.provenance?.source_sha256 ?? {}).length === 0
     || Object.keys(reference.provenance?.input_sha256 ?? {}).length === 0) {
@@ -85,26 +85,34 @@ function prepare(referenceCase) {
 }
 function solve(prepared, referenceCase) {
     const result = referenceCase.hour === undefined ? runtime.solve(prepared) : runtime.solveHour(prepared);
-    if (referenceCase.hour !== undefined) verifyCacheStep(result);
+    if (referenceCase.hour !== undefined) verifyCacheStep(result, referenceCase.scattering);
     return result;
 }
 function assert(condition, message) {if (!condition) throw new Error(message);}
-function verifyCacheStep(result) {
+function verifyCacheStep(result, scattering) {
     const before = result.cacheBefore, after = result.cacheAfter;
     const night = result.snapshot[1] === 0;
     assert(after.solves === before.solves + 1, 'Each cached call must perform one solve');
     assert(after.skyBuilds === before.skyBuilds + Number(result.skyPrepared),
         'Fixed-sky preparation counter differs from the preparation result');
     assert(after.skyBuilds <= 1, 'Fixed sky was rebuilt for the same scene/sky/sampling state');
+    assert(after.scatteringBuilds === before.scatteringBuilds + Number(result.scatteringPrepared),
+        'Scattering cache preparation counter differs from the preparation result');
+    assert(after.scatteringBuilds <= 1, 'Scattering paths were rebuilt for the same scene/sky/sampling state');
+    assert(result.diagnostics.scatteringEnabled === scattering, 'Stale scattering enabled flag');
     assert(after.nightSkips === before.nightSkips + Number(night), 'Night shortcut counter differs');
     assert(after.sunTraces === before.sunTraces + Number(!night && result.snapshot[4] > 0),
         'Each illuminated solve must retrace its current sun direction');
     if (night) {
-        assert(!result.skyPrepared && result.values.every(value => value === 0),
-            'Night must return zero without preparing a sky response');
+        assert(!result.skyPrepared && !result.scatteringPrepared
+            && result.values.subarray(0, runtime.counts.outputCount - 3).every(value => value === 0)
+            && result.diagnostics.iterations === 0 && result.diagnostics.converged,
+            'Night must return zero energy without preparing any response');
     } else {
         assert(after.skyReady && after.skyBuilds === 1, 'Illuminated solve requires a prepared sky');
+        if (scattering) assert(after.scatteringBuilds === 1, 'Illuminated scattering requires prepared paths');
     }
+    if (!scattering) assert(!result.scatteringPrepared, 'Disabled scattering prepared scattering paths');
 }
 function verifySnapshot(actual, expected) {
     if (expected === undefined) return {};
@@ -130,10 +138,12 @@ function verifyBudget(values, expected) {
         intercepted: sum(values.subarray(0, voxelCount)),
         terrain: sum(values.subarray(voxelCount, offset)),
         escaped_top: values[offset + 1], escaped_side: values[offset + 2],
-        escaped_bottom: values[offset + 3]};
+        escaped_bottom: values[offset + 3], absorbed_voxel: values[offset + 4],
+        absorbed_terrain: values[offset + 5], unresolved: values[offset + 6],
+        iterations: values[offset + 7], converged: values[offset + 8], enabled: values[offset + 9]};
     let maximumError = 0;
     for (const [name, actual] of Object.entries(budget)) {
-        const reference = expected[name];
+        const reference = typeof expected[name] === 'boolean' ? Number(expected[name]) : expected[name];
         if (!Number.isFinite(reference)) throw new Error('Missing finite native budget field: ' + name);
         const error = Math.abs(actual - reference);
         if (error > tolerance.absolute + tolerance.relative * Math.abs(reference)) {
@@ -172,6 +182,7 @@ for (const referenceCase of reference.cases) {
     }
     checks.push({name: referenceCase.name, hour: referenceCase.hour,
         sectors: referenceCase.sectors,
+        scattering: referenceCase.scattering,
         directions: referenceCase.par_flux?.length ?? null,
         rays_per_voxel: referenceCase.rays_per_voxel ?? reference.scene.rays_per_voxel,
         seconds: referenceCase.seconds, ...parity, ...budgetParity, ...snapshotParity,
@@ -179,8 +190,9 @@ for (const referenceCase of reference.cases) {
         scene_preparation_milliseconds: prepared.scenePreparationMilliseconds,
         state_preparation_milliseconds: prepared.preparationMilliseconds,
         first_solve_milliseconds: first.solveMilliseconds,
-        sky_preparation_milliseconds: first.skyPreparationMilliseconds ?? 0,
+        response_preparation_milliseconds: first.responsePreparationMilliseconds ?? 0,
         sky_prepared: first.skyPrepared ?? false,
+        scattering_prepared: first.scatteringPrepared ?? false,
         cache_before: first.cacheBefore, cache_after: first.cacheAfter,
         ...(benchmark ? {
             warmed_solve: timingSummary(solveTimes), readback: timingSummary(readbackTimes)} : {}),
@@ -201,35 +213,43 @@ let lifecycle = null;
 if (reference.meteorology) {
     const fresh = await initialize(bytes, reference.scene, reference.meteorology);
     assert(fresh.cacheStats().hourStates === 0, 'Initialization eagerly created hourly states');
-    const caseAt = (hour, sectors, rays) => {
+    const caseAt = (hour, sectors, rays, scattering = false) => {
         const found = reference.cases.find(candidate => candidate.hour === hour
-            && candidate.sectors === sectors && candidate.rays_per_voxel === rays);
-        if (!found) throw new Error(`Missing lifecycle reference ${hour}/${sectors}/${rays}`);
+            && candidate.sectors === sectors && candidate.rays_per_voxel === rays
+            && candidate.scattering === scattering);
+        if (!found) throw new Error(`Missing lifecycle reference ${hour}/${sectors}/${rays}/${scattering}`);
         return found;
     };
-    const lifecycleReferences = [caseAt(21, 16, 1), caseAt(12, 16, 1),
-        caseAt(18.75, 16, 1), caseAt(12, 16, 1), caseAt(12, 16, 1),
-        caseAt(21, 16, 1), caseAt(12, 16, 4), caseAt(12, 46, 4),
-        caseAt(12, 16, 1), caseAt(21, 46, 16)];
+    const lifecycleReferences = [caseAt(21, 16, 1, true), caseAt(12, 16, 1),
+        caseAt(12, 16, 1, true), caseAt(18.75, 16, 1, true),
+        caseAt(12, 16, 1), caseAt(12, 16, 1, true), caseAt(21, 16, 1, true),
+        caseAt(12, 16, 4), caseAt(12, 46, 4, true), caseAt(12, 16, 1),
+        caseAt(12, 16, 4, true), caseAt(12, 46, 4), caseAt(21, 46, 16, true)];
     const steps = lifecycleReferences.map((referenceCase, index) => {
         const prepared = fresh.prepareHour(referenceCase);
         const before = fresh.cacheStats();
         const result = fresh.solveHour(prepared);
-        verifyCacheStep(result);
+        verifyCacheStep(result, referenceCase.scattering);
         verifySnapshot(result.snapshot, referenceCase.snapshot);
+        verifyBudget(result.values, referenceCase.budget);
         const parity = verify(result.values, referenceCase.expected);
         return {step: index + 1, name: referenceCase.name, ...parity,
-            sky_prepared: result.skyPrepared, cache_before: result.cacheBefore,
+            sky_prepared: result.skyPrepared, scattering_prepared: result.scatteringPrepared,
+            cache_before: result.cacheBefore,
             cache_after: result.cacheAfter, states_before: before.hourStates,
             states_after: fresh.cacheStats().hourStates};
     });
     const first = steps[0], last = steps.at(-1), stats = fresh.cacheStats();
-    assert(first.cache_after.skyBuilds === 0 && !first.cache_after.skyReady,
-        'First night visit built a fixed sky');
-    assert(last.cache_after.skyBuilds === 0 && !last.cache_after.skyReady,
-        'Night with a previously unused configuration built a fixed sky');
-    assert(steps[8].cache_after.skyBuilds === 1 && steps[8].states_after === 3,
+    assert(first.cache_after.skyBuilds === 0 && !first.cache_after.skyReady
+        && first.cache_after.scatteringBuilds === 0, 'First night visit prepared responses');
+    assert(last.cache_after.skyBuilds === 0 && !last.cache_after.skyReady
+        && last.cache_after.scatteringBuilds === 0, 'Night with a previously unused configuration prepared responses');
+    assert(steps[9].cache_after.skyBuilds === 1 && steps[9].states_after === 3,
         'Returning to the initial configuration did not reuse its fixed sky');
+    assert(!steps[2].sky_prepared && steps[2].scattering_prepared
+        && !steps[4].sky_prepared && !steps[4].scattering_prepared
+        && !steps[5].sky_prepared && !steps[5].scattering_prepared,
+        'Off/on/off/on mode changes did not reuse the same sky and scattering caches');
     assert(stats.sceneStates === 3 && stats.weatherStates === 2 && stats.hourStates === 4,
         'Hour changes created excess scene, weather or hourly cache states');
     lifecycle = {passed: true, steps, final_cache: stats};
@@ -239,11 +259,12 @@ if (reference.meteorology) {
     assert(cache.sceneStates === 3 && cache.weatherStates === 2 && cache.hourStates === 6,
         'Expected three geometries, two skies and six reusable hourly states');
     assert(cache.states.every(state => state.skyBuilds === 1), 'Expected one fixed-sky build per configuration');
+    assert(cache.states.every(state => state.scatteringBuilds === 1), 'Expected one scattering-path build per configuration');
 }
 const report = {
     passed: true,
     created_utc: new Date().toISOString(),
-    scope: 'PAR first-order voxel + triangulated terrain; calculations use shared Julia source',
+    scope: 'PAR voxel interception + triangulated terrain, scattering off/on; calculations use shared Julia source',
     engine: {node: process.version, v8: process.versions.v8, platform: process.platform, architecture: process.arch},
     provenance: reference.provenance ?? {},
     compilation: receipt,
@@ -257,9 +278,10 @@ const report = {
     imports: runtime.imports, counts: runtime.counts, tolerance,
     initialization: runtime.timing, warmup_solves_per_benchmark_case: warmup,
     benchmark_hours: benchmarkHours,
-    timing_scope: 'Sky preparation is measured separately on the first nonzero-PAR visit to each configuration. Warmed solve includes current weather, fresh sun tracing and accumulation, without sun-response caching; readback is separate.',
-    cold_sky_preparations: checks.filter(check => check.sky_prepared).map(check => ({
-        name: check.name, milliseconds: check.sky_preparation_milliseconds})),
+    timing_scope: 'Fixed sky and scattering-path preparation are measured separately from live solves on their first nonzero-PAR use per configuration. Warmed solve includes current weather, fresh sun tracing, accumulation and requested iterative scattering, without sun-response caching; readback is separate.',
+    cold_response_preparations: checks.filter(check => check.sky_prepared || check.scattering_prepared).map(check => ({
+        name: check.name, sky: check.sky_prepared, scattering: check.scattering_prepared,
+        milliseconds: check.response_preparation_milliseconds})),
     cache, lifecycle, checks, transitions,
 };
 fs.mkdirSync(path.dirname(reportPath), {recursive: true});
@@ -274,5 +296,5 @@ console.log(JSON.stringify({passed: true, report: reportPath, wasm_bytes: bytes.
         native_cached: check.native_timing?.cached_warm?.median_ms ?? null,
         native_uncached: check.native_timing?.kernel_uncached?.median_ms
             ?? check.native_timing?.kernel?.median_ms ?? null})),
-    cold_sky_preparations: report.cold_sky_preparations,
+    cold_response_preparations: report.cold_response_preparations,
     cache, lifecycle_passed: lifecycle?.passed ?? null}, null, 2));

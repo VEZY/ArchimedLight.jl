@@ -23,23 +23,24 @@ function source_hashes()
     return Dict(relpath(path, root)=>bytes2hex(sha256(read(path))) for path in sort(paths))
 end
 
-function run(; output_directory=joinpath(@__DIR__, "build"))
+function run(; output_directory=joinpath(@__DIR__, "build", "scattering"))
     mkpath(output_directory)
     wasm_path = joinpath(output_directory, "voxel.wasm")
     rm(wasm_path; force=true)
     diagnostics = WasmTarget.WasmDiagnostic[]
     entries = [
-        (VoxelWasmKernel.solve, (VoxelWasmKernel.Data, Vector{Float64}, Vector{Float64}, Float64), "solve"),
+        (VoxelWasmKernel.solve, (VoxelWasmKernel.Data, VoxelWasmKernel.WeatherData,
+            Vector{Float64}, Vector{Float64}, Float64, Bool), "solve"),
         (VoxelWasmKernel.make_weather,
-            (Vector{Float64}, Vector{Float64}, Vector{Float64}), "make_weather"),
+            (Vector{Float64}, Vector{Float64}, Vector{Float64}, Vector{Float64}, Vector{Float64}), "make_weather"),
         (VoxelWasmKernel.solve_hour,
-            (VoxelWasmKernel.Data, VoxelWasmKernel.WeatherData, Float64, Float64), "solve_hour"),
+            (VoxelWasmKernel.Data, VoxelWasmKernel.WeatherData, Float64, Float64, Bool), "solve_hour"),
         (VoxelWasmKernel.make_hour_state,
             (VoxelWasmKernel.Data, VoxelWasmKernel.WeatherData), "make_hour_state"),
         (VoxelWasmKernel.prepare_hour,
-            (VoxelWasmKernel.HourState, Float64), "prepare_hour"),
+            (VoxelWasmKernel.HourState, Float64, Bool), "prepare_hour"),
         (VoxelWasmKernel.solve_hour_cached,
-            (VoxelWasmKernel.HourState, Float64, Float64), "solve_hour_cached"),
+            (VoxelWasmKernel.HourState, Float64, Float64, Bool), "solve_hour_cached"),
         (VoxelWasmKernel.state_stats,
             (VoxelWasmKernel.HourState,), "state_stats"),
         (VoxelWasmKernel.hour_snapshot,
@@ -51,7 +52,8 @@ function run(; output_directory=joinpath(@__DIR__, "build"))
         (VoxelWasmKernel.get_f64, (Vector{Float64}, Int32), "get_f64"),
         (VoxelWasmKernel.make_data,
             (Vector{Float64}, Vector{Int32}, Vector{Float64}, Vector{Float64}, Vector{Int32},
-             Int32, Float64, Vector{Float64}, Vector{Float64}, Vector{Int32}, Vector{Int32}), "make_data"),
+             Int32, Float64, Vector{Float64}, Vector{Float64}, Vector{Int32}, Vector{Int32},
+             Vector{Float64}, Vector{Float64}), "make_data"),
     ]
     record = Dict{String,Any}("started_utc"=>string(now(UTC)),
         "julia"=>string(VERSION), "wasmtarget"=>string(pkgversion(WasmTarget)),

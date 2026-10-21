@@ -288,6 +288,14 @@ Multiple-scattering results expose soil diagnostics through
 `ground_absorbed_energy` and `ground_reflected_energy` field names remain as
 compatibility aliases in the result containers.
 
+Each spectral band also returns `terrain_incident_energy`,
+`terrain_absorbed_energy` and `terrain_reflected_energy`, in J per terrain patch.
+These vectors include the first-order terrain input and cumulative processed
+interactions over foliage orders and soil bounces. Pending energy at the bounce
+limit remains in `unresolved_energy`. Legacy flat ground has empty terrain
+vectors. For a concrete terrain, the per-patch absorbed and reflected sums match
+the corresponding aggregate soil diagnostics.
+
 For each spectral band, the checked terminal invariant is:
 
 ```text

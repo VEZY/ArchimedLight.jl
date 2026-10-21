@@ -439,7 +439,13 @@ struct VoxelScatteringTransportCache{T<:AbstractFloat}
     terrain_patch_count::Int
 end
 
-"""One conservative application of foliage and optional soil transport."""
+"""
+One conservative application of foliage and optional soil transport.
+The `terrain_*_energy` vectors contain cumulative processed interactions in J
+per terrain patch, excluding any pending unresolved transport. They are empty
+for legacy flat ground; the aggregate `ground_*` fields include either soil
+representation.
+"""
 struct VoxelTransportResult{T<:AbstractFloat}
     intercepted_energy::Array{T,3}
     ground_absorbed_energy::T
@@ -449,9 +455,24 @@ struct VoxelTransportResult{T<:AbstractFloat}
     escaped_bottom_energy::T
     unresolved_energy::T
     balance_residual::T
+    terrain_incident_energy::Vector{T}
+    terrain_absorbed_energy::Vector{T}
+    terrain_reflected_energy::Vector{T}
 end
 
-"""Complete iterative scattering result for one spectral band."""
+# Preserve positional construction from before per-patch diagnostics existed.
+VoxelTransportResult(args::Vararg{Any,8}) =
+    VoxelTransportResult(args..., eltype(args[1])[], eltype(args[1])[], eltype(args[1])[])
+VoxelTransportResult{T}(args::Vararg{Any,8}) where {T<:AbstractFloat} =
+    VoxelTransportResult{T}(args..., T[], T[], T[])
+
+"""
+Complete iterative scattering result for one spectral band.
+The `terrain_*_energy` vectors sum processed per-patch interactions over all
+foliage orders and terrain bounces, including the first-order terrain input.
+Incident and reflected energy are internal transfers; absorbed energy is the
+terminal soil contribution to the external energy budget.
+"""
 struct VoxelBandScatteringResult{T<:AbstractFloat}
     added_intercepted_energy::Array{T,3}
     total_intercepted_energy::Array{T,3}
@@ -470,7 +491,15 @@ struct VoxelBandScatteringResult{T<:AbstractFloat}
     absolute_balance_residual::T
     relative_balance_residual::T
     order_intercepted_energy::Vector{T}
+    terrain_incident_energy::Vector{T}
+    terrain_absorbed_energy::Vector{T}
+    terrain_reflected_energy::Vector{T}
 end
+
+VoxelBandScatteringResult(args::Vararg{Any,17}) =
+    VoxelBandScatteringResult(args..., eltype(args[1])[], eltype(args[1])[], eltype(args[1])[])
+VoxelBandScatteringResult{T}(args::Vararg{Any,17}) where {T<:AbstractFloat} =
+    VoxelBandScatteringResult{T}(args..., T[], T[], T[])
 
 """Soil absorption diagnostic (the stored `ground_*` field name is legacy-compatible)."""
 soil_absorbed_energy(result::Union{VoxelTransportResult,VoxelBandScatteringResult}) =
