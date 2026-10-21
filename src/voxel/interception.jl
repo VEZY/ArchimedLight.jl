@@ -18,20 +18,82 @@ _voxel_reference_ray_offsets(grid::VoxelGrid, requested::Integer) =
 
 # Irradiances are horizontal-plane fluxes. Side-face samples therefore carry
 # their projected area relative to one horizontal voxel, including |dxy/dz|.
+struct VoxelIncidentRays{T<:AbstractFloat}
+    minimum::NTuple{3,T}
+    maximum::NTuple{3,T}
+    voxel_size::NTuple{3,T}
+    dimensions::NTuple{3,Int}
+    offsets::Vector{NTuple{2,Float64}}
+    offsets_x::Vector{NTuple{2,Float64}}
+    offsets_y::Vector{NTuple{2,Float64}}
+    weight::Float64
+    weight_x::Float64
+    weight_y::Float64
+    x_face::T
+    y_face::T
+end
+
+Base.IteratorSize(::Type{<:VoxelIncidentRays}) = Base.HasLength()
+Base.IteratorEltype(::Type{<:VoxelIncidentRays}) = Base.HasEltype()
+Base.eltype(::Type{<:VoxelIncidentRays}) = Tuple{NTuple{3,Float64},Float64,Bool}
+
+function Base.length(rays::VoxelIncidentRays)
+    nx, ny, nz = rays.dimensions
+    return length(rays.offsets) * nx * ny + length(rays.offsets_x) * ny * nz +
+           length(rays.offsets_y) * nx * nz
+end
+
+function Base.iterate(rays::VoxelIncidentRays, state::Int=1)
+    state > length(rays) && return nothing
+    lo, hi = rays.minimum, rays.maximum
+    dx, dy, dz = rays.voxel_size
+    nx, ny, nz = rays.dimensions
+    n_top = length(rays.offsets) * nx * ny
+    n_side_x = length(rays.offsets_x) * ny * nz
+    position = state - 1
+    if position < n_top
+        offset_count = length(rays.offsets)
+        offset = rays.offsets[mod(position, offset_count) + 1]
+        cell = div(position, offset_count)
+        i = mod(cell, nx) + 1
+        j = div(cell, nx) + 1
+        origin = (lo[1] + (i - 1) * dx + offset[1],
+                  lo[2] + (j - 1) * dy + offset[2], hi[3])
+        weight, from_side = rays.weight, false
+    elseif position < n_top + n_side_x
+        position -= n_top
+        offset_count = length(rays.offsets_x)
+        offset = rays.offsets_x[mod(position, offset_count) + 1]
+        cell = div(position, offset_count)
+        j = mod(cell, ny) + 1
+        k = div(cell, ny) + 1
+        origin = (rays.x_face, lo[2] + (j - 1) * dy + offset[1],
+                  lo[3] + (k - 1) * dz + offset[2])
+        weight, from_side = rays.weight_x, true
+    else
+        position -= n_top + n_side_x
+        offset_count = length(rays.offsets_y)
+        offset = rays.offsets_y[mod(position, offset_count) + 1]
+        cell = div(position, offset_count)
+        i = mod(cell, nx) + 1
+        k = div(cell, nx) + 1
+        origin = (lo[1] + (i - 1) * dx + offset[1], rays.y_face,
+                  lo[3] + (k - 1) * dz + offset[2])
+        weight, from_side = rays.weight_y, true
+    end
+    point = (Float64(origin[1]), Float64(origin[2]), Float64(origin[3]))
+    return (point, weight, from_side), state + 1
+end
+
 function _voxel_incident_rays(grid::VoxelGrid, direction, requested, toricity)
     lo, hi = grid.minimum, grid.maximum
     dx, dy, dz = grid.voxel_size
     nx, ny, nz = size(grid)
     offsets = _voxel_reference_ray_offsets(grid, requested)
     weight = 1.0 / length(offsets)
-    top = (((lo[1] + (i - 1) * dx + offset[1],
-             lo[2] + (j - 1) * dy + offset[2], hi[3]), weight, false)
-           for offset in offsets, i in 1:nx, j in 1:ny)
-    toricity && return top, length(offsets)
-
-    offsets_x = direction[1] == 0 ? NTuple{2,Float64}[] :
+    offsets_x = toricity || direction[1] == 0 ? NTuple{2,Float64}[] :
                 _voxel_face_ray_offsets(dy, dz, requested)
-    offsets_y = direction[2] == 0 ? NTuple{2,Float64}[] :
+    offsets_y = toricity || direction[2] == 0 ? NTuple{2,Float64}[] :
                 _voxel_face_ray_offsets(dx, dz, requested)
     weight_x = isempty(offsets_x) ? 0.0 :
                abs(direction[1] / direction[3]) * dz / dx / length(offsets_x)
@@ -39,13 +101,10 @@ function _voxel_incident_rays(grid::VoxelGrid, direction, requested, toricity)
                abs(direction[2] / direction[3]) * dz / dy / length(offsets_y)
     x_face = direction[1] > 0 ? lo[1] : hi[1]
     y_face = direction[2] > 0 ? lo[2] : hi[2]
-    side_x = (((x_face, lo[2] + (j - 1) * dy + offset[1],
-                lo[3] + (k - 1) * dz + offset[2]), weight_x, true)
-              for offset in offsets_x, j in 1:ny, k in 1:nz)
-    side_y = (((lo[1] + (i - 1) * dx + offset[1], y_face,
-                lo[3] + (k - 1) * dz + offset[2]), weight_y, true)
-              for offset in offsets_y, i in 1:nx, k in 1:nz)
-    return Iterators.flatten((top, side_x, side_y)), length(offsets)
+    rays = VoxelIncidentRays(lo, hi, grid.voxel_size, (nx, ny, nz), offsets,
+                             offsets_x, offsets_y, weight, weight_x, weight_y,
+                             x_face, y_face)
+    return rays, length(offsets)
 end
 
 function _voxel_grid_fingerprint(grid::VoxelGrid)
@@ -283,6 +342,24 @@ function compute_voxel_first_order(
     _validate_terrain_for_grid(grid, terrain, options.toricity)
     responses = cache === nothing ? prepare_voxel_responses(grid, turtle, backend, terrain; options=options) :
                 _validate_voxel_cache(grid, turtle, backend, terrain, cache; options=options)
+    return _apply_voxel_first_order(
+        grid, responses.responses, fluxes.par, fluxes.nir,
+        Float64(duration_seconds), options.nir_interception, terrain_patch_count(terrain),
+    )
+end
+
+# Typed numerical entry point shared by the ordinary pipeline and compiled
+# adapters. Sky construction, cache validation, and I/O stay with the caller.
+function _apply_voxel_first_order(
+    grid::VoxelGrid,
+    responses::AbstractVector{<:VoxelDirectionResponse},
+    par_fluxes::Vector{Float64},
+    nir_fluxes::Vector{Float64},
+    duration_seconds::Float64,
+    nir_interception::Bool,
+    patch_count::Int,
+)
+    sector_count = length(responses)
     par_energy = zeros(Float64, size(grid))
     nir_energy = zeros(Float64, size(grid))
     area_time = voxel_horizontal_area(grid) * Float64(duration_seconds)
@@ -298,15 +375,15 @@ function compute_voxel_first_order(
     nir_escaped_bottom = 0.0
     par_bottom = zeros(Float64, size(grid)[1:2])
     nir_bottom = zeros(Float64, size(grid)[1:2])
-    par_terrain = zeros(Float64, terrain_patch_count(terrain))
-    nir_terrain = zeros(Float64, terrain_patch_count(terrain))
+    par_terrain = zeros(Float64, patch_count)
+    nir_terrain = zeros(Float64, patch_count)
     par_terrain_incident = 0.0
     nir_terrain_incident = 0.0
 
     for sector_index in 1:sector_count
-        response = responses.responses[sector_index]
-        par_scale = fluxes.par[sector_index] * area_time
-        nir_scale = options.nir_interception ? fluxes.nir[sector_index] * area_time : 0.0
+        response = responses[sector_index]
+        par_scale = par_fluxes[sector_index] * area_time
+        nir_scale = nir_interception ? nir_fluxes[sector_index] * area_time : 0.0
         for index in eachindex(response.interception_fraction)
             fraction = response.interception_fraction[index]
             par_energy[index] += fraction * par_scale

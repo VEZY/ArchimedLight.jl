@@ -554,7 +554,9 @@ function _intersect_triangulated_base(terrain::TriangulatedTerrain, origin, dire
         end
     end
     best_patch == 0 && return nothing
-    point = ntuple(axis -> origin[axis] + best_distance * direction[axis], 3)
+    point = let distance = best_distance
+        ntuple(axis -> origin[axis] + distance * direction[axis], 3)
+    end
     return TerrainHit(
         best_distance,
         point,
