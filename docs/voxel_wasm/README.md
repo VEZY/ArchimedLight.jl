@@ -38,6 +38,22 @@ interpolated forcing tables or light results are sent to the browser.
 The reconstruction omits diffuse twilight once the sun sets
 and does not exactly conserve the original hourly radiation integrals.
 
+The first daylight calculation prepares the fixed-sky directional responses
+inside Wasm. Later hour changes reweight those responses and trace the current
+sun, using the same Julia tracer and accumulator. This follows the wheat
+demo's caching strategy. The cache holds geometric unit-irradiance responses,
+not results for selected hours. Zero-PAR hours return fresh zero outputs without
+tracing or preparing a sky cache.
+
+The current UI retains at most six configurations: two sky resolutions times
+three ray samplings. Returning to a previous setting reuses its sky responses;
+changing the hour never adds a cache entry. Scene arrays, optical parameters
+and quadratures are owned by the runtime and stay fixed. Replacing the scene
+or weather creates new states; in-place mutation after preparation is outside
+this private adapter's contract. The native series uses a general directional
+dictionary cache. This small typed cache avoids dictionary lookup and retention
+of past sun directions while sharing the same numerical calculations.
+
 The 72 comparison cases cover 12 hours, including sunrise, sunset, 19:10 and
 night, with 16/46 sectors and requested sampling of 1/4/16 rays per voxel face.
 The displayed default uses 16 rays per face for a less sparse terrain image.
@@ -102,68 +118,89 @@ VoxelWasmView.export_view()
 
 The command compares all 72 cases, then records 31 warmed timing samples for
 the 12 midday/late-afternoon cases. Omitting `--benchmark-hours` times every
-case. It verifies every sample and revisits midday after night to catch stale
-state. Native preparation uses the same two benchmark hours by default. Scene
-reading/BVH construction, ABI decoding, transport, calculation and readback are
-timed separately. BVH construction happens only in the native preparation stage.
-Native timing uses single evaluations and separates compilation/warm-up.
+case. It verifies every sample, revisits midday after night, and checks cache
+counters through repeated hours and option switches. Native preparation uses
+the same two benchmark hours by default. Scene reading/BVH construction, ABI
+decoding, state creation, first sky preparation, live calculation and readback
+have separate timing scopes. BVH construction happens only in native geometry
+preparation. Native cold samples create a fresh state every time; warmed samples
+retain the fixed sky but retrace the sun every time. Both use `evals=1`, with
+compilation and initial warm-up outside the samples.
 
 Serve `build/` with a static HTTP server to inspect the exported `index.html`.
 The exported page needs a WasmGC-capable browser and no Julia service. Drag to
 rotate, scroll to zoom and right-drag to pan; camera movement does not rerun the
 light calculation.
 
+The status area always reserves two text rows, including while calculating.
+Timing and weather details therefore cannot shift the canvas when an hour
+changes. Long text is ellipsized with its full value available on hover.
+
 ## Validation measured on 21 October 2026
 
-The fresh Julia 1.13.1 suite passed **29,637 assertions**, including 756 checks
-that preserve the previous ray origins, weights and ordering. An additional
-**406 weather checks** passed on 197 snapshots, covering every five-minute UI
-step and the sunrise/night boundaries. The public native pipeline and the
-typed hourly adapter agree exactly on all **72 × 1,092 output values**.
-The emitted Wasm's largest absolute difference was **1.397e-9 J**; all outputs
-passed `1e-9 J + 1e-12 × |reference|`. Its five weather diagnostics differed by
-at most `1.137e-13` in their respective units. The largest summed energy-budget
-residual was `7.544e-8 J`, also within the scaled tolerance.
+The cache update changes only this prototype folder. The production Julia
+sources and package tests are unchanged; the most recent full Julia 1.13.1
+suite passed **29,637 assertions**. Fresh prototype validation passed **330
+cache assertions** and **406 weather assertions** on 197 snapshots. Cache
+regressions cover night before daylight, day/night/day, repeated hours,
+sampling changes, replaced PAD/weather, duration scaling and response ownership.
 
-The Node checker verified all 31 timed repetitions for the 12 benchmark cases
-and the midday → night → midday transition. At **19:10 UTC**, horizontal PAR
-and all 1,092 energy outputs are zero. At 18:45 UTC, horizontal PAR is still
-6.37 W m⁻². Browser checks at 08:25, 12:00, 18:45 and 19:10 also confirmed
-native parity, geometry reuse and updates after moving the slider. Rotation
-and zoom leave the calculation count unchanged.
+The public native pipeline, uncached adapter and cached adapter agree exactly
+on all **72 × 1,092 output values**. The emitted Wasm's maximum absolute error
+remains **1.397e-9 J**, passing `1e-9 J + 1e-12 × |reference|`. Its five weather
+diagnostics differ by at most `1.137e-13` in their respective units. The largest
+summed energy-budget residual is `7.544e-8 J`, within the scaled tolerance.
 
-On the same ARM64 Mac, warmed medians at 12:00 UTC were:
+The Node checker verifies every one of the 31 timed repetitions on 12 benchmark
+cases. Cache counters prove that each configuration builds its sky once and
+that every illuminated update, including a repeated hour, retraces the sun.
+Ten additional lifecycle transitions check night-first visits and option reuse.
+At **19:10 UTC**, all 1,092 energy outputs are zero and neither sky preparation
+nor sun tracing occurs. At 18:45 UTC, horizontal PAR is still 6.37 W m⁻².
+Browser checks also confirm sky reuse, deferred preparation at night, correct
+updates after option changes and unchanged geometry buffers.
 
-| Sky sectors | Rays per voxel face | Native Julia (ms) | Wasm / Node (ms) |
-| ---: | ---: | ---: | ---: |
-| 16 | 1 | 2.22 | 10.75 |
-| 16 | 4 | 8.06 | 42.10 |
-| 16 | 16 | 35.74 | 158.97 |
-| 46 | 1 | 6.72 | 30.00 |
-| 46 | 4 | 25.51 | 113.63 |
-| 46 | 16 | 105.01 | 447.25 |
+Warmed medians at 12:00 UTC on the same ARM64 Mac are:
 
-Both columns time the same uncached weather interpolation, physical solve and
-output packing, excluding geometry preparation, transfer, readback and rendering.
-Native samples use `evals=1`; Node 24.10 uses five warmups and 31 samples.
-Wasm is about 4–5 times slower here, while the coarse settings remain suitable
-for interaction. The default 46-sector, 16-ray midday solve takes about 447 ms
-in Node; its measured p95 is 468 ms. These
-results concern this small scene and engine, rather than a large forest.
+| Sky sectors | Rays per voxel face | Native cached (ms) | Wasm cached (ms) | Previous Wasm uncached (ms) |
+| ---: | ---: | ---: | ---: | ---: |
+| 16 | 1 | 0.159 | 0.917 | 10.75 |
+| 16 | 4 | 0.597 | 3.035 | 42.10 |
+| 16 | 16 | 2.415 | 11.817 | 158.97 |
+| 46 | 1 | 0.184 | 0.862 | 30.00 |
+| 46 | 4 | 0.636 | 3.067 | 113.63 |
+| 46 | 16 | 2.275 | 11.858 | 447.25 |
 
-Native file reading plus normals/BVH preparation took a 3.70 ms median with a
-warmed filesystem. Native ABI decoding took about 0.007 ms. The first Node
-initialization separately took 3.20 ms to compile the Wasm, 1.64 ms to instantiate,
-6.63 ms for scene transport, 2.30 ms for scene decoding and 0.31 ms for weather
-preparation. These first-use measurements have a different timing scope from
-warmed native medians.
+The cached columns are fresh 31-sample measurements. The previous Wasm column
+comes from the preserved pre-cache campaign, with the same scene/input hashes,
+Node 24.10 and V8 version. Both Wasm solve scopes include weather interpolation,
+physical calculation and output packing, and exclude transfer, readback and
+rendering. The cached scope also excludes first sky preparation. Native samples
+use `evals=1`; Node uses five warmups. The current sun is never a cached result.
 
-The numerical module is **537,862 bytes**, produced in 28.9 s in the warmed
-compiler session. Its SHA256 is
-`dcd2b1e7df10b3d90ed8855d24c2e15cc3154bc8768a9552c8e2e4a69bc2b70d`.
-Timing summaries, source/input/environment hashes and native checks are in
-`build/wasm_verification.json`, `build/native_reference.json` and
-`build/compile_receipt.json` after a rebuild.
+At the detailed default, the Wasm median falls from **447.25 to 11.86 ms**
+(about **38× faster**), with a current p95 of **12.33 ms**. The first fixed-sky
+preparation still costs **441.67 ms**, measured on its first visit, and is
+reported separately in the page. Switching back to a prepared setting reuses
+that cache. First-use records are single observations, not 31-sample medians.
+The 24 zero-PAR case solves take 0.003–0.851 ms in this campaign, including
+cold-use effects; they perform no ray tracing.
+
+Contemporary native measurements at the same detailed setting give **110.90 ms
+uncached**, **2.28 ms with a prepared sky**, and **111.72 ms for a fresh state
+plus its first daylight solve**. Those are separate 31-sample measurements.
+Temporary native allocations fall from **224.0 MB to 6.07 MB per update**;
+the remaining allocation is mainly in the current sun's shared traversal.
+These results concern this small scene and engine, rather than a large forest.
+
+The numerical module is **553,680 bytes**, produced in
+74.7 s after restarting the compiler session. Its SHA256 is
+`beba245e03a15a2aa8c14e4c009dc574df8974d9fbad50e8a68f3ebecc2b841c`.
+Timing scopes, cold preparation records, counters and source/input/environment
+hashes are recorded in `build/wasm_verification.json`,
+`build/native_reference.json`, `build/native_verification.json` and
+`build/compile_receipt.json`. The previous campaign is preserved locally under
+`build/before_sky_cache/`; generated files remain ignored.
 
 The package changes are limited to a typed incident-ray iterator, a shared
 first-order accumulator and an immutable binding for the terrain hit-point

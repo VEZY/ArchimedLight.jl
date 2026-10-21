@@ -76,9 +76,13 @@ export async function initialize(bytes, scene, meteorology = null) {
     const preparationMilliseconds = performance.now() - preparationStart;
     const sceneStates = new Map([[scene.rays_per_voxel, data]]);
     const weatherStates = new Map();
+    // A state owns fixed-sky responses for one immutable scene/sampling/sky
+    // combination. Hours and weather weights never become cache keys.
+    const hourStates = new Map();
     let weatherTransportMilliseconds = 0;
     if (meteorology !== null) {
-        for (const name of ['make_weather', 'solve_hour', 'hour_snapshot']) {
+        for (const name of ['make_weather', 'make_hour_state', 'prepare_hour',
+            'solve_hour_cached', 'state_stats', 'hour_snapshot']) {
             if (typeof kernel[name] !== 'function') throw new Error('Missing hourly Wasm export: ' + name);
         }
         finiteArray(meteorology.weather, 'meteorology.weather', 3);
@@ -132,9 +136,18 @@ export async function initialize(bytes, scene, meteorology = null) {
             || !weatherStates.has(reference.sectors)) {
             throw new Error('Expected an hour between 0 and 24 UTC, positive duration and a prepared sky');
         }
-        return {...prepareScene(reference.rays_per_voxel ?? scene.rays_per_voxel),
-            weather: weatherStates.get(reference.sectors), hour: reference.hour,
-            seconds: reference.seconds, preparationMilliseconds: 0};
+        const rayCount = reference.rays_per_voxel ?? scene.rays_per_voxel;
+        const preparedScene = prepareScene(rayCount);
+        const weather = weatherStates.get(reference.sectors);
+        const key = `${reference.sectors}:${rayCount}`;
+        let preparationMilliseconds = 0;
+        if (!hourStates.has(key)) {
+            const started = performance.now();
+            hourStates.set(key, kernel.make_hour_state(preparedScene.data, weather));
+            preparationMilliseconds = performance.now() - started;
+        }
+        return {...preparedScene, weather, state: hourStates.get(key), hour: reference.hour,
+            seconds: reference.seconds, preparationMilliseconds};
     }
 
     function readback(result, solveMilliseconds) {
@@ -149,14 +162,33 @@ export async function initialize(bytes, scene, meteorology = null) {
         return readback(result, performance.now() - started);
     }
     function solveHour(prepared) {
+        const cacheBefore = stateStats(prepared.state);
+        const setupStarted = performance.now();
+        const skyPrepared = kernel.prepare_hour(prepared.state, prepared.hour) !== 0;
+        const skyPreparationMilliseconds = performance.now() - setupStarted;
         const started = performance.now();
-        const result = kernel.solve_hour(prepared.data, prepared.weather, prepared.hour, prepared.seconds);
+        const result = kernel.solve_hour_cached(prepared.state, prepared.hour, prepared.seconds);
         const output = readback(result, performance.now() - started);
         const snapshot = kernel.hour_snapshot(prepared.weather, prepared.hour);
         output.snapshot = Array.from({length: 5}, (_, index) => kernel.get_f64(snapshot, index));
+        output.skyPreparationMilliseconds = skyPreparationMilliseconds;
+        output.skyPrepared = skyPrepared;
+        output.cacheBefore = cacheBefore;
+        output.cacheAfter = stateStats(prepared.state);
         return output;
     }
-    return {prepareCase, prepareHour, solve, solveHour, counts, imports, timing: {
+    function stateStats(state) {
+        const vector = kernel.state_stats(state);
+        const values = Array.from({length: 5}, (_, index) => kernel.get_f64(vector, index));
+        return {skyBuilds: values[0], sunTraces: values[1], solves: values[2],
+            nightSkips: values[3], skyReady: values[4] !== 0};
+    }
+    function cacheStats() {
+        return {sceneStates: sceneStates.size, weatherStates: weatherStates.size,
+            hourStates: hourStates.size,
+            states: Array.from(hourStates, ([key, state]) => ({key, ...stateStats(state)}))};
+    }
+    return {prepareCase, prepareHour, solve, solveHour, cacheStats, counts, imports, timing: {
         compile_milliseconds: compileMilliseconds,
         instantiate_milliseconds: instantiateMilliseconds,
         scene_transport_milliseconds: transportMilliseconds,

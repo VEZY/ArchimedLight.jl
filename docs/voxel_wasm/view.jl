@@ -73,6 +73,7 @@ function export_view(; directory=joinpath(@__DIR__, "build"),
         sort!(String[case.name for case in verification.checks]) ||
         error("The verified case names differ from the native references")
     length(verification.transitions) == 3 || error("Missing Wasm forcing transition checks")
+    verification.lifecycle.passed === true || error("Missing fixed-sky cache lifecycle checks")
     mesh, receiver_ids = scene_mesh(reference.scene)
     output_count = Int(reference.abi.output_length)
     # Deliberately exclude expected/native outputs and directional forcing
@@ -102,6 +103,9 @@ self.onmessage = async event => {
             self.postMessage({type: 'result', values: result.values,
                 solveMilliseconds: result.solveMilliseconds,
                 setupMilliseconds: prepared.preparationMilliseconds + prepared.scenePreparationMilliseconds,
+                skyPreparationMilliseconds: result.skyPreparationMilliseconds,
+                skyPrepared: result.skyPrepared, cacheBefore: result.cacheBefore,
+                cacheAfter: result.cacheAfter, cache: runtime.cacheStats(),
                 readbackMilliseconds: result.readbackMilliseconds,
                 snapshot: result.snapshot}, [result.values.buffer]);
         }
@@ -131,7 +135,15 @@ self.onmessage = async event => {
             id="voxel-sectors", disabled=true)
         sampling = Bonito.DOM.select((Bonito.DOM.option(string(n); value=string(n)) for n in ray_counts)...;
             id="voxel-sampling", disabled=true)
-        status = Bonito.DOM.p("Loading Julia WebAssembly…"; id="voxel-status")
+        status_line_style = "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0"
+        status_summary = Bonito.DOM.div("Loading Julia WebAssembly…";
+            id="voxel-status-summary", style=status_line_style)
+        status_details = Bonito.DOM.div("Duration: $(duration) s";
+            id="voxel-status-details", style=status_line_style)
+        # Reserve both lines during loading, calculation and completed states,
+        # so changing the status never shifts the WebGL canvas or its camera.
+        status = Bonito.DOM.div(status_summary, status_details; id="voxel-status",
+            style="display:grid;grid-template-rows:1.5em 1.5em;line-height:1.5;height:3em;margin:1em 0")
         page = Bonito.DOM.main(
             Bonito.DOM.h1("Voxel + terrain · live Wasm prototype"),
             Bonito.DOM.p("Shared Julia first-order PAR calculations, finite scene, black vegetation and soil. Move the hour slider to change the illumination."),
@@ -142,11 +154,13 @@ self.onmessage = async event => {
             status, figure,
             Bonito.DOM.p("Drag to rotate · scroll to zoom · right-drag to pan. Coordinates in metres. Occupied voxels remain visible when unlit."),
             Bonito.DOM.p("15 May 2025 · interpolated Montpellier weather · same weather inputs as the wheat demo"),
+            Bonito.DOM.p("The fixed sky is prepared once per sky/sampling setting. Each daylight update traces the moving sun; night needs no ray tracing."),
             Bonito.DOM.p("The fixed colour scale shows energy per calculation element; voxel and terrain elements have different sizes.");
             style="font:16px system-ui,sans-serif;max-width:1080px;margin:auto;padding:18px")
         Bonito.on_document_load(session, js"""
         (async () => {
-            const status = $(status), slider = $(hour_slider), hourLabel = $(hour_label);
+            const status = $(status), statusSummary = $(status_summary), statusDetails = $(status_details);
+            const slider = $(hour_slider), hourLabel = $(hour_label);
             const sectors = $(sector_menu), sampling = $(sampling);
             const controls = [slider, sectors, sampling], receiverIDs = $(receiver_ids);
             const meteorology = JSON.parse($(weather_literal)), scene = JSON.parse($(scene_literal));
@@ -161,13 +175,19 @@ self.onmessage = async event => {
                 const indexBuffer = mesh.geometry.index;
                 const state = {ready:false, busy:true, runs:0, values:new Float64Array($(output_count))};
                 let current = null, queued = null, workerReady = false;
+                const showStatus = (summary, details) => {
+                    statusSummary.textContent = summary;
+                    if (details !== undefined) statusDetails.textContent = details;
+                    statusSummary.title = statusSummary.textContent;
+                    statusDetails.title = statusDetails.textContent;
+                };
                 const updateLabel = () => {
                     const minutes = Math.round(60 * Number(slider.value));
                     hourLabel.textContent = String(Math.floor(minutes / 60)).padStart(2, '0') + ':'
                         + String(minutes % 60).padStart(2, '0');
                 };
                 const fail = error => {
-                    status.textContent = 'Calculation failed: ' + error.message;
+                    showStatus('Calculation failed: ' + error.message);
                     status.style.color = '#b91c1c'; state.error = String(error); state.busy = false;
                     state.ready = false; mesh.visible = false;
                     controls.forEach(control => {control.disabled = true;});
@@ -178,7 +198,7 @@ self.onmessage = async event => {
                 const dispatch = () => {
                     if (!workerReady || current || !queued) return;
                     current = queued; queued = null; state.busy = true;
-                    status.textContent = 'Calculating in Julia WebAssembly…';
+                    showStatus('Calculating in Julia WebAssembly…');
                     worker.postMessage({type:'calculate', input:current.input});
                 };
                 state.run = (options = {}) => {
@@ -211,6 +231,8 @@ self.onmessage = async event => {
                         colours.needsUpdate = true; mesh.visible = true;
                         state.runs++; state.ready = true; state.busy = false;
                         state.solveMilliseconds = message.solveMilliseconds;
+                        state.skyPreparationMilliseconds = message.skyPreparationMilliseconds;
+                        state.cache = message.cache;
                         state.options = {hour:current.input.hour, sectors:current.input.sectors,
                             raysPerVoxel:current.input.rays_per_voxel};
                         state.snapshot = message.snapshot;
@@ -222,10 +244,20 @@ self.onmessage = async event => {
                         status.dataset.hour = String(current.input.hour);
                         status.dataset.options = JSON.stringify(state.options);
                         status.dataset.snapshot = JSON.stringify(message.snapshot);
-                        status.textContent = 'Julia/Wasm: ' + message.solveMilliseconds.toFixed(2) + ' ms · setup: '
-                            + message.setupMilliseconds.toFixed(2) + ' ms · duration: '
-                            + current.input.seconds + ' s · horizontal PAR: ' + message.snapshot[1].toFixed(1)
-                            + ' W m⁻² · sun elevation: ' + message.snapshot[4].toFixed(1) + '°';
+                        status.dataset.cache = JSON.stringify(message.cache);
+                        status.dataset.cacheBefore = JSON.stringify(message.cacheBefore);
+                        status.dataset.cacheAfter = JSON.stringify(message.cacheAfter);
+                        status.dataset.solveMilliseconds = String(message.solveMilliseconds);
+                        status.dataset.skyPreparationMilliseconds = String(message.skyPreparationMilliseconds);
+                        status.dataset.setupMilliseconds = String(message.setupMilliseconds);
+                        status.dataset.readbackMilliseconds = String(message.readbackMilliseconds);
+                        const setupStatus = message.skyPrepared
+                            ? ' · initial sky setup: ' + message.skyPreparationMilliseconds.toFixed(2) + ' ms'
+                            : '';
+                        showStatus('Julia/Wasm live: ' + message.solveMilliseconds.toFixed(2) + ' ms' + setupStatus,
+                            'Duration: ' + current.input.seconds + ' s · horizontal PAR: '
+                            + message.snapshot[1].toFixed(1) + ' W m⁻² · sun elevation: '
+                            + message.snapshot[4].toFixed(1) + '°');
                         const completed = current; current = null; completed.resolve(message.values); dispatch();
                     } else if (message.type === 'error') fail(new Error(message.message));
                 };
@@ -235,7 +267,8 @@ self.onmessage = async event => {
                 window.addEventListener('beforeunload', () => worker.terminate(), {once:true});
                 worker.postMessage({type:'initialize', bytes:$(wasm), scene, meteorology});
             } catch (error) {
-                status.textContent = 'Initialization failed: ' + error.message;
+                statusSummary.textContent = 'Initialization failed: ' + error.message;
+                statusSummary.title = statusSummary.textContent;
                 window.voxelLightError = String(error.stack || error);
                 if (worker) worker.terminate();
             }

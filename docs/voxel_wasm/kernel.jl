@@ -21,6 +21,53 @@ struct WeatherData
     sky_up::Vector{AL.StaticArrays.SVector{3,Float64}}
 end
 
+"""One immutable scene/weather configuration, with its fixed-sky responses."""
+mutable struct HourState
+    data::Data
+    weather::WeatherData
+    responses::Vector{AL.VoxelDirectionResponse{Float64}}
+    par::Vector{Float64}
+    nir::Vector{Float64}
+    sky_ready::Bool
+    sky_builds::Int
+    sun_traces::Int
+    solves::Int
+    night_skips::Int
+end
+
+function make_hour_state(data::Data, weather::WeatherData)
+    n = length(weather.sky_up)
+    return HourState(data, weather,
+        Vector{AL.VoxelDirectionResponse{Float64}}(undef, n),
+        zeros(Float64, n), zeros(Float64, n), false, 0, 0, 0, 0)
+end
+
+# The browser owns a separate state for each sky/sampling configuration. Its
+# geometry, optics and quadrature stay fixed; changing only the clock never
+# invalidates these responses. The moving sun is kept in one replaceable slot.
+function prepare_sky!(state::HourState)
+    state.sky_ready && return Int32(0)
+    @inbounds for i in eachindex(state.weather.sky_up)
+        direction = state.weather.sky_up[i]
+        state.responses[i] = direction_response(state.data,
+            -direction[1], -direction[2], -direction[3])
+    end
+    state.sky_ready = true
+    state.sky_builds += 1
+    return Int32(1)
+end
+
+"""Prepare a daylight configuration separately from the live solve timing."""
+function prepare_hour(state::HourState, hour::Float64)
+    forcing = weather_snapshot(state.weather, hour)
+    forcing.RI_PAR_f == 0.0 && return Int32(0)
+    return prepare_sky!(state)
+end
+
+"""Counts: whole-sky builds, sun traces, solves, zero-PAR skips, sky ready."""
+state_stats(state::HourState) = Float64[state.sky_builds, state.sun_traces,
+    state.solves, state.night_skips, state.sky_ready]
+
 function make_weather(weather::Vector{Float64}, site::Vector{Float64},
                       sky_up_flat::Vector{Float64})
     columns = (weather[1:3:end], weather[2:3:end], weather[3:3:end])
@@ -127,6 +174,10 @@ function solve(data::Data, propagation::Vector{Float64}, par::Vector{Float64}, s
     end
     result = AL._apply_voxel_first_order(data.grid, responses, par, zeros(Float64, count),
                                         seconds, false, AL.terrain_patch_count(data.terrain))
+    return pack_result(result)
+end
+
+function pack_result(result::AL.VoxelFirstOrderResult{Float64})
     n = length(result.par_energy)
     m = length(result.par_terrain_energy)
     output = Vector{Float64}(undef, n + m + 4)
@@ -148,32 +199,72 @@ function solve_hour(data::Data, weather::WeatherData, hour::Float64, seconds::Fl
     forcing = weather_snapshot(weather, hour)
     n = length(weather.sky_up)
     sun_up = AL._sun_direction(forcing.sun_azimuth, forcing.sun_elevation)
-    weights = AL._diffuse_weights_java_like(1.0 - forcing.direct_fraction,
-                                           weather.sky_up, sun_up)
     has_sun = forcing.sun_elevation > 0.0
     count = n + Int(has_sun)
     propagation = Vector{Float64}(undef, 3count)
     par = zeros(Float64, count)
-    diffuse_par = forcing.RI_PAR_f * (1.0 - forcing.direct_fraction)
-    direct_par = forcing.RI_PAR_f * forcing.direct_fraction
     @inbounds for i in 1:n
         direction = weather.sky_up[i]
         k = 3i - 2
         propagation[k] = -direction[1]
         propagation[k + 1] = -direction[2]
         propagation[k + 2] = -direction[3]
-        par[i] = diffuse_par * weights[i]
-        # Preserve the ordinary explicit-sun fallback for a below-horizon sun.
-        !has_sun && (par[i] += direct_par / n)
     end
     if has_sun
         k = 3n + 1
         propagation[k] = -sun_up[1]
         propagation[k + 1] = -sun_up[2]
         propagation[k + 2] = -sun_up[3]
-        par[count] = direct_par
     end
+    fill_hour_par!(par, weather, forcing, sun_up, has_sun)
     return solve(data, propagation, par, seconds)
+end
+
+# Both cache modes use the same clock-to-sector adapter and native sky weights.
+# Only response ownership changes; the sector order and arithmetic stay fixed.
+function fill_hour_par!(par::Vector{Float64}, weather::WeatherData,
+                        forcing, sun_up, has_sun::Bool)
+    n = length(weather.sky_up)
+    weights = AL._diffuse_weights_java_like(1.0 - forcing.direct_fraction,
+                                           weather.sky_up, sun_up)
+    diffuse_par = forcing.RI_PAR_f * (1.0 - forcing.direct_fraction)
+    direct_par = forcing.RI_PAR_f * forcing.direct_fraction
+    @inbounds for i in 1:n
+        par[i] = diffuse_par * weights[i]
+        # Preserve the ordinary explicit-sun fallback for a below-horizon sun.
+        !has_sun && (par[i] += direct_par / n)
+    end
+    has_sun && (par[n + 1] = direct_par)
+    return nothing
+end
+
+"""Reuse the diffuse sky; trace only the current sun and accumulate natively."""
+function solve_hour_cached(state::HourState, hour::Float64, seconds::Float64)
+    state.solves += 1
+    forcing = weather_snapshot(state.weather, hour)
+    if forcing.RI_PAR_f == 0.0
+        state.night_skips += 1
+        return zeros(Float64, length(state.data.grid.pad) +
+            AL.terrain_patch_count(state.data.terrain) + 4)
+    end
+    prepare_sky!(state)
+    n = length(state.weather.sky_up)
+    sun_up = AL._sun_direction(forcing.sun_azimuth, forcing.sun_elevation)
+    has_sun = forcing.sun_elevation > 0.0
+    count = n + Int(has_sun)
+    resize!(state.responses, count)
+    resize!(state.par, count)
+    resize!(state.nir, count)
+    fill!(state.nir, 0.0)
+    fill_hour_par!(state.par, state.weather, forcing, sun_up, has_sun)
+    if has_sun
+        state.responses[count] = direction_response(state.data,
+            -sun_up[1], -sun_up[2], -sun_up[3])
+        state.sun_traces += 1
+    end
+    result = AL._apply_voxel_first_order(state.data.grid, state.responses,
+        state.par, state.nir, seconds, false, AL.terrain_patch_count(state.data.terrain))
+    return pack_result(result)
 end
 
 new_f64(n::Int32) = Vector{Float64}(undef, Int(n))

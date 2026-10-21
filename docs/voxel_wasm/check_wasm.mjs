@@ -84,7 +84,27 @@ function prepare(referenceCase) {
     return referenceCase.hour === undefined ? runtime.prepareCase(referenceCase) : runtime.prepareHour(referenceCase);
 }
 function solve(prepared, referenceCase) {
-    return referenceCase.hour === undefined ? runtime.solve(prepared) : runtime.solveHour(prepared);
+    const result = referenceCase.hour === undefined ? runtime.solve(prepared) : runtime.solveHour(prepared);
+    if (referenceCase.hour !== undefined) verifyCacheStep(result);
+    return result;
+}
+function assert(condition, message) {if (!condition) throw new Error(message);}
+function verifyCacheStep(result) {
+    const before = result.cacheBefore, after = result.cacheAfter;
+    const night = result.snapshot[1] === 0;
+    assert(after.solves === before.solves + 1, 'Each cached call must perform one solve');
+    assert(after.skyBuilds === before.skyBuilds + Number(result.skyPrepared),
+        'Fixed-sky preparation counter differs from the preparation result');
+    assert(after.skyBuilds <= 1, 'Fixed sky was rebuilt for the same scene/sky/sampling state');
+    assert(after.nightSkips === before.nightSkips + Number(night), 'Night shortcut counter differs');
+    assert(after.sunTraces === before.sunTraces + Number(!night && result.snapshot[4] > 0),
+        'Each illuminated solve must retrace its current sun direction');
+    if (night) {
+        assert(!result.skyPrepared && result.values.every(value => value === 0),
+            'Night must return zero without preparing a sky response');
+    } else {
+        assert(after.skyReady && after.skyBuilds === 1, 'Illuminated solve requires a prepared sky');
+    }
 }
 function verifySnapshot(actual, expected) {
     if (expected === undefined) return {};
@@ -151,13 +171,18 @@ for (const referenceCase of reference.cases) {
         readbackTimes.push(result.readbackMilliseconds);
     }
     checks.push({name: referenceCase.name, hour: referenceCase.hour,
+        sectors: referenceCase.sectors,
         directions: referenceCase.par_flux?.length ?? null,
         rays_per_voxel: referenceCase.rays_per_voxel ?? reference.scene.rays_per_voxel,
         seconds: referenceCase.seconds, ...parity, ...budgetParity, ...snapshotParity,
         benchmark,
-        ...(benchmark ? {scene_preparation_milliseconds: prepared.scenePreparationMilliseconds,
-            forcing_transport_milliseconds: prepared.preparationMilliseconds,
-            first_solve_milliseconds: first.solveMilliseconds,
+        scene_preparation_milliseconds: prepared.scenePreparationMilliseconds,
+        state_preparation_milliseconds: prepared.preparationMilliseconds,
+        first_solve_milliseconds: first.solveMilliseconds,
+        sky_preparation_milliseconds: first.skyPreparationMilliseconds ?? 0,
+        sky_prepared: first.skyPrepared ?? false,
+        cache_before: first.cacheBefore, cache_after: first.cacheAfter,
+        ...(benchmark ? {
             warmed_solve: timingSummary(solveTimes), readback: timingSummary(readbackTimes)} : {}),
         native_timing: referenceCase.native_timing ?? null});
 }
@@ -169,6 +194,52 @@ const transitions = transitionReferences.map((referenceCase, index) => {
     const result = solve(prepare(referenceCase), referenceCase);
     return {step: index + 1, name: referenceCase.name, ...verify(result.values, referenceCase.expected)};
 });
+// Start with a fresh module instance: a night visit must not build the sky.
+// Changing hour reuses only the fixed sky; even a repeated hour traces the sun.
+// Sampling/sector switches create independent states, and returning reuses one.
+let lifecycle = null;
+if (reference.meteorology) {
+    const fresh = await initialize(bytes, reference.scene, reference.meteorology);
+    assert(fresh.cacheStats().hourStates === 0, 'Initialization eagerly created hourly states');
+    const caseAt = (hour, sectors, rays) => {
+        const found = reference.cases.find(candidate => candidate.hour === hour
+            && candidate.sectors === sectors && candidate.rays_per_voxel === rays);
+        if (!found) throw new Error(`Missing lifecycle reference ${hour}/${sectors}/${rays}`);
+        return found;
+    };
+    const lifecycleReferences = [caseAt(21, 16, 1), caseAt(12, 16, 1),
+        caseAt(18.75, 16, 1), caseAt(12, 16, 1), caseAt(12, 16, 1),
+        caseAt(21, 16, 1), caseAt(12, 16, 4), caseAt(12, 46, 4),
+        caseAt(12, 16, 1), caseAt(21, 46, 16)];
+    const steps = lifecycleReferences.map((referenceCase, index) => {
+        const prepared = fresh.prepareHour(referenceCase);
+        const before = fresh.cacheStats();
+        const result = fresh.solveHour(prepared);
+        verifyCacheStep(result);
+        verifySnapshot(result.snapshot, referenceCase.snapshot);
+        const parity = verify(result.values, referenceCase.expected);
+        return {step: index + 1, name: referenceCase.name, ...parity,
+            sky_prepared: result.skyPrepared, cache_before: result.cacheBefore,
+            cache_after: result.cacheAfter, states_before: before.hourStates,
+            states_after: fresh.cacheStats().hourStates};
+    });
+    const first = steps[0], last = steps.at(-1), stats = fresh.cacheStats();
+    assert(first.cache_after.skyBuilds === 0 && !first.cache_after.skyReady,
+        'First night visit built a fixed sky');
+    assert(last.cache_after.skyBuilds === 0 && !last.cache_after.skyReady,
+        'Night with a previously unused configuration built a fixed sky');
+    assert(steps[8].cache_after.skyBuilds === 1 && steps[8].states_after === 3,
+        'Returning to the initial configuration did not reuse its fixed sky');
+    assert(stats.sceneStates === 3 && stats.weatherStates === 2 && stats.hourStates === 4,
+        'Hour changes created excess scene, weather or hourly cache states');
+    lifecycle = {passed: true, steps, final_cache: stats};
+}
+const cache = runtime.cacheStats();
+if (reference.meteorology) {
+    assert(cache.sceneStates === 3 && cache.weatherStates === 2 && cache.hourStates === 6,
+        'Expected three geometries, two skies and six reusable hourly states');
+    assert(cache.states.every(state => state.skyBuilds === 1), 'Expected one fixed-sky build per configuration');
+}
 const report = {
     passed: true,
     created_utc: new Date().toISOString(),
@@ -186,7 +257,10 @@ const report = {
     imports: runtime.imports, counts: runtime.counts, tolerance,
     initialization: runtime.timing, warmup_solves_per_benchmark_case: warmup,
     benchmark_hours: benchmarkHours,
-    checks, transitions,
+    timing_scope: 'Sky preparation is measured separately on the first nonzero-PAR visit to each configuration. Warmed solve includes current weather, fresh sun tracing and accumulation, without sun-response caching; readback is separate.',
+    cold_sky_preparations: checks.filter(check => check.sky_prepared).map(check => ({
+        name: check.name, milliseconds: check.sky_preparation_milliseconds})),
+    cache, lifecycle, checks, transitions,
 };
 fs.mkdirSync(path.dirname(reportPath), {recursive: true});
 fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n');
@@ -197,4 +271,8 @@ console.log(JSON.stringify({passed: true, report: reportPath, wasm_bytes: bytes.
     initialization: runtime.timing,
     warmed_median_ms: checks.filter(check => check.benchmark).map(check => ({name: check.name,
         wasm: check.warmed_solve.median_milliseconds,
-        native: check.native_timing?.kernel?.median_ms ?? null}))}, null, 2));
+        native_cached: check.native_timing?.cached_warm?.median_ms ?? null,
+        native_uncached: check.native_timing?.kernel_uncached?.median_ms
+            ?? check.native_timing?.kernel?.median_ms ?? null})),
+    cold_sky_preparations: report.cold_sky_preparations,
+    cache, lifecycle_passed: lifecycle?.passed ?? null}, null, 2));

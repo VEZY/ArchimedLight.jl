@@ -123,7 +123,7 @@ end
 function timing(f; samples::Integer)
     f() # Compilation and initial warm-up are outside the samples.
     benchmark = @benchmarkable $f() evals=1
-    trial = BenchmarkTools.run(benchmark; samples=samples, seconds=60.0)
+    trial = BenchmarkTools.run(benchmark; samples=samples, seconds=60.0, warmup=false)
     estimate = BenchmarkTools.median(trial)
     return Dict("samples" => length(trial), "evals" => trial.params.evals,
         "median_ms" => estimate.time / 1e6,
@@ -188,10 +188,13 @@ function prepare(; path::AbstractString=REFERENCE, samples::Integer=31,
         directions = Float64[-Float64(s.direction[a]) for s in step.turtle.sectors for a in 1:3]
         turtle, fluxes = abi_forcing(directions, step.fluxes.par)
         kernel = () -> Kernel.solve_hour(data, weather, hour, step.duration_seconds)
+        cached_state = Kernel.make_hour_state(data, weather)
+        cached = () -> Kernel.solve_hour_cached(cached_state, hour, step.duration_seconds)
         @assert all(isapprox.(Kernel.hour_snapshot(weather, hour), snapshot_vector(configuration.snapshot);
             atol=1e-10, rtol=1e-12))
         expected = flat_result(step.first_order)
         @assert all(isapprox.(kernel(), expected; atol=1e-9, rtol=1e-12))
+        @assert all(isapprox.(cached(), expected; atol=1e-9, rtol=1e-12))
         @assert all(isapprox.(flat_result(kernel_step(data, turtle, fluxes,
             step.duration_seconds, configuration.options)), expected; atol=1e-9, rtol=1e-12))
         first = step.first_order
@@ -206,10 +209,29 @@ function prepare(; path::AbstractString=REFERENCE, samples::Integer=31,
             "absorbed_terrain" => sum(first.par_terrain_energy),
             "unresolved" => 0.0, "converged" => true)
         # Keep parity cases distinct from the representative performance sample.
-        native_timing = hour in benchmark_hours ? Dict(
-            "fixture_preparation" => fixture_preparation_timing,
-            "setup" => setup_timings[rays], "kernel" => timing(kernel; samples),
-            "public_pipeline" => timing(public_solve; samples)) : nothing
+        native_timing = if hour in benchmark_hours
+            uncached = timing(kernel; samples)
+            # A new state owns no sky responses: every cold sample pays for all
+            # sky directions. The warmed state retains only the fixed sky; the
+            # current sun is retraced on every call, even for a repeated hour.
+            cold = () -> Kernel.solve_hour_cached(Kernel.make_hour_state(data, weather),
+                hour, step.duration_seconds)
+            stats_before = Kernel.state_stats(cached_state)
+            warmed = timing(cached; samples)
+            stats_after = Kernel.state_stats(cached_state)
+            @assert stats_after[1] == stats_before[1]
+            @assert stats_after[2] - stats_before[2] == warmed["samples"] + 1
+            Dict("fixture_preparation" => fixture_preparation_timing,
+                "setup" => setup_timings[rays], "kernel" => uncached,
+                "kernel_uncached" => uncached,
+                "hour_state_setup" => timing(() -> Kernel.make_hour_state(data, weather); samples),
+                "cached_sky_preparation" => timing(() ->
+                    Kernel.prepare_hour(Kernel.make_hour_state(data, weather), hour); samples),
+                "cached_cold" => timing(cold; samples), "cached_warm" => warmed,
+                "public_pipeline" => timing(public_solve; samples))
+        else
+            nothing
+        end
         push!(cases, Dict("name" => "h$(round(Int, hour * 60))-s$(sectors)-r$(rays)",
             "hour" => hour, "snapshot" => snapshot_vector(configuration.snapshot),
             "sectors" => sectors, "rays_per_voxel" => rays, "g" => buffers.g,
@@ -236,7 +258,12 @@ function prepare(; path::AbstractString=REFERENCE, samples::Integer=31,
         "cases" => cases, "meteorology" => meteorology,
         "native_performance" => Dict("benchmark_hours" => collect(benchmark_hours),
             "samples" => samples, "evals" => 1,
-            "unmeasured_cases" => "native_timing is null; these cases verify parity only"),
+            "unmeasured_cases" => "native_timing is null; these cases verify parity only",
+            "scope" => Dict("kernel_uncached" => "Full sky and sun rebuilt for every sample; kernel is the same historical baseline.",
+                "cached_cold" => "Fresh HourState construction and first daylight solve, including all fixed sky responses; geometry decoding excluded.",
+                "cached_warm" => "Fixed sky prepared before timing; weather weights and the current sun recalculated for every sample, with no sun cache.",
+                "hour_state_setup" => "Fresh ownership/response buffers only; no directional responses.",
+                "cached_sky_preparation" => "Fresh state construction and fixed-sky responses only; no sun or accumulation.")),
         "provenance" => merge(provenance(), Dict("created_utc" => string(now(UTC)), "requested_revision_label" => revision,
             "loaded_archimedlight" => pathof(ArchimedLight), "julia" => string(VERSION),
             "kernel" => string(Sys.KERNEL), "architecture" => string(Sys.ARCH),
@@ -250,7 +277,7 @@ function prepare(; path::AbstractString=REFERENCE, samples::Integer=31,
             "individual_ids" => sort!(unique([c.individual_id for c in fixture.input.components])),
             "wood_point_count" => sum(c.count for c in fixture.input.components if c.organ == :wood),
             "geometry_preparation" => "Native readers prepare facet normals and the terrain BVH; only geometry is serialized, never light responses.",
-            "timing_scope" => "Fixture preparation reads all three bundled files and builds native terrain normals/BVH (warmed filesystem). Setup measures fresh VoxelWasmKernel.make_data decoding the flat geometry/BVH buffers separately; kernel measures identical native VoxelWasmKernel.solve_hour inputs/output, alongside the public pipeline, only at native_performance.benchmark_hours; other cases are parity checks without timings. evals=1.")))
+            "timing_scope" => "Fixture preparation reads all three bundled files and builds native terrain normals/BVH (warmed filesystem). Setup measures fresh VoxelWasmKernel.make_data decoding the flat geometry/BVH buffers separately. kernel/kernel_uncached measure full solve_hour; cached_cold includes fresh state and fixed-sky preparation on every sample; cached_warm retains only fixed sky and retraces the current sun every sample. Timings alongside the public pipeline only at native_performance.benchmark_hours; other cases verify parity. evals=1.")))
     mkpath(dirname(path))
     write(path, JSON.json(payload))
     return (path=abspath(path), cases=length(cases), output_length=nvoxels + nterrain + 4)
