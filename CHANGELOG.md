@@ -26,6 +26,9 @@
 
 ### Performance
 
+- Index compact scattering paths by source and direction, with one sparse row
+  lookup per emitter. Reuse DDA scratch during compact preparation while
+  retaining independently owned cached paths and geometric diagnostics.
 - Reuse prepared direction constants, terrain origin elevations and BVH scratch
   when building voxel scattering paths, and omit legacy flat-ground paths for
   concrete terrain. Use compact occupied-segment paths with cached stable

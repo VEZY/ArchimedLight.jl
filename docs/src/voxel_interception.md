@@ -340,6 +340,9 @@ segments and their stable Beer–Lambert fractions. Explicit
 `prepare_voxel_scattering_transport(...; compact=true)` selects the same storage.
 Its default `compact=false` retains geometric paths for diagnostics and existing
 cache callers. Both representations use the same transport and energy balance.
+Compact paths are indexed within each source's direction row; sparse source IDs
+do not require a grid-sized index table. Preparation reuses DDA scratch and
+copies each retained compact path before tracing the next ray.
 
 Within a newly traced response, rays sharing one direction reuse its DDA
 stepping constants and built-in terrain normalization. Built-in terrain is

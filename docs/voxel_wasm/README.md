@@ -183,7 +183,7 @@ changes. Long text is ellipsized with its full value available on hover.
 
 ## Validation on 22 October 2026
 
-The complete default Julia 1.13.1 package suite passes **35,967 assertions**, including
+The complete default Julia 1.13.1 package suite passes **36,071 assertions**, including
 **636 workspace/cache regressions** for launch-cache validation, non-cubic and periodic
 scenes, missing terrain coverage, custom mutable terrains, independent concurrent
 calls and retained output ownership. Custom terrain extensions keep their
@@ -197,12 +197,15 @@ Another **3,286 assertions** cover scattering preparation and compact paths,
 including both traversal algorithms, periodic revisits, non-cubic terminal
 routing, tiny and opaque optical depths, cache invalidation and raw/compact
 PAR/NIR parity.
+Another **104 assertions** cover sparse indexed paths, missing directions,
+independent compact storage and reusable DDA scratch with both traversals and
+periodic/non-periodic terrain.
 
 The public mixed-vegetation pipeline, uncached adapter, explicit-direction
 adapter and cached adapter agree exactly on **144 × 1,098 output values**.
 Those native outputs and the supplemental **24 × 1,098** high-ray outputs are
-also exactly equal to the preserved pre-optimization version at commit
-`4e48bdd`. Ray positions, weights, triangle geometry and scattering quadrature
+also exactly equal to the preserved compact-path version at commit
+`e809ca0`. Ray positions, weights, triangle geometry and scattering quadrature
 are unchanged. The disabled-scattering first-order outputs still match the
 preserved 72-case PAD-only baseline within **5.457e-12 J**.
 
@@ -216,9 +219,9 @@ and six further lifecycle revisits, with a maximum native/Wasm output difference
 of **4.657e-10 J**. Their largest energy-balance residual is **2.305e-6 J**,
 within the same relative tolerance applied to the summed incoming energy.
 
-The numerical module is **936,953 bytes**, compiled in 51.4 s with no compiler
+The numerical module is **969,843 bytes**, compiled in 132.5 s with no compiler
 diagnostics. Its SHA256 is
-`cc64a6ab47f098bedc5785717a9bace650f4f64f301184c654b5fdf4a44363d7`.
+`336b24e7ba7ebbac4dde3f905f4b70b44fc6ced61734f39179ebbb6402162d6f`.
 Build-only adaptations ignore native capacity hints, clear segment vectors in
 one operation and route dense multidimensional arrays through WasmTarget's
 existing matrix registry. The clearing overlay is restricted to voxel segment
@@ -381,3 +384,52 @@ improve by **1.04×–1.50×**; high-ray updates remain dominated by live-sun tr
 Disabled-scattering controls vary from about −0.4% to +5.7%, so this campaign
 does not establish a first-order speedup. Every timed output matches its native
 reference and the preserved module; the module grows by 73,642 bytes.
+
+## Indexed scattering paths and DDA scratch
+
+The next shared Julia pass replaces compact tuple-key path dictionaries with
+direction slots and one sparse source-to-row lookup per emitting source. Storage
+depends on prepared sources, not the largest voxel ID. Compact preparation
+consumes one reusable DDA segment buffer and retains independent compact paths;
+raw geometric diagnostics and the reference traversal retain their ownership.
+Table capacities grow geometrically, including in Wasm, rather than copying the
+complete table for every insertion.
+
+Measurements compare the complete frozen `e809ca0` module with current Julia
+1.13.1, using 46 sectors, 16 rays per face, three alternating blocks of 11 samples
+and `evals=1`. Readers and JIT are excluded; preparation creates fresh caches
+and warmed scattering creates fresh outputs.
+
+| Scene | Preparation before → after (ms) | Warm scattering before → after (ms) | Retained cache before → after (MB) |
+| --- | ---: | ---: | ---: |
+| Bundled tree, black terrain | 20.17 → 11.41 | 0.179 → 0.147 | 6.74 → 5.51 |
+| Bundled tree, reflective terrain | 19.52 → 11.34 | 3.461 → 2.047 | 6.74 → 5.51 |
+| Sparse canopy + terrain | 12.35 → 5.57 | 0.601 → 0.373 | 6.06 → 3.70 |
+| Dense canopy + reflective terrain | 14.20 → 10.16 | 2.452 → 1.158 | 10.85 → 11.42 |
+
+Preparation allocates **60–81% fewer bytes**; warmed allocations are unchanged.
+Retained memory is `Base.summarysize`, including spare native vector capacity,
+not peak RSS. That capacity increases the dense cache by **5.2%**; its warmed
+scattering improves **2.12×**, so the representation is retained. Sparse fixtures
+use **18–39% less** retained cache memory.
+
+Same-current-package controls isolate the two changes: indexed lookup improves
+one transport application **1.33×–2.17×**, with exact outputs; reusing DDA scratch
+reduces preparation allocations in every fixture. Public step and four-sun
+series medians improve **1.30×–1.46×** in the frozen-module campaign, with exact
+PAR/NIR comparisons. These fixture timings do not establish a general speedup
+for other scenes or include input loading.
+
+The ignored `indexed-round5/` directory preserves the frozen package/module,
+fresh native references, benchmark drivers, raw results, source hashes and
+`comparison.md`. All **168 native/Wasm cases** and **19 lifecycle transitions**
+pass; the native outputs and energy budgets remain exactly equal to `e809ca0`.
+
+The matched Node campaign verifies every sample against fresh native references
+and frozen Wasm outputs. Scattering-enabled warmed whole-update medians vary
+from **0.98× to 1.04×**; disabled-scattering controls vary more, so no general
+warmed Wasm gain is claimed. Five fresh runtime instances per sampling setting
+isolate scattering preparation after sky preparation: medians at 16/64/256 rays
+change from **59.32 / 55.90 / 56.78 ms** to **56.91 / 54.42 / 53.88 ms**.
+These timings exclude rendering and confirm that indexed table construction
+does not introduce a Wasm startup penalty in this scene.

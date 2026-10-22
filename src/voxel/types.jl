@@ -470,10 +470,97 @@ struct VoxelCompactScatteringPath{T<:AbstractFloat}
     terrain_patch_id::Int
 end
 
+# Only occupied source IDs have rows. Directions use direct slots within a row,
+# avoiding a hash lookup for every ray without allocating a grid-by-sky table.
+# Explicit capacities also keep construction amortized when WASM vectors grow
+# by copying their storage rather than retaining native spare capacity.
+mutable struct VoxelIndexedScatteringPaths{T<:AbstractFloat}
+    ndirs::Int
+    id_span::Int
+    row_for_id::Dict{Int,Int}
+    slots::Vector{Int}
+    paths::Vector{VoxelCompactScatteringPath{T}}
+    row_count::Int
+    path_count::Int
+end
+
+function VoxelIndexedScatteringPaths{T}(ndirs::Int, id_span::Int) where {T<:AbstractFloat}
+    ndirs > 0 || throw(ArgumentError("scattering direction count must be positive"))
+    id_span >= 0 || throw(ArgumentError("scattering source ID span cannot be negative"))
+    return VoxelIndexedScatteringPaths{T}(ndirs, id_span, Dict{Int,Int}(),
+        Int[], VoxelCompactScatteringPath{T}[], 0, 0)
+end
+
+@inline function _voxel_scattering_path_slot(paths::VoxelIndexedScatteringPaths,
+    key::Tuple{Int,Int})
+    id, direction = key
+    1 <= id <= paths.id_span || return 0
+    1 <= direction <= paths.ndirs || return 0
+    row = get(paths.row_for_id, id, 0)
+    row == 0 && return 0
+    @inbounds return paths.slots[(row - 1) * paths.ndirs + direction]
+end
+
+@inline Base.haskey(paths::VoxelIndexedScatteringPaths, key::Tuple{Int,Int}) =
+    _voxel_scattering_path_slot(paths, key) != 0
+
+@inline function Base.getindex(paths::VoxelIndexedScatteringPaths, key::Tuple{Int,Int})
+    slot = _voxel_scattering_path_slot(paths, key)
+    slot == 0 && throw(KeyError(key))
+    @inbounds return paths.paths[slot]
+end
+
+function Base.setindex!(paths::VoxelIndexedScatteringPaths{T},
+    path::VoxelCompactScatteringPath{T}, key::Tuple{Int,Int}) where {T}
+    id, direction = key
+    1 <= id <= paths.id_span && 1 <= direction <= paths.ndirs ||
+        throw(BoundsError(paths, key))
+    row = get(paths.row_for_id, id, 0)
+    if row == 0
+        row = paths.row_count + 1
+        required = row * paths.ndirs
+        if required > length(paths.slots)
+            resize!(paths.slots, max(required, 2 * length(paths.slots), 4 * paths.ndirs))
+        end
+        for slot in (row - 1) * paths.ndirs + 1:required
+            @inbounds paths.slots[slot] = 0
+        end
+        paths.row_for_id[id] = row
+        paths.row_count = row
+    end
+    slot = (row - 1) * paths.ndirs + direction
+    @inbounds path_index = paths.slots[slot]
+    if path_index == 0
+        path_index = paths.path_count + 1
+        if path_index > length(paths.paths)
+            resize!(paths.paths, max(path_index, 2 * length(paths.paths), 8))
+        end
+        @inbounds paths.paths[path_index] = path
+        @inbounds paths.slots[slot] = path_index
+        paths.path_count = path_index
+    else
+        @inbounds paths.paths[path_index] = path
+    end
+    return paths
+end
+
+Base.length(paths::VoxelIndexedScatteringPaths) = paths.path_count
+Base.isempty(paths::VoxelIndexedScatteringPaths) = paths.path_count == 0
+Base.values(paths::VoxelIndexedScatteringPaths) = Iterators.take(paths.paths, paths.path_count)
+Base.keys(paths::VoxelIndexedScatteringPaths) =
+    ((id, direction) for (id, row) in paths.row_for_id for direction in 1:paths.ndirs
+        if paths.slots[(row - 1) * paths.ndirs + direction] != 0)
+
+function _finish_voxel_scattering_paths!(paths::VoxelIndexedScatteringPaths)
+    resize!(paths.slots, paths.row_count * paths.ndirs)
+    resize!(paths.paths, paths.path_count)
+    return paths
+end
+
 struct VoxelCompactScatteringPaths{T<:AbstractFloat}
-    source_paths::Dict{Tuple{Int,Int},VoxelCompactScatteringPath{T}}
-    ground_paths::Dict{Tuple{Int,Int},VoxelCompactScatteringPath{T}}
-    terrain_paths::Dict{Tuple{Int,Int},VoxelCompactScatteringPath{T}}
+    source_paths::VoxelIndexedScatteringPaths{T}
+    ground_paths::VoxelIndexedScatteringPaths{T}
+    terrain_paths::VoxelIndexedScatteringPaths{T}
 end
 
 """Geometry-dependent internal-ray paths reused by the matrix-free transport operator."""
