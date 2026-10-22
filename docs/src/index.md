@@ -36,11 +36,11 @@ Choose a wheat mesh or a voxel tree above terrain. Change the hour and options;
   <div class="live-wheat-stage" aria-busy="false">
     <img class="live-wheat-preview" src="assets/live-voxel/preview.jpg"
       width="1000" height="694" loading="lazy"
-      alt="A voxel tree above a triangulated terrain, coloured by intercepted PAR energy, with hour, sky-sector, ray-count and scattering controls.">
+      alt="A voxel tree above a triangulated terrain, coloured by incident PAR irradiance, with hour, sky-sector, ray-count and scattering controls.">
   </div>
   <figcaption class="live-wheat-caption">
     <p>A tree from the bundled JSONL.gz example above a PLY terrain.
-    Colours show intercepted PAR energy per voxel or terrain triangle.</p>
+    Colours show incident PAR irradiance on the plant and ground.</p>
     <span class="live-wheat-status" role="status" aria-live="polite"></span>
     <a class="live-wheat-open" href="assets/live-voxel/index.html" target="_blank" rel="noopener">Open standalone demo</a>.
     <a href="voxel_tree_tutorial.html">Follow the voxel workflow</a>.

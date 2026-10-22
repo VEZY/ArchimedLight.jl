@@ -9,11 +9,13 @@ serve the verified static copy in `docs/src/assets/live-voxel/` without compilin
 
 The prototype calculates PAR interception in a finite scene with optional
 isotropic multiple scattering and black opaque soil. Inputs use horizontal
-irradiance in W m⁻² and a 60 s step. Colours show cumulative intercepted energy
-in J per voxel and processed incident energy per terrain triangle. Repeated
-scattering interactions count again in interception; the energy balance uses
-absorbed, escaped and unresolved energy. Energy per element depends on element
-size; it is not an irradiance map.
+irradiance in W m⁻² and a 60 s step. Colours show incident PAR in W m⁻² on the
+same 0–600 scale as the wheat demo: voxel energy divided by duration and proxy
+plant area (`PAD × voxel volume`), and terrain energy divided by duration and
+triangle surface area. The export reuses Julia's plant-area normalization and
+triangle-area calculation to prepare the display factors. Raw solver outputs
+and budgets remain in joules. Repeated scattering interactions count again in
+interception; the energy balance uses absorbed, escaped and unresolved energy.
 
 The paired `tree.jsonl.gz` supplies leaf/wood point proportions. Native
 `VoxelVegetation(...; mode=:point_proxy)` converts these into effective voxel
@@ -98,8 +100,8 @@ of past sun directions while sharing the same numerical calculations.
 The 144 comparison cases cover 12 hours, including sunrise, sunset, 19:10 and
 night, with 16/46 sectors, requested sampling of 1/4/16 rays per voxel face,
 and scattering disabled/enabled.
-The displayed default uses 16 rays per face for a less sparse terrain image.
-Select 64 or 256 to compare denser incident-ray sampling. Higher counts increase
+The displayed default uses 256 rays per voxel face and 16 sky sectors.
+Select fewer rays to compare coarser incident-ray sampling. Higher counts increase
 initial sky preparation and live sun tracing work; they retain the same sampler
 and scattering angular quadrature.
 
@@ -157,6 +159,7 @@ export from the same Kaimon Julia environment:
 
 ```julia
 include(joinpath(prototype, "view.jl"))
+include(joinpath(prototype, "check_view.jl")) # Area/time normalization checks.
 VoxelWasmView.export_view()
 ```
 

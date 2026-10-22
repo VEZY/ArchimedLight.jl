@@ -8,6 +8,26 @@ module VoxelWasmView
 
 using Bonito, WGLMakie, JSON3, Base64, SHA
 using Bonito: @js_str
+import ArchimedLight as AL
+
+# Display conversion only: retain the solver's energies and budget in joules.
+function irradiance_scale(scene, seconds::Real)
+    isfinite(seconds) && seconds > 0 || throw(ArgumentError("display duration must be positive and finite"))
+    # This fixture uses the same G for all components; prepare.load_fixture
+    # verifies that scene.pad is also the original point-input PAD.
+    grid = AL.VoxelGrid(scene.bounds[1:3], scene.bounds[4:6],
+        reshape(Float64.(scene.pad), Tuple(Int.(scene.dims))))
+    factors = vec(AL._voxel_flux_from_energy!(similar(grid.pad),
+        ones(size(grid)), grid, seconds))
+    points = [ntuple(a -> Float64(scene.vertices[3i - 3 + a]), 3)
+        for i in 1:(length(scene.vertices) ÷ 3)]
+    for i in 1:(length(scene.triangles) ÷ 3)
+        triangle = ntuple(a -> Int(scene.triangles[3i - 3 + a]), 3)
+        area = AL._triangle_area3d((points[v] for v in triangle)...)
+        push!(factors, inv(seconds * area))
+    end
+    return factors
+end
 
 function scene_mesh(scene)
     GB = WGLMakie.GeometryBasics
@@ -55,7 +75,7 @@ end
 function export_view(; directory=joinpath(@__DIR__, "build", "scattering"),
     reference_path=joinpath(directory, "native_reference.json"),
     asset_directory=joinpath(@__DIR__, "..", "src", "assets", "live-voxel"),
-    colour_maximum::Real=20000.0)
+    colour_maximum::Real=600.0)
     reference_text = read(reference_path, String)
     reference = JSON3.read(reference_text)
     wasm = read(joinpath(directory, "voxel.wasm"))
@@ -84,12 +104,14 @@ function export_view(; directory=joinpath(@__DIR__, "build", "scattering"),
     scene_literal = Bonito.JSCode(JSON3.write(JSON3.write(reference.scene)))
     weather_literal = Bonito.JSCode(JSON3.write(JSON3.write(reference.meteorology)))
     sectors = sort(unique(Int(case.sectors) for case in reference.cases))
+    default_sector_count = 16
     ray_counts = sort(unique(Int(case.rays_per_voxel) for case in reference.cases))
-    default_ray_count = last(ray_counts)
     ray_counts = sort(union(ray_counts, [64, 256]))
+    default_ray_count = 256
     durations = unique(Float64(case.seconds) for case in reference.cases)
     length(durations) == 1 || error("The view expects one calculation duration")
     duration = only(durations)
+    colour_scale = irradiance_scale(reference.scene, duration)
     runtime_url = "data:text/javascript;base64," * base64encode(runtime)
     worker_source = "import {initialize} from " * JSON3.write(runtime_url) * ";\n" * raw"""
 let runtime;
@@ -129,7 +151,7 @@ self.onmessage = async event => {
         visible=false)
     WGLMakie.update_cam!(axis.scene, (12.0, -14.0, 12.0), (4.0, 4.0, 4.4), (0.0, 0.0, 1.0))
     WGLMakie.Colorbar(figure[2, 1], plot; vertical=false,
-        label="Intercepted PAR energy (J per element)")
+        label="Incident PAR (W m⁻²)")
 
     shell_path = joinpath(@__DIR__, "..", "live_wheat", "shell.css")
     app = Bonito.App(; title="Voxel tree + terrain light interception") do session
@@ -138,9 +160,9 @@ self.onmessage = async event => {
             style="width:100%;accent-color:#b94c48")
         hour_label = Bonito.DOM.output("12:00"; id="voxel-hour-label",
             style="font-variant-numeric:tabular-nums;min-width:5em")
-        sector_menu = Bonito.DOM.select((Bonito.DOM.option(string(n); value=string(n)) for n in sectors)...;
+        sector_menu = Bonito.DOM.select((Bonito.DOM.option(string(n); value=string(n), selected=n == default_sector_count) for n in sectors)...;
             id="voxel-sectors", disabled=true)
-        sampling = Bonito.DOM.select((Bonito.DOM.option(string(n); value=string(n)) for n in ray_counts)...;
+        sampling = Bonito.DOM.select((Bonito.DOM.option(string(n); value=string(n), selected=n == default_ray_count) for n in ray_counts)...;
             id="voxel-sampling", disabled=true)
         scattering = Bonito.DOM.input(; id="voxel-scattering", type="checkbox", disabled=true)
         status_line_style = "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0"
@@ -165,7 +187,7 @@ self.onmessage = async event => {
             Bonito.DOM.p("15 May 2025 · interpolated Montpellier weather"; class="live-demo-caption"),
             Bonito.DOM.details(Bonito.DOM.summary("Model notes"),
                 Bonito.DOM.p("Point-based leaf/wood mixtures; illustrative leaf reflectance 0.08 and transmittance 0.07, black wood and soil, isotropic scattering and finite boundaries."),
-                Bonito.DOM.p("Colours show intercepted voxel energy and incident terrain energy in joules per element over $(Int(duration)) s, including repeated interactions with scattering. Elements have different sizes; shaded voxels remain visible.");
+                Bonito.DOM.p("Voxel irradiance is averaged over proxy plant area (PAD × voxel volume); terrain irradiance over triangle surface area. Scattering includes repeated light encounters.");
                 class="live-demo-notes");
             style="font:16px system-ui,sans-serif;width:100%;margin:auto")
         Bonito.on_document_load(session, js"""
@@ -174,9 +196,10 @@ self.onmessage = async event => {
             const slider = $(hour_slider), hourLabel = $(hour_label);
             const sectors = $(sector_menu), sampling = $(sampling), scattering = $(scattering);
             const controls = [slider, sectors, sampling, scattering], receiverIDs = $(receiver_ids);
+            const colourScale = $(colour_scale);
             const meteorology = JSON.parse($(weather_literal)), scene = JSON.parse($(scene_literal));
             sampling.value = String($(default_ray_count));
-            sectors.value = String($(last(sectors)));
+            sectors.value = String($(default_sector_count));
             let worker;
             let embeddedReady = false;
             const notifyParent = type => {
@@ -251,7 +274,10 @@ self.onmessage = async event => {
                     } else if (message.type === 'result') {
                         if (!current) return fail(new Error('Unexpected worker result'));
                         state.values = message.values;
-                        for (let i=0; i<receiverIDs.length; i++) colours.array[i] = message.values[receiverIDs[i]];
+                        for (let i=0; i<receiverIDs.length; i++) {
+                            const receiver = receiverIDs[i];
+                            colours.array[i] = message.values[receiver] * colourScale[receiver];
+                        }
                         colours.needsUpdate = true; mesh.visible = true;
                         if (!embeddedReady) requestAnimationFrame(() => requestAnimationFrame(() => {
                             embeddedReady = true; notifyParent('ready');
