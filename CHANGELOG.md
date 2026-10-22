@@ -26,6 +26,11 @@
 
 ### Performance
 
+- Reuse prepared direction constants, terrain origin elevations and BVH scratch
+  when building voxel scattering paths, and omit legacy flat-ground paths for
+  concrete terrain. Use compact occupied-segment paths with cached stable
+  Beer–Lambert fractions in the native pipeline and browser adapter; preserve
+  geometric caches and their historical constructors for explicit callers.
 - Prepare voxel DDA direction constants and built-in terrain ray normalization
   once per incident direction, and validate built-in terrain once per response
   rather than per ray. The native step and series APIs and the browser adapter

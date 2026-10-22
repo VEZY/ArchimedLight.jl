@@ -99,60 +99,72 @@ function _voxel_ground_center(grid::VoxelGrid, i::Int, j::Int)
     )
 end
 
-"""
-    prepare_voxel_scattering_transport(grid, quadrature, backend; options=LightOptions())
+# Cached paths own their segments; only terrain intersection scratch is shared
+# while preparing them. Built-in terrain can reuse the exact elevation at one
+# origin, whereas custom terrain retains its per-ray queries and validation.
+function _voxel_scattering_origin_surface(grid, origin, terrain, toricity, stack)
+    ray_origin = _canonical_voxel_origin(grid, origin, toricity)
+    surface = _voxel_launch_cacheable(terrain) ?
+        terrain_elevation_at(terrain, ray_origin[1], ray_origin[2], stack) : nothing
+    return ray_origin, surface
+end
 
-Cache internal source-to-boundary DDA paths for occupied voxels and upward
-ground rays. Terrain-cut voxels use a source point in their exposed part.
-Attenuation is deliberately not stored in the cache, so
-the transport application remains an explicit Beer-Lambert calculation.
-"""
-function prepare_voxel_scattering_transport(
-    grid::VoxelGrid,
-    quadrature::VoxelScatteringQuadrature,
-    backend::VoxelCPUBackend=VoxelCPUBackend(),
-    terrain::AbstractVoxelTerrain=NoVoxelTerrain();
-    options::LightOptions=LightOptions(),
-)
-    _validate_voxel_scattering_quadrature(quadrature)
-    backend.traversal in (:dda, :reference) ||
-        throw(ArgumentError("voxel scattering supports only :dda and :reference traversal"))
-    _validate_terrain_for_grid(grid, terrain, options.toricity)
+function _trace_voxel_scattering_path(grid, origin, ray_origin, raw_direction, setup,
+    terrain_direction, backend, terrain, toricity, terrain_stack, surface)
+    path = if backend.traversal == :dda
+        _trace_voxel_ray_dda_prepared!(VoxelRaySegment{Float64}[], grid,
+            ray_origin, setup, toricity, true)
+    else
+        _trace_voxel_ray_reference(grid, origin, raw_direction, toricity; allow_upward=true)
+    end
+    return _truncate_voxel_path_at_terrain_prepared!(grid, path, ray_origin,
+        setup.direction, terrain, toricity,
+        VoxelRayWorkspace(path.segments, terrain_stack), surface, terrain_direction)
+end
 
-    source_paths = Dict{Tuple{Int,Int},VoxelRayPath{Float64}}()
+function _prepare_voxel_scattering_paths!(source_paths, ground_paths, terrain_paths,
+    grid, quadrature, backend, terrain, options, store_path::F) where {F}
+    # Transport normalizes the raw quadrature direction once for DDA and once
+    # for terrain intersection. Keep that rounding sequence outside the loops.
+    setups = map(quadrature.directions) do direction
+        _voxel_dda_setup(grid, _normalise_voxel_transport_direction(direction))
+    end
+    terrain_directions = map(setups) do setup
+        _prepare_voxel_terrain_direction(terrain, setup.direction)
+    end
+    terrain_stack = Int[]
     for (source_id, index) in enumerate(CartesianIndices(grid.pad))
         grid.pad[index] > 0 || continue
         origin = _voxel_scattering_source_point(grid, index, terrain)
         origin === nothing && continue
+        ray_origin, surface = _voxel_scattering_origin_surface(grid, origin,
+            terrain, options.toricity, terrain_stack)
         for direction_index in eachindex(quadrature.directions)
-            source_paths[(source_id, direction_index)] = _trace_voxel_transport_ray(
-                grid,
-                origin,
-                quadrature.directions[direction_index];
-                toricity=options.toricity,
-                algorithm=backend.traversal,
-                terrain=terrain,
-            )
+            path = _trace_voxel_scattering_path(grid, origin, ray_origin,
+                quadrature.directions[direction_index], setups[direction_index],
+                terrain_directions[direction_index], backend, terrain,
+                options.toricity, terrain_stack, surface)
+            source_paths[(source_id, direction_index)] = store_path(path)
         end
     end
 
-    ground_paths = Dict{Tuple{Int,Int},VoxelRayPath{Float64}}()
-    nx, ny, _ = size(grid)
-    for (ground_id, index) in enumerate(CartesianIndices((nx, ny)))
-        origin = _voxel_ground_center(grid, index[1], index[2])
-        for direction_index in eachindex(quadrature.directions)
-            quadrature.directions[direction_index][3] > 0 || continue
-            ground_paths[(ground_id, direction_index)] = _trace_voxel_transport_ray(
-                grid,
-                origin,
-                quadrature.directions[direction_index];
-                toricity=options.toricity,
-                algorithm=backend.traversal,
-            )
+    # Legacy flat-ground transport cannot be combined with concrete terrain.
+    if terrain isa NoVoxelTerrain
+        nx, ny, _ = size(grid)
+        for (ground_id, index) in enumerate(CartesianIndices((nx, ny)))
+            origin = _voxel_ground_center(grid, index[1], index[2])
+            ray_origin = _canonical_voxel_origin(grid, origin, options.toricity)
+            for direction_index in eachindex(quadrature.directions)
+                quadrature.directions[direction_index][3] > 0 || continue
+                path = _trace_voxel_scattering_path(grid, origin, ray_origin,
+                    quadrature.directions[direction_index], setups[direction_index],
+                    terrain_directions[direction_index], backend, terrain,
+                    options.toricity, terrain_stack, nothing)
+                ground_paths[(ground_id, direction_index)] = store_path(path)
+            end
         end
     end
 
-    terrain_paths = Dict{Tuple{Int,Int},VoxelRayPath{Float64}}()
     terrain_direction_weights = Dict{Int,Tuple{Vector{Int},Vector{Float64}}}()
     for patch_id in 1:terrain_patch_count(terrain)
         origin = _terrain_launch_point(grid, terrain, patch_id)
@@ -160,17 +172,58 @@ function prepare_voxel_scattering_transport(
         normal = terrain_patch_normal(terrain, patch_id)
         direction_indices, weights = terrain_lambertian_weights(quadrature, normal)
         terrain_direction_weights[patch_id] = (direction_indices, weights)
+        ray_origin, surface = _voxel_scattering_origin_surface(grid, origin,
+            terrain, options.toricity, terrain_stack)
         for direction_index in direction_indices
-            direction = quadrature.directions[direction_index]
-            terrain_paths[(patch_id, direction_index)] = _trace_voxel_transport_ray(
-                grid,
-                origin,
-                direction;
-                toricity=options.toricity,
-                algorithm=backend.traversal,
-                terrain=terrain,
-            )
+            path = _trace_voxel_scattering_path(grid, origin, ray_origin,
+                quadrature.directions[direction_index], setups[direction_index],
+                terrain_directions[direction_index], backend, terrain,
+                options.toricity, terrain_stack, surface)
+            terrain_paths[(patch_id, direction_index)] = store_path(path)
         end
+    end
+    return terrain_direction_weights
+end
+
+"""
+    prepare_voxel_scattering_transport(grid, quadrature, backend;
+                                      options=LightOptions(), compact=false)
+
+Cache internal source-to-boundary DDA paths for occupied voxels and upward
+ground rays. Terrain-cut voxels use a source point in their exposed part.
+With `compact=false`, paths retain their geometry for inspection. With
+`compact=true`, only occupied segments and their Beer-Lambert fractions are
+stored. Both modes depend on PAD and the backend extinction coefficient;
+leaf optical properties and soil reflectance may change without rebuilding.
+"""
+function prepare_voxel_scattering_transport(
+    grid::VoxelGrid,
+    quadrature::VoxelScatteringQuadrature,
+    backend::VoxelCPUBackend=VoxelCPUBackend(),
+    terrain::AbstractVoxelTerrain=NoVoxelTerrain();
+    options::LightOptions=LightOptions(),
+    compact::Bool=false,
+)
+    _validate_voxel_scattering_quadrature(quadrature)
+    backend.traversal in (:dda, :reference) ||
+        throw(ArgumentError("voxel scattering supports only :dda and :reference traversal"))
+    _validate_terrain_for_grid(grid, terrain, options.toricity)
+
+    source_paths = Dict{Tuple{Int,Int},VoxelRayPath{Float64}}()
+    ground_paths = Dict{Tuple{Int,Int},VoxelRayPath{Float64}}()
+    terrain_paths = Dict{Tuple{Int,Int},VoxelRayPath{Float64}}()
+    compact_paths = nothing
+    if compact
+        compact_source = Dict{Tuple{Int,Int},VoxelCompactScatteringPath{Float64}}()
+        compact_ground = Dict{Tuple{Int,Int},VoxelCompactScatteringPath{Float64}}()
+        compact_terrain = Dict{Tuple{Int,Int},VoxelCompactScatteringPath{Float64}}()
+        terrain_direction_weights = _prepare_voxel_scattering_paths!(compact_source,
+            compact_ground, compact_terrain, grid, quadrature, backend, terrain,
+            options, path -> _compact_voxel_scattering_path(path, grid, backend))
+        compact_paths = VoxelCompactScatteringPaths(compact_source, compact_ground, compact_terrain)
+    else
+        terrain_direction_weights = _prepare_voxel_scattering_paths!(source_paths,
+            ground_paths, terrain_paths, grid, quadrature, backend, terrain, options, identity)
     end
 
     return VoxelScatteringTransportCache(
@@ -184,6 +237,7 @@ function prepare_voxel_scattering_transport(
         terrain_paths,
         terrain_direction_weights,
         terrain_patch_count(terrain),
+        compact_paths,
     )
 end
 
@@ -241,6 +295,65 @@ function _accumulate_voxel_path_transport!(
     elseif path.exit_reason == :bottom
         last_index === nothing && error("a bottom-exiting internal ray crossed no voxel")
         ground_incident[last_index[1], last_index[2]] += incoming
+        return (top=0.0, side=0.0, bottom=0.0)
+    elseif path.exit_reason == :top
+        return (top=incoming, side=0.0, bottom=0.0)
+    elseif path.exit_reason == :side
+        return (top=0.0, side=incoming, bottom=0.0)
+    end
+    error("unsupported voxel exit reason: $(path.exit_reason)")
+end
+
+function _compact_voxel_scattering_path(
+    path::VoxelRayPath, grid::VoxelGrid, backend::VoxelCPUBackend,
+)
+    # Allocate only retained segments: empty portions of the ray are useful
+    # while tracing, but neither attenuate light nor need to survive preparation.
+    retained = backend.g > 0 ?
+        count(segment -> grid.pad[CartesianIndex(segment.index)] > 0, path.segments) : 0
+    segments = Vector{VoxelCompactScatteringSegment{Float64}}(undef, retained)
+    nx, ny, _ = size(grid)
+    write = 0
+    if backend.g > 0
+        for segment in path.segments
+            index = CartesianIndex(segment.index)
+            density = grid.pad[index]
+            density > 0 || continue
+            interception, transmission = _voxel_segment_fractions(
+                backend.g * density * segment.length)
+            write += 1
+            i, j, k = segment.index
+            segments[write] = VoxelCompactScatteringSegment(
+                i + (j - 1) * nx + (k - 1) * nx * ny, interception, transmission)
+        end
+    end
+    # Routing depends on the geometric terminal cell, which can itself be empty.
+    bottom_index = if path.exit_reason == :bottom && !isempty(path.segments)
+        terminal = path.segments[end].index
+        terminal[1] + (terminal[2] - 1) * size(grid)[1]
+    else
+        0
+    end
+    patch_id = path.exit_reason == :terrain ? something(path.terrain_hit).patch_id : 0
+    return VoxelCompactScatteringPath(segments, path.exit_reason, bottom_index, patch_id)
+end
+
+function _accumulate_voxel_path_transport!(
+    intercepted, ground_incident, terrain_incident, energy::Float64,
+    path::VoxelCompactScatteringPath, grid::VoxelGrid, backend::VoxelCPUBackend,
+)
+    incoming = energy
+    for segment in path.segments
+        removed = incoming * segment.interception
+        incoming = incoming * segment.transmission
+        intercepted[segment.index] += removed
+    end
+    if path.exit_reason == :terrain
+        terrain_incident[path.terrain_patch_id] += incoming
+        return (top=0.0, side=0.0, bottom=0.0)
+    elseif path.exit_reason == :bottom
+        path.bottom_index == 0 && error("a bottom-exiting internal ray crossed no voxel")
+        ground_incident[path.bottom_index] += incoming
         return (top=0.0, side=0.0, bottom=0.0)
     elseif path.exit_reason == :top
         return (top=incoming, side=0.0, bottom=0.0)
@@ -315,7 +428,8 @@ function apply_voxel_scattering_transport(
     band in (:par, :nir) || throw(ArgumentError("band must be :par or :nir"))
 
     transport_cache = cache === nothing ?
-                      prepare_voxel_scattering_transport(grid, quadrature, backend, terrain; options=options) :
+                      prepare_voxel_scattering_transport(grid, quadrature, backend, terrain;
+                          options=options, compact=true) :
                       _validate_voxel_scattering_cache(grid, quadrature, backend, terrain, cache; options=options)
     return _apply_voxel_scattering_transport(
         grid, emitted, quadrature, backend, transport_cache;
@@ -357,6 +471,37 @@ function _apply_voxel_scattering_transport(
     terrain::AbstractVoxelTerrain,
     initial_terrain_energy::Union{Nothing,AbstractVector{<:Real}},
 )
+    paths = transport_cache.compact
+    if paths === nothing
+        return _apply_voxel_scattering_transport_paths(
+            grid, emitted, quadrature, backend, transport_cache,
+            band, ground, initial_ground_energy, terrain, initial_terrain_energy,
+            transport_cache.source_paths, transport_cache.ground_paths,
+            transport_cache.terrain_paths)
+    end
+    return _apply_voxel_scattering_transport_paths(
+        grid, emitted, quadrature, backend, transport_cache,
+        band, ground, initial_ground_energy, terrain, initial_terrain_energy,
+        paths.source_paths, paths.ground_paths, paths.terrain_paths)
+end
+
+# Choose the representation once. Each order then runs on concrete path
+# dictionaries, without a per-segment mode branch or abstract path dispatch.
+function _apply_voxel_scattering_transport_paths(
+    grid::VoxelGrid,
+    emitted::AbstractArray{<:Real,3},
+    quadrature::VoxelScatteringQuadrature,
+    backend::VoxelCPUBackend,
+    transport_cache::VoxelScatteringTransportCache,
+    band::Symbol,
+    ground::Union{Nothing,VoxelGroundOptics},
+    initial_ground_energy::Union{Nothing,AbstractArray{<:Real,2}},
+    terrain::AbstractVoxelTerrain,
+    initial_terrain_energy::Union{Nothing,AbstractVector{<:Real}},
+    source_paths::Dict{Tuple{Int,Int},P},
+    ground_paths::Dict{Tuple{Int,Int},P},
+    terrain_paths::Dict{Tuple{Int,Int},P},
+) where {P}
     intercepted = zeros(Float64, size(grid))
     ground_incident = zeros(Float64, size(grid)[1:2])
     terrain_incident = zeros(Float64, terrain_patch_count(terrain))
@@ -396,14 +541,14 @@ function _apply_voxel_scattering_transport(
         grid.pad[index] > 0 ||
             throw(ArgumentError("non-zero scattering energy was assigned to empty voxel $index"))
         emitted_total += energy
-        haskey(transport_cache.source_paths, (source_id, first(eachindex(quadrature.directions)))) ||
+        haskey(source_paths, (source_id, first(eachindex(quadrature.directions)))) ||
             throw(ArgumentError(
                 "non-zero scattering energy was assigned to fully subterranean voxel $index",
             ))
         for direction_index in eachindex(quadrature.directions)
             directional_energy = energy * quadrature.weights[direction_index]
             directional_energy == 0 && continue
-            path = transport_cache.source_paths[(source_id, direction_index)]
+            path = source_paths[(source_id, direction_index)]
             escaped = _accumulate_voxel_path_transport!(
                 intercepted,
                 ground_incident,
@@ -444,7 +589,7 @@ function _apply_voxel_scattering_transport(
             reflected = reflected_by_cell[index]
             reflected == 0 && continue
             for (direction_index, weight) in zip(direction_indices, ground_weights)
-                path = transport_cache.ground_paths[(ground_id, direction_index)]
+                path = ground_paths[(ground_id, direction_index)]
                 escaped = _accumulate_voxel_path_transport!(
                     intercepted,
                     secondary_ground,
@@ -483,7 +628,7 @@ function _apply_voxel_scattering_transport(
                 direction_indices, weights =
                     transport_cache.terrain_direction_weights[patch_id]
                 for (direction_index, weight) in zip(direction_indices, weights)
-                    path = transport_cache.terrain_paths[(patch_id, direction_index)]
+                    path = terrain_paths[(patch_id, direction_index)]
                     escaped = _accumulate_voxel_path_transport!(
                         intercepted,
                         ground_incident,
@@ -869,7 +1014,8 @@ function compute_voxel_scattering(
     _validate_voxel_first_order_for_scattering(grid, first, terrain)
     quadrature = prepare_voxel_scattering_quadrature(turtle)
     transport_cache = cache === nothing ?
-                      prepare_voxel_scattering_transport(grid, quadrature, backend, terrain; options=options) :
+                      prepare_voxel_scattering_transport(grid, quadrature, backend, terrain;
+                          options=options, compact=true) :
                       _validate_voxel_scattering_cache(grid, quadrature, backend, terrain, cache; options=options)
     par = _compute_voxel_scattering_band(
         grid,

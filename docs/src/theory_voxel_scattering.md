@@ -72,7 +72,7 @@ The optical convention is:
 - PAR: 400–700 nm;
 - NIR: 700–2500 nm.
 
-All current voxel outputs are energy quantities (`W` or `J`), so spectra must
+Voxel radiation outputs use energy, power or irradiance units, so spectra must
 be reduced with incident spectral irradiance weighting. For a band ``b``:
 
 ```math
@@ -121,7 +121,13 @@ isotropic foliage source. Sun sectors are excluded because scattered emission
 is independent of the instantaneous direct-beam direction.
 
 The matrix-free operator applies Beer–Lambert attenuation along cached DDA
-paths. For every application:
+paths. The step and series workflows prepare compact paths: empty-voxel segments
+are discarded, and each retained segment stores its linear voxel index and
+the same interception/transmission fractions used by geometric tracing. Their
+original order and terminal soil or escape destination are preserved. These
+fractions depend on `PAD`, `G` and path length, so the existing cache validation
+rejects changed extinction fields while allowing new leaf albedos or soil
+reflectance. For every application:
 
 ```math
 E_\mathrm{emitted} = E_\mathrm{reintercepted}

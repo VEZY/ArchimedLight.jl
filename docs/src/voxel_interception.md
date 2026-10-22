@@ -335,6 +335,12 @@ patch material assignment. Optical albedos and soil reflectance
 are applied during iteration rather than baked into geometric paths, so changing
 only optics does not require rebuilding those paths.
 
+The step and series APIs use compact scattering paths that retain only occupied
+segments and their stable Beer–Lambert fractions. Explicit
+`prepare_voxel_scattering_transport(...; compact=true)` selects the same storage.
+Its default `compact=false` retains geometric paths for diagnostics and existing
+cache callers. Both representations use the same transport and energy balance.
+
 Within a newly traced response, rays sharing one direction reuse its DDA
 stepping constants and built-in terrain normalization. Built-in terrain is
 validated once per response; standalone ray calls and custom terrain retain

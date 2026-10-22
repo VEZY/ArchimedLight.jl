@@ -75,7 +75,7 @@ function prepare_hour(state::HourState, hour::Float64, scattering::Bool=false)
     if scattering && state.scattering_cache === nothing
         state.scattering_cache = AL.prepare_voxel_scattering_transport(
             state.data.grid, state.weather.quadrature, state.data.backend,
-            state.data.terrain; options=SCATTER_OPTIONS)
+            state.data.terrain; options=SCATTER_OPTIONS, compact=true)
         state.scattering_builds += 1
         flags |= Int32(2)
     end

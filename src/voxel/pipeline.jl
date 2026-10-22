@@ -50,7 +50,8 @@ function _voxel_scattering_cache_for_turtle!(
         _voxel_scattering_quadrature_fingerprint(quadrature),
     )
     cache = get!(cache_by_configuration, key) do
-        prepare_voxel_scattering_transport(grid, quadrature, backend, terrain; options=options)
+        prepare_voxel_scattering_transport(grid, quadrature, backend, terrain;
+            options=options, compact=true)
     end
     return _validate_voxel_scattering_cache(grid, quadrature, backend, terrain, cache; options=options)
 end

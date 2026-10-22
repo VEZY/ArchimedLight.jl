@@ -205,6 +205,10 @@ end
     return incoming * (1 - transmission), incoming * transmission
 end
 
+# A unit packet supplies the exact same two fractions without changing the
+# branch layout of the first-order hot loop.
+@inline _voxel_segment_fractions(optical_depth) = _voxel_segment_energy(1.0, optical_depth)
+
 function _voxel_path_for_backend(
     grid,
     origin,

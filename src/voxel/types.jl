@@ -455,6 +455,27 @@ struct VoxelScatteringQuadrature{T<:AbstractFloat}
     weights::Vector{T}
 end
 
+# Compact transport stores both attenuation tails to preserve the arithmetic
+# used by geometric paths, including very small interception/transmission.
+struct VoxelCompactScatteringSegment{T<:AbstractFloat}
+    index::Int
+    interception::T
+    transmission::T
+end
+
+struct VoxelCompactScatteringPath{T<:AbstractFloat}
+    segments::Vector{VoxelCompactScatteringSegment{T}}
+    exit_reason::Symbol
+    bottom_index::Int
+    terrain_patch_id::Int
+end
+
+struct VoxelCompactScatteringPaths{T<:AbstractFloat}
+    source_paths::Dict{Tuple{Int,Int},VoxelCompactScatteringPath{T}}
+    ground_paths::Dict{Tuple{Int,Int},VoxelCompactScatteringPath{T}}
+    terrain_paths::Dict{Tuple{Int,Int},VoxelCompactScatteringPath{T}}
+end
+
 """Geometry-dependent internal-ray paths reused by the matrix-free transport operator."""
 struct VoxelScatteringTransportCache{T<:AbstractFloat}
     grid_fingerprint::UInt
@@ -467,6 +488,32 @@ struct VoxelScatteringTransportCache{T<:AbstractFloat}
     terrain_paths::Dict{Tuple{Int,Int},VoxelRayPath{T}}
     terrain_direction_weights::Dict{Int,Tuple{Vector{Int},Vector{T}}}
     terrain_patch_count::Int
+    compact::Union{Nothing,VoxelCompactScatteringPaths{T}}
+end
+
+# Retain both historical ten-argument constructors for geometric caches.
+function VoxelScatteringTransportCache(
+    grid_fingerprint::UInt, terrain_fingerprint::UInt, backend::VoxelCPUBackend,
+    toricity::Bool, quadrature_fingerprint::UInt,
+    source_paths::Dict{Tuple{Int,Int},VoxelRayPath{T}},
+    ground_paths::Dict{Tuple{Int,Int},VoxelRayPath{T}},
+    terrain_paths::Dict{Tuple{Int,Int},VoxelRayPath{T}},
+    terrain_direction_weights::Dict{Int,Tuple{Vector{Int},Vector{T}}},
+    terrain_patch_count::Int,
+) where {T<:AbstractFloat}
+    return VoxelScatteringTransportCache{T}(grid_fingerprint, terrain_fingerprint,
+        backend, toricity, quadrature_fingerprint, source_paths, ground_paths,
+        terrain_paths, terrain_direction_weights, terrain_patch_count, nothing)
+end
+
+function VoxelScatteringTransportCache{T}(
+    grid_fingerprint, terrain_fingerprint, backend, toricity, quadrature_fingerprint,
+    source_paths, ground_paths, terrain_paths, terrain_direction_weights,
+    terrain_patch_count,
+) where {T<:AbstractFloat}
+    return VoxelScatteringTransportCache{T}(grid_fingerprint, terrain_fingerprint,
+        backend, toricity, quadrature_fingerprint, source_paths, ground_paths,
+        terrain_paths, terrain_direction_weights, terrain_patch_count, nothing)
 end
 
 """

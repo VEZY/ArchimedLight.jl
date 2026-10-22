@@ -76,6 +76,16 @@ and on reuses those paths. Each illuminated update still traces the moving
 sun, recomputes radiation weights and iterates the common scattering solver.
 The generic native stopping criteria and convergence diagnostics are retained.
 
+Scattering preparation shares the incident tracer's direction setup and terrain
+search workspace. Built-in terrain heights are queried once per source, and
+unused flat-ground paths are omitted when a terrain is supplied. The native
+pipeline and this adapter request compact transport: occupied segments retain
+their array index and both Beer–Lambert fractions, plus the original terminal
+destination. Empty segments do not survive preparation. Both fractions come
+from the existing scalar attenuation routine; no light equations are duplicated.
+The default public preparation call still returns geometric paths for inspection;
+pass `compact=true` to request the compact representation explicitly.
+
 The current UI retains at most ten configurations: two sky resolutions times
 five ray samplings (1, 4, 16, 64 and 256). Returning to a previous setting reuses
 its sky responses; changing the hour never adds a cache entry. Scene arrays, optical parameters
@@ -173,7 +183,7 @@ changes. Long text is ellipsized with its full value available on hover.
 
 ## Validation on 22 October 2026
 
-The complete default Julia 1.13.1 package suite passes **32,681 assertions**, including
+The complete default Julia 1.13.1 package suite passes **35,967 assertions**, including
 **636 workspace/cache regressions** for launch-cache validation, non-cubic and periodic
 scenes, missing terrain coverage, custom mutable terrains, independent concurrent
 calls and retained output ownership. Custom terrain extensions keep their
@@ -183,12 +193,16 @@ hit/miss queries, periodic terrain and DDA reset/ownership.
 The shared direction preparation adds **2,088 regressions** covering exact ray
 paths, public per-ray terrain responses, custom terrain validation, and native
 step/series parity through changing suns, night and scattering switches.
+Another **3,286 assertions** cover scattering preparation and compact paths,
+including both traversal algorithms, periodic revisits, non-cubic terminal
+routing, tiny and opaque optical depths, cache invalidation and raw/compact
+PAR/NIR parity.
 
 The public mixed-vegetation pipeline, uncached adapter, explicit-direction
 adapter and cached adapter agree exactly on **144 × 1,098 output values**.
 Those native outputs and the supplemental **24 × 1,098** high-ray outputs are
 also exactly equal to the preserved pre-optimization version at commit
-`3c47b05`. Ray positions, weights, triangle geometry and scattering quadrature
+`4e48bdd`. Ray positions, weights, triangle geometry and scattering quadrature
 are unchanged. The disabled-scattering first-order outputs still match the
 preserved 72-case PAD-only baseline within **5.457e-12 J**.
 
@@ -202,9 +216,9 @@ and six further lifecycle revisits, with a maximum native/Wasm output difference
 of **4.657e-10 J**. Their largest energy-balance residual is **2.305e-6 J**,
 within the same relative tolerance applied to the summed incoming energy.
 
-The numerical module is **863,311 bytes**, compiled in 119.9 s with no compiler
+The numerical module is **936,953 bytes**, compiled in 51.4 s with no compiler
 diagnostics. Its SHA256 is
-`646dcc259cb7faf59851810bf87f793adadb7f12a0f8036ba3f43bbee7def7c6`.
+`cc64a6ab47f098bedc5785717a9bace650f4f64f301184c654b5fdf4a44363d7`.
 Build-only adaptations ignore native capacity hints, clear segment vectors in
 one operation and route dense multidimensional arrays through WasmTarget's
 existing matrix registry. The clearing overlay is restricted to voxel segment
@@ -317,3 +331,53 @@ stopped. Its twelve median speedups range from **1.04× to 1.12×**; before/afte
 Wasm output arrays agree exactly in every timing case. These warmed live-update
 timings exclude sky/scattering preparation, array readback and rendering, and
 are separate from the fresh-cache native public API measurements above.
+
+## Shared scattering preparation and compact paths
+
+The scattering pass reuses the shared direction/terrain preparation and skips
+unused flat-ground paths when concrete terrain is present. Compact paths retain
+only occupied segments, their two attenuation fractions and their terminal
+destination. Geometry is converted one path at a time, so a complete geometric
+cache is not retained beside its compact replacement. PAD, extinction, geometry,
+quadrature and boundary changes still invalidate the cache; leaf albedos and
+soil reflectance remain live inputs.
+
+Native Julia 1.13.1 measurements use 46 sectors and 16 rays per face. Three
+alternating blocks contain 11 samples each with `evals=1`; readers and JIT are
+excluded. Cold samples prepare a fresh cache; warmed scattering calls allocate
+fresh result arrays. The raw/compact comparison runs within the same current
+package process, isolating representation cost.
+
+| Scene | Preparation before → compact (ms) | Warm scattering raw → compact (ms) | Retained cache before → compact (MB) |
+| --- | ---: | ---: | ---: |
+| Bundled tree, black terrain | 33.79 → 13.09 | 0.751 → 0.175 | 37.90 → 6.74 |
+| Bundled tree, reflective terrain | 21.59 → 13.19 | 15.757 → 3.206 | 37.90 → 6.74 |
+| Sparse 16 × 12 × 16 canopy + terrain | 14.30 → 7.54 | 2.783 → 0.583 | 41.44 → 6.06 |
+| Dense 8 × 6 × 8 canopy + reflective terrain | 20.71 → 13.46 | 7.888 → 2.276 | 38.99 → 10.85 |
+
+The compact representation speeds up warmed scattering by **3.5×–4.9×** and
+reduces retained cache memory by **72–85%**. Cold allocated bytes fall from
+47.7–49.7 MB to 30.0–42.7 MB. Retained memory is `Base.summarysize`, not peak
+process RSS. Compact conversion adds preparation work relative to the optimized
+geometry-only variant, especially in dense scenes; total preparation remains
+below the original version in these fixtures. Scattering iterations, ray samples
+and every compared energy output are unchanged.
+
+Fresh actual-package checks also exercise public steps and four distinct-sun
+series, with two 11-sample blocks per version in reversed order and fresh caches
+per sample. No full-step regression appears there. Timings vary substantially
+between processes, including the unchanged first-order calculation, so these
+checks are not used to claim a whole-solver speedup. The initial scalar-helper
+factorization was rejected; the final first-order scalar body is unchanged.
+
+The ignored `compact-round4/` directory preserves the frozen `4e48bdd` package,
+module, references, benchmark drivers, allocation measurements, source hashes
+and complete raw results. Its `comparison.md` records the preparation tradeoff
+and the fresh-process observations separately from the isolated compact gain.
+
+The matched emitted-Wasm campaign uses the same runtime and driver, five warm-ups
+and 31 samples per case, after other jobs stop. Scattering-enabled whole updates
+improve by **1.04×–1.50×**; high-ray updates remain dominated by live-sun tracing.
+Disabled-scattering controls vary from about −0.4% to +5.7%, so this campaign
+does not establish a first-order speedup. Every timed output matches its native
+reference and the preserved module; the module grows by 73,642 bytes.

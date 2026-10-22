@@ -207,8 +207,10 @@ function verify_hour_cache(reference=JSON.parsefile(Prepare.REFERENCE),
                 end
                 if scattering_ready
                     cache = something(state.scattering_cache)
-                    sizes = (length(cache.source_paths), length(cache.terrain_paths),
+                    paths = cache.compact === nothing ? cache : cache.compact
+                    sizes = (length(paths.source_paths), length(paths.terrain_paths),
                         length(cache.terrain_direction_weights))
+                    @test sizes[1] > 0 && sizes[2] > 0
                     if scattering_cache === nothing
                         scattering_cache = cache
                         scattering_path_sizes = sizes
