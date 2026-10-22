@@ -12,7 +12,8 @@ browser_vertex_par = Float32[browser_initial_par[Int(i) + 1] for i in browser_ve
 
 # One native WGLMakie mesh and thermal scale for plant AND ground.
 # Its scalar vertex_color buffer changes after each Wasm solve; geometry stays fixed.
-browser_figure = WGLMakie.Figure(size=(1000, 490), fontsize=19, backgroundcolor=:white)
+browser_figure = WGLMakie.Figure(size=(1000, 490), fontsize=19,
+    figure_padding=40, backgroundcolor=:white)
 WGLMakie.Label(browser_figure[0, 1], "Wheat light interception";
     fontsize=25, tellwidth=false)
 # LScene's Camera3D exports WGLMakie's browser orbit controls. Axis3's
@@ -120,24 +121,23 @@ browser_app = Bonito.App(; title="Wheat light interception") do session
         Bonito.DOM.option("136"; value="136");
         id="light-sectors", disabled=true,
         style="font: inherit; padding: 3px 6px;")
-    status = Bonito.DOM.div("Loading…"; id="light-status",
-        style="min-height: 1.5em; color: #475569; margin: 10px 0 2px;")
+    status = Bonito.DOM.div("Loading…"; id="light-status", class="live-demo-status")
     sliders = Bonito.DOM.div(
         Bonito.DOM.label("Hour (UTC)"), hour_slider, hour_label,
         Bonito.DOM.label("Resolution"), resolution_slider, resolution_label;
-        style="display: grid; grid-template-columns: 100px minmax(180px, 1fr) 75px; align-items: center; column-gap: 18px; row-gap: 10px;")
+        class="live-demo-sliders")
     options = Bonito.DOM.div(
         Bonito.DOM.label(scattering_box, " Scattering"),
         Bonito.DOM.label(toricity_box, " Toricity"),
         Bonito.DOM.label("Sky sectors ", sectors_menu);
-        style="display: flex; flex-wrap: wrap; align-items: center; gap: 28px; margin: 14px 0 4px;")
+        class="live-demo-options")
     page = Bonito.DOM.main(
         sliders, options, status,
         browser_figure,
         Bonito.DOM.p("Drag to rotate · scroll or pinch to zoom · right-drag to pan. Coordinates in metres.";
-            style="color: #475569; font-size: 13px; margin: 8px 0;"),
-        Bonito.DOM.p("15 May 2025 · interpolated Montpellier weather · fixed wheat architecture";
-            style="color: #64748b; font-size: 13px; margin: 8px 0;");
+            class="live-demo-caption"),
+        Bonito.DOM.p("15 May 2025 · interpolated Montpellier weather";
+            class="live-demo-caption");
         style="font: 16px system-ui, sans-serif; max-width: 1040px; margin: auto; padding: 16px;")
 
     Bonito.on_document_load(session, js"""
@@ -180,9 +180,7 @@ browser_app = Bonito.App(; title="Wheat light interception") do session
                 pending = null;
                 state.busy = true;
                 status.dataset.busy = "true";
-                const previous = Number.isFinite(state.milliseconds) ?
-                    "Calculation: " + state.milliseconds.toFixed(1) + " ms · " : "";
-                status.textContent = previous + "updating…";
+                status.textContent = "Calculating…";
                 worker.postMessage({type: "calculate", id: current.id,
                     hour: current.hour, options: current.options});
             };
@@ -202,7 +200,7 @@ browser_app = Bonito.App(; title="Wheat light interception") do session
                 });
             };
             const fail = error => {
-                status.textContent = "Light calculation failed: " + error.message;
+                status.textContent = "Calculation failed: " + error.message;
                 status.style.color = "#b91c1c";
                 status.dataset.busy = "false";
                 state.busy = false;
@@ -272,7 +270,7 @@ browser_app = Bonito.App(; title="Wheat light interception") do session
             worker.postMessage({type: "initialize", bytes: $(browser_wasm_bytes),
                 inputs: $(browser_wasm_inputs), receiverCount: $(length(browser_initial_par))});
         } catch (error) {
-            status.textContent = "Light initialization failed: " + error.message;
+            status.textContent = "Initialization failed: " + error.message;
             status.style.color = "#b91c1c";
             console.error(error);
             window.browserLightError = String(error.stack || error);

@@ -75,13 +75,14 @@ function _voxel_cache_for_turtle!(
         _validate_voxel_launch_cache(launch_cache, grid, terrain, backend,
             options.toricity, terrain_fingerprint)
     end
+    occupied_bounds = _prepare_voxel_occupied_bounds(grid, backend, terrain, options)
     directions = NTuple{3,Float64}[]
     responses = VoxelDirectionResponse{Float64}[]
     for sector in turtle.sectors
         direction = _normalise_voxel_direction(ntuple(i -> -Float64(sector.direction[i]), 3))
         response = get!(response_by_direction, direction) do
             _compute_voxel_direction_response(grid, direction, backend, terrain,
-                options, launch_cache, workspace, terrain_fingerprint)
+                options, launch_cache, workspace, terrain_fingerprint, occupied_bounds)
         end
         push!(directions, direction)
         push!(responses, response)

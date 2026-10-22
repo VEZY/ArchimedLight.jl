@@ -2,8 +2,8 @@
 
 This is an isolated prototype on the bundled `examples/voxel_tree` scene:
 an 8 × 8 × 9 PAD grid, 65 occupied cells, and a 512-triangle PLY terrain.
-Generated artifacts stay in ignored `build/`; normal package and documentation
-builds do not compile or publish this prototype.
+Compiler and validation outputs stay in ignored `build/`. Documentation builds
+serve the verified static copy in `docs/src/assets/live-voxel/` without compiling.
 
 ## Numerical scope
 
@@ -159,6 +159,14 @@ export from the same Kaimon Julia environment:
 include(joinpath(prototype, "view.jl"))
 VoxelWasmView.export_view()
 ```
+
+Export also publishes the certified, self-contained HTML and its source/hash
+receipt to `docs/src/assets/live-voxel/` for the home-page scene selector.
+Pass `asset_directory=nothing` to export only the local prototype. The static
+preview is a screenshot of the rendered scene. Ordinary documentation builds
+serve these assets without a compiler; `node docs/voxel_wasm/check_published.mjs`
+checks that the published view still matches its validated runtime and sources.
+Both live demos use `docs/live_wheat/shell.css` for controls, status and captions.
 
 The command compares all 144 cases, then records 31 warmed timing samples for
 the 24 midday/late-afternoon cases. Omitting `--benchmark-hours` times every
@@ -479,3 +487,43 @@ Matched warmed Node timings and an order-reversed repeat vary substantially,
 including disabled-scattering controls, so they establish no whole-update gain
 or regression for the small browser scene. Every measured output still passes
 its fresh native reference and exactly matches the frozen module.
+
+## Incident-ray bounds and scattering workspaces
+
+Finite DDA responses prepare conservative occupied bounds once per batch or
+native row. Proven empty rays retain the same DDA steps and exact terminal
+metadata, while omitting segment writes and the attenuation pass. Terrain
+intersection and coverage checks stay shared. Periodic/reference/custom-terrain
+paths and public geometric queries retain their full traversal. Each browser
+configuration retains the same shared bounds for its read-only scene.
+
+Each active scattering band also reuses transport arrays and two alternating
+terrain-bounce buffers. Public results remain independently owned. On four native
+fixtures, scattering allocations fall by **9–48%**, with unchanged retained path
+caches; applying transport with an existing workspace allocates **zero bytes**.
+The scratch workspace is local to a band solve, rather than retained in its
+result or geometry cache. Bounds preparation also allocates zero bytes in the
+measured current-package controls.
+
+Matched sibling-module measurements isolate the ray optimization against the
+workspace-only version: complete fresh native steps improve **5–14%** on the
+three sparse fixtures; four distinct-sun series improve **3–14%**. These use
+46 sectors, 16 rays per face, three alternating 11-sample blocks and `evals=1`.
+An unchanged first-order control exposed a 28–29% package-versus-manual-module
+timing difference, so that unmatched comparison is excluded from speedup claims.
+All 27 measured candidate source files match the retained shared Julia source.
+
+Against frozen `16ff906`, 12 matched warmed Node cases (31 samples each,
+16/64/256 rays, two hours, scattering off/on) improve **7–15%** in complete update
+time. Every sample passes a fresh native reference; captured arrays exactly
+match the frozen module. Cold scattering preparation remains variable and is
+recorded separately from the faster sky preparation. The Wasm module grows from
+993,416 to 1,081,526 bytes (8.9%); geometry-cache sizes are unchanged.
+
+The ignored `transport-round7/` directory retains source hashes, frozen inputs,
+the corrected matched-module controls, raw timings and `comparison.md`, including
+the discarded preliminary measurement interpretation. Final validation passes
+37,356 default-suite assertions, 7,399 focused assertions and 168 native/Wasm
+cases. Native arrays and budgets equal `16ff906` exactly, including the
+128-bounce terrain residual. Release-tagged external fixtures are outside this
+default-suite run.

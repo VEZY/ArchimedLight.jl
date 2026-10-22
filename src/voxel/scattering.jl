@@ -394,6 +394,35 @@ function _ground_lambertian_weights(quadrature::VoxelScatteringQuadrature)
     return direction_indices, weights
 end
 
+# Public transport calls own a fresh workspace. A band solve can instead reuse
+# these buffers after consuming each order's borrowed transport result.
+struct _VoxelScatteringWorkspace{G}
+    intercepted::Array{Float64,3}
+    ground_incident::Matrix{Float64}
+    terrain_incident::Vector{Float64}
+    terrain_next::Vector{Float64}
+    terrain_incident_total::Vector{Float64}
+    terrain_absorbed::Vector{Float64}
+    terrain_reflected::Vector{Float64}
+    reflected_by_cell::G
+    secondary_ground::G
+end
+
+function _VoxelScatteringWorkspace(grid::VoxelGrid, terrain::AbstractVoxelTerrain,
+    ground::Union{Nothing,VoxelGroundOptics})
+    horizontal = size(grid)[1:2]
+    patches = terrain_patch_count(terrain)
+    pending = Vector{Float64}(undef, patches)
+    next = patches == 0 ? pending : Vector{Float64}(undef, patches)
+    reflected = ground === nothing ? nothing : Matrix{Float64}(undef, horizontal)
+    secondary = ground === nothing ? nothing : Matrix{Float64}(undef, horizontal)
+    return _VoxelScatteringWorkspace(
+        Array{Float64,3}(undef, size(grid)), Matrix{Float64}(undef, horizontal),
+        pending, next, Vector{Float64}(undef, patches),
+        Vector{Float64}(undef, patches), Vector{Float64}(undef, patches),
+        reflected, secondary)
+end
+
 """
     apply_voxel_scattering_transport(grid, emitted, quadrature, backend;
                                      band=:par, ground=nothing,
@@ -501,6 +530,7 @@ function _apply_voxel_scattering_transport(
     initial_ground_energy::Union{Nothing,AbstractArray{<:Real,2}},
     terrain::AbstractVoxelTerrain,
     initial_terrain_energy::Union{Nothing,AbstractVector{<:Real}},
+    workspace::_VoxelScatteringWorkspace=_VoxelScatteringWorkspace(grid, terrain, ground),
 )
     paths = transport_cache.compact
     if paths === nothing
@@ -508,12 +538,12 @@ function _apply_voxel_scattering_transport(
             grid, emitted, quadrature, backend, transport_cache,
             band, ground, initial_ground_energy, terrain, initial_terrain_energy,
             transport_cache.source_paths, transport_cache.ground_paths,
-            transport_cache.terrain_paths)
+            transport_cache.terrain_paths, workspace)
     end
     return _apply_voxel_scattering_transport_paths(
         grid, emitted, quadrature, backend, transport_cache,
         band, ground, initial_ground_energy, terrain, initial_terrain_energy,
-        paths.source_paths, paths.ground_paths, paths.terrain_paths)
+        paths.source_paths, paths.ground_paths, paths.terrain_paths, workspace)
 end
 
 # Choose the representation once. Each order then runs on concrete path
@@ -532,13 +562,20 @@ function _apply_voxel_scattering_transport_paths(
     source_paths::S,
     ground_paths::G,
     terrain_paths::R,
+    workspace::_VoxelScatteringWorkspace=_VoxelScatteringWorkspace(grid, terrain, ground),
 ) where {S,G,R}
-    intercepted = zeros(Float64, size(grid))
-    ground_incident = zeros(Float64, size(grid)[1:2])
-    terrain_incident = zeros(Float64, terrain_patch_count(terrain))
-    terrain_incident_total = zeros(Float64, length(terrain_incident))
-    terrain_absorbed = zeros(Float64, length(terrain_incident))
-    terrain_reflected = zeros(Float64, length(terrain_incident))
+    intercepted = workspace.intercepted
+    ground_incident = workspace.ground_incident
+    terrain_incident = workspace.terrain_incident
+    terrain_incident_total = workspace.terrain_incident_total
+    terrain_absorbed = workspace.terrain_absorbed
+    terrain_reflected = workspace.terrain_reflected
+    fill!(intercepted, 0.0)
+    fill!(ground_incident, 0.0)
+    fill!(terrain_incident, 0.0)
+    fill!(terrain_incident_total, 0.0)
+    fill!(terrain_absorbed, 0.0)
+    fill!(terrain_reflected, 0.0)
     if initial_ground_energy !== nothing
         for index in eachindex(initial_ground_energy)
             value = Float64(initial_ground_energy[index])
@@ -605,7 +642,7 @@ function _apply_voxel_scattering_transport_paths(
         escaped_bottom = sum(ground_incident)
     else
         reflectance = _ground_band_field(ground, band)
-        reflected_by_cell = zeros(Float64, size(ground_incident))
+        reflected_by_cell = workspace.reflected_by_cell
         for index in CartesianIndices(ground_incident)
             incident = ground_incident[index]
             coefficient = _voxel_optical_value(reflectance, index)
@@ -616,7 +653,8 @@ function _apply_voxel_scattering_transport_paths(
         end
 
         direction_indices, ground_weights = _ground_lambertian_weights(quadrature)
-        secondary_ground = zeros(Float64, size(ground_incident))
+        secondary_ground = workspace.secondary_ground
+        fill!(secondary_ground, 0.0)
         for (ground_id, index) in enumerate(CartesianIndices(reflected_by_cell))
             reflected = reflected_by_cell[index]
             reflected == 0 && continue
@@ -643,10 +681,11 @@ function _apply_voxel_scattering_transport_paths(
     terrain_unresolved = 0.0
     if !(terrain isa NoVoxelTerrain)
         pending = terrain_incident
+        next_incident = workspace.terrain_next
         reference = sum(pending)
         for bounce in 1:128
             sum(pending) <= 64eps(Float64) * max(reference, 1.0) && break
-            next_incident = zeros(Float64, length(pending))
+            fill!(next_incident, 0.0)
             for patch_id in eachindex(pending)
                 incident = pending[patch_id]
                 incident == 0 && continue
@@ -680,7 +719,7 @@ function _apply_voxel_scattering_transport_paths(
             if bounce == 128
                 terrain_unresolved = sum(next_incident)
             else
-                pending = next_incident
+                pending, next_incident = next_incident, pending
             end
         end
         sum(ground_incident) <= 64eps(Float64) * max(reference, 1.0) || error(
@@ -929,11 +968,12 @@ function _compute_voxel_scattering_band(
     transport_unresolved = 0.0
     iterations = 0
     converged = source_reference == 0.0
+    workspace = source_reference == 0.0 ? nothing :
+        _VoxelScatteringWorkspace(grid, terrain, ground)
 
     for iteration in 1:options.scattering_max_iter
         source_reference == 0.0 && break
         iterations = iteration
-        fill!(emitted, 0.0)
         for index in CartesianIndices(grid.pad)
             incoming = current[index]
             omega = _voxel_band_albedo(optics, band, index)
@@ -952,6 +992,7 @@ function _compute_voxel_scattering_band(
             iteration == 1 ? initial_ground : nothing,
             terrain,
             iteration == 1 ? initial_terrain : nothing,
+            something(workspace),
         )
         ground_absorbed += transport.ground_absorbed_energy
         ground_reflected += transport.ground_reflected_energy

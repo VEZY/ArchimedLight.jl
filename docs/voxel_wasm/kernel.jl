@@ -31,6 +31,7 @@ mutable struct HourState
     weather::WeatherData
     launch_cache::AL.VoxelLaunchGeometryCache
     workspace::AL.VoxelRayWorkspace
+    occupied_bounds::Union{Nothing,AL._VoxelOccupiedBounds}
     responses::Vector{AL.VoxelDirectionResponse{Float64}}
     par::Vector{Float64}
     nir::Vector{Float64}
@@ -48,6 +49,7 @@ function make_hour_state(data::Data, weather::WeatherData)
     return HourState(data, weather,
         AL.VoxelLaunchGeometryCache(data.grid, data.terrain, data.backend, OPTIONS.toricity),
         AL.VoxelRayWorkspace(),
+        AL._prepare_voxel_occupied_bounds(data.grid, data.backend, data.terrain, OPTIONS),
         Vector{AL.VoxelDirectionResponse{Float64}}(undef, n),
         zeros(Float64, n), zeros(Float64, n), false, 0, 0, 0, 0, nothing, 0)
 end
@@ -62,7 +64,7 @@ function prepare_sky!(state::HourState)
         direction = state.weather.sky_up[i]
         state.responses[i] = direction_response(state.data,
             -direction[1], -direction[2], -direction[3], state.launch_cache, state.workspace,
-            terrain_fingerprint)
+            terrain_fingerprint, state.occupied_bounds)
     end
     state.sky_ready = true
     state.sky_builds += 1
@@ -201,11 +203,13 @@ end
 function direction_response(data::Data, x::Float64, y::Float64, z::Float64,
                             launch_cache::AL.VoxelLaunchGeometryCache,
                             workspace::AL.VoxelRayWorkspace,
-                            terrain_fingerprint::Union{Nothing,UInt}=nothing)
+                            terrain_fingerprint::Union{Nothing,UInt}=nothing,
+                            occupied_bounds::Union{Nothing,AL._VoxelOccupiedBounds}=
+                                AL._prepare_voxel_occupied_bounds(data.grid, data.backend, data.terrain, OPTIONS))
     # Preserve prepare_voxel_responses' normalization before the shared response.
     direction = AL._normalise_voxel_direction((x, y, z))
     AL._compute_voxel_direction_response(data.grid, direction, data.backend, data.terrain,
-                                        OPTIONS, launch_cache, workspace, terrain_fingerprint)
+                                        OPTIONS, launch_cache, workspace, terrain_fingerprint, occupied_bounds)
 end
 
 """Shared interception/scattering; output includes display energy and an absorption budget."""
@@ -215,10 +219,11 @@ function solve(data::Data, weather::WeatherData, propagation::Vector{Float64},
     responses = Vector{AL.VoxelDirectionResponse{Float64}}(undef, count)
     launch_cache = AL.VoxelLaunchGeometryCache(data.grid, data.terrain, data.backend, OPTIONS.toricity)
     workspace = AL.VoxelRayWorkspace()
+    occupied_bounds = AL._prepare_voxel_occupied_bounds(data.grid, data.backend, data.terrain, OPTIONS)
     @inbounds for i in 1:count
         k = 3i - 2
         responses[i] = direction_response(data, propagation[k], propagation[k + 1], propagation[k + 2],
-                                         launch_cache, workspace, launch_cache.terrain_fingerprint)
+                                         launch_cache, workspace, launch_cache.terrain_fingerprint, occupied_bounds)
     end
     result = AL._apply_voxel_first_order(data.grid, responses, par, zeros(Float64, count),
                                         seconds, false, AL.terrain_patch_count(data.terrain))
@@ -344,7 +349,8 @@ function solve_hour_cached(state::HourState, hour::Float64, seconds::Float64,
     fill_hour_par!(state.par, state.weather, forcing, sun_up, has_sun)
     if has_sun
         state.responses[count] = direction_response(state.data,
-            -sun_up[1], -sun_up[2], -sun_up[3], state.launch_cache, state.workspace)
+            -sun_up[1], -sun_up[2], -sun_up[3], state.launch_cache, state.workspace,
+            nothing, state.occupied_bounds)
         state.sun_traces += 1
     end
     result = AL._apply_voxel_first_order(state.data.grid, state.responses,

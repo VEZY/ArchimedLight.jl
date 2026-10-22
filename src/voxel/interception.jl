@@ -189,6 +189,69 @@ function _voxel_launch_height!(cache::VoxelLaunchGeometryCache, rays::VoxelIncid
     return surface
 end
 
+const _VoxelOccupiedBounds = NamedTuple{(:minimum, :maximum, :empty),
+    Tuple{NTuple{3,Float64},NTuple{3,Float64},Bool}}
+
+# This bounds only the incident-ray optimization. Raw diagnostics, periodic
+# rays, the reference tracer and custom terrain keep their original paths.
+function _prepare_voxel_occupied_bounds(grid::VoxelGrid, backend::VoxelCPUBackend,
+    terrain::AbstractVoxelTerrain, options::LightOptions)
+    options.toricity && return nothing
+    backend.traversal == :dda || return nothing
+    terrain isa NoVoxelTerrain || _voxel_launch_cacheable(terrain) || return nothing
+    empty_bounds = (minimum=ntuple(axis -> Float64(grid.minimum[axis]), 3),
+        maximum=ntuple(axis -> Float64(grid.maximum[axis]), 3), empty=true)
+    backend.g == 0 && return empty_bounds
+    dimensions = size(grid)
+    lower = dimensions
+    upper = (0, 0, 0)
+    found = false
+    for index in CartesianIndices(grid.pad)
+        grid.pad[index] > 0 || continue
+        found = true
+        lower = (min(lower[1], index[1]), min(lower[2], index[2]), min(lower[3], index[3]))
+        upper = (max(upper[1], index[1]), max(upper[2], index[2]), max(upper[3], index[3]))
+    end
+    found || return empty_bounds
+    lower == (1, 1, 1) && upper == dimensions && return nothing
+
+    # Include forward probing, coordinate rounding and accumulated plane-time
+    # rounding. A non-periodic ray crosses at most the sum of grid dimensions.
+    scale = max(maximum(abs, grid.minimum), maximum(abs, grid.maximum),
+        maximum(ntuple(axis -> grid.maximum[axis] - grid.minimum[axis], 3)), 1.0)
+    padding = 4096eps(Float64) * scale * (sum(dimensions) + 8)
+    isfinite(padding) || return nothing
+    # Capture immutable post-scan bindings, never the reassigned scan state.
+    occupied_lower, occupied_upper = lower, upper
+    bounds_minimum = ntuple(axis -> grid.minimum[axis] +
+        (occupied_lower[axis] - 1) * grid.voxel_size[axis] - padding, 3)
+    bounds_maximum = ntuple(axis -> grid.minimum[axis] +
+        occupied_upper[axis] * grid.voxel_size[axis] + padding, 3)
+    return (minimum=bounds_minimum, maximum=bounds_maximum, empty=false)
+end
+
+_voxel_ray_misses_occupied_bounds(origin, direction, ::Nothing) = false
+
+function _voxel_ray_misses_occupied_bounds(origin, direction, bounds::_VoxelOccupiedBounds)
+    bounds.empty && return true
+    near = 0.0
+    far = Inf
+    for axis in 1:3
+        component = direction[axis]
+        if component == 0
+            bounds.minimum[axis] <= origin[axis] <= bounds.maximum[axis] || return true
+        else
+            first = (bounds.minimum[axis] - origin[axis]) / component
+            second = (bounds.maximum[axis] - origin[axis]) / component
+            first > second && ((first, second) = (second, first))
+            near = max(near, first)
+            far = min(far, second)
+            far + _voxel_tolerance(far) >= near || return true
+        end
+    end
+    return false
+end
+
 function _voxel_grid_fingerprint(grid::VoxelGrid)
     state = hash(size(grid), hash(grid.minimum, hash(grid.maximum)))
     for value in grid.pad
@@ -232,8 +295,8 @@ end
 
 function _voxel_path_for_backend!(grid, origin, direction, backend::VoxelCPUBackend,
     terrain, options, workspace::VoxelRayWorkspace, surface::Union{Nothing,Real},
-    setup, terrain_direction)
-    ray_origin = _canonical_voxel_origin(grid, origin, options.toricity)
+    setup, terrain_direction,
+    ray_origin=_canonical_voxel_origin(grid, origin, options.toricity))
     path = if backend.traversal == :dda
         _trace_voxel_ray_dda_prepared!(workspace.segments, grid, ray_origin,
             setup, options.toricity)
@@ -273,7 +336,9 @@ end
 function _compute_voxel_direction_response(grid::VoxelGrid, propagation_direction,
     backend::VoxelCPUBackend, terrain::AbstractVoxelTerrain, options::LightOptions,
     launch_cache::VoxelLaunchGeometryCache, workspace::VoxelRayWorkspace,
-    terrain_fingerprint::Union{Nothing,UInt}=nothing)
+    terrain_fingerprint::Union{Nothing,UInt}=nothing,
+    occupied_bounds::Union{Nothing,_VoxelOccupiedBounds}=
+        _prepare_voxel_occupied_bounds(grid, backend, terrain, options))
     _validate_terrain_for_grid(grid, terrain, options.toricity)
     _validate_voxel_launch_cache(launch_cache, grid, terrain, backend,
         options.toricity, terrain_fingerprint)
@@ -295,6 +360,8 @@ function _compute_voxel_direction_response(grid::VoxelGrid, propagation_directio
     ray_direction = _normalise_voxel_direction(direction)
     setup = _voxel_dda_setup(grid, ray_direction)
     terrain_direction = _prepare_voxel_terrain_direction(terrain, ray_direction)
+    terminal_bounds = options.toricity || backend.traversal != :dda ||
+        !(terrain isa NoVoxelTerrain || _voxel_launch_cacheable(terrain)) ? nothing : occupied_bounds
     for (ray_index, (origin, ray_weight, from_side)) in enumerate(rays)
         surface = terrain isa NoVoxelTerrain ? nothing :
             _voxel_launch_height!(launch_cache, rays, ray_index, origin, terrain, workspace)
@@ -305,37 +372,53 @@ function _compute_voxel_direction_response(grid::VoxelGrid, propagation_directio
             end
             incoming_weight += ray_weight
         end
-        path = _voxel_path_for_backend!(grid, origin, direction, backend, terrain,
-            options, workspace, surface, setup, terrain_direction)
+        ray_origin = _canonical_voxel_origin(grid, origin, options.toricity)
         incoming = ray_weight
         last_index = nothing
-        for segment in path
-            i, j, k = segment.index
-            density = grid.pad[i, j, k]
-            if density > 0 && backend.g > 0
-                intercepted, incoming = _voxel_segment_energy(
-                    incoming, backend.g * density * segment.length,
-                )
-                interception[i, j, k] += intercepted
+        if _voxel_ray_misses_occupied_bounds(ray_origin, setup.direction, terminal_bounds)
+            terminal = _trace_voxel_ray_dda_terminal!(workspace.segments, grid, ray_origin, setup)
+            terrain_hit = nothing
+            if !(terrain isa NoVoxelTerrain)
+                _check_voxel_terrain_origin!(ray_origin, terrain, workspace, surface)
+                terrain_hit = _voxel_terrain_terminal_hit(ray_origin, setup.direction,
+                    terrain, workspace, terrain_direction, terminal.has_segments,
+                    terminal.exit_reason, terminal.maximum_distance)
             end
-            last_index = segment.index
+            exit_reason = terrain_hit === nothing ? terminal.exit_reason : :terrain
+            last_index = terminal.has_segments ? terminal.terminal_index : nothing
+        else
+            path = _voxel_path_for_backend!(grid, origin, direction, backend, terrain,
+                options, workspace, surface, setup, terrain_direction, ray_origin)
+            for segment in path
+                i, j, k = segment.index
+                density = grid.pad[i, j, k]
+                if density > 0 && backend.g > 0
+                    intercepted, incoming = _voxel_segment_energy(
+                        incoming, backend.g * density * segment.length,
+                    )
+                    interception[i, j, k] += intercepted
+                end
+                last_index = segment.index
+            end
+            terrain_hit = path.terrain_hit
+            exit_reason = path.exit_reason
         end
-        if path.exit_reason == :terrain
-            hit = something(path.terrain_hit)
+        if exit_reason == :terrain
+            hit = something(terrain_hit)
             terrain_incident_fraction[hit.patch_id] += incoming
             terrain_incident_weight += incoming
-        elseif path.exit_reason == :bottom
+        elseif exit_reason == :bottom
             escaped_weight += incoming
             escaped_bottom_weight += incoming
             last_index === nothing || (bottom_exit_fraction[last_index[1], last_index[2]] += incoming)
-        elseif path.exit_reason == :side
+        elseif exit_reason == :side
             escaped_weight += incoming
             escaped_side_weight += incoming
-        elseif path.exit_reason == :top
+        elseif exit_reason == :top
             escaped_weight += incoming
             escaped_top_weight += incoming
         else
-            error("unsupported voxel exit reason: $(path.exit_reason)")
+            error("unsupported voxel exit reason: $exit_reason")
         end
     end
 
@@ -382,6 +465,7 @@ function prepare_voxel_responses(
     # fresh value only within this batch; custom terrain keeps its dispatch.
     terrain_fingerprint = _voxel_launch_cacheable(terrain) ?
         launch_cache.terrain_fingerprint : nothing
+    occupied_bounds = _prepare_voxel_occupied_bounds(grid, backend, terrain, options)
     workspace = VoxelRayWorkspace()
     directions = NTuple{3,Float64}[]
     responses = VoxelDirectionResponse{Float64}[]
@@ -392,7 +476,7 @@ function prepare_voxel_responses(
         direction = _normalise_voxel_direction(propagation)
         push!(directions, direction)
         push!(responses, _compute_voxel_direction_response(grid, direction, backend,
-            terrain, options, launch_cache, workspace, terrain_fingerprint))
+            terrain, options, launch_cache, workspace, terrain_fingerprint, occupied_bounds))
     end
     return VoxelResponseCache(
         _voxel_grid_fingerprint(grid),

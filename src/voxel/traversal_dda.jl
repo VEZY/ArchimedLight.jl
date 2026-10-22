@@ -56,12 +56,17 @@ end
 function _trace_voxel_ray_dda_prepared!(
     segments::Vector{VoxelRaySegment{Float64}}, grid::VoxelGrid, ray_origin,
     setup, toricity::Bool, reserve::Bool=false,
-)
+    terminal_only::Val{TerminalOnly}=Val(false),
+) where {TerminalOnly}
     empty!(segments)
+    terminal_index = (0, 0, 0)
+    terminal_distance = 0.0
+    has_segments = false
     ray_direction = setup.direction
     t_end, exit_reason = _voxel_exit_time(grid, ray_origin, ray_direction, toricity)
     tolerance = _voxel_tolerance(t_end)
-    t_end <= tolerance && return VoxelRayPath(segments, exit_reason)
+    t_end <= tolerance && return _voxel_dda_result(segments, exit_reason,
+        terminal_index, terminal_distance, has_segments, terminal_only)
 
     probe_time = min(t_end / 2, setup.probe_distance)
     probe_time = max(probe_time, min(t_end / 2, tolerance))
@@ -91,9 +96,21 @@ function _trace_voxel_ray_dda_prepared!(
         next_time = min(next_x, next_y, next_z, t_end)
         next_time + tolerance >= current_time ||
             error("voxel DDA produced a decreasing traversal time")
-        _append_voxel_segment!(segments, (i, j, k), current_time, next_time)
+        if TerminalOnly
+            # Keep the same acceptance threshold as _append_voxel_segment!.
+            # The final accepted time can differ from the analytic grid exit.
+            length = next_time - current_time
+            if length > _voxel_tolerance(next_time)
+                terminal_index = (i, j, k)
+                terminal_distance = next_time
+                has_segments = true
+            end
+        else
+            _append_voxel_segment!(segments, (i, j, k), current_time, next_time)
+        end
         if next_time >= t_end - tolerance
-            return VoxelRayPath(segments, exit_reason)
+            return _voxel_dda_result(segments, exit_reason,
+                terminal_index, terminal_distance, has_segments, terminal_only)
         end
 
         hit_x = abs(next_x - next_time) <= tolerance
@@ -114,29 +131,49 @@ function _trace_voxel_ray_dda_prepared!(
         end
 
         if k < 1
-            return VoxelRayPath(segments, :bottom)
+            return _voxel_dda_result(segments, :bottom,
+                terminal_index, terminal_distance, has_segments, terminal_only)
         end
         if k > dimensions[3]
-            return VoxelRayPath(segments, :top)
+            return _voxel_dda_result(segments, :top,
+                terminal_index, terminal_distance, has_segments, terminal_only)
         end
 
         if !(1 <= i <= dimensions[1])
             if toricity
                 i = mod1(i, dimensions[1])
             else
-                return VoxelRayPath(segments, :side)
+                return _voxel_dda_result(segments, :side,
+                    terminal_index, terminal_distance, has_segments, terminal_only)
             end
         end
         if !(1 <= j <= dimensions[2])
             if toricity
                 j = mod1(j, dimensions[2])
             else
-                return VoxelRayPath(segments, :side)
+                return _voxel_dda_result(segments, :side,
+                    terminal_index, terminal_distance, has_segments, terminal_only)
             end
         end
         current_time = next_time
     end
     error("voxel DDA exceeded its derived iteration bound")
+end
+
+@inline _voxel_dda_result(segments, exit_reason, terminal_index,
+    terminal_distance, has_segments, ::Val{false}) = VoxelRayPath(segments, exit_reason)
+
+@inline _voxel_dda_result(segments, exit_reason, terminal_index,
+    terminal_distance, has_segments, ::Val{true}) =
+    (exit_reason=exit_reason, terminal_index=terminal_index,
+        maximum_distance=terminal_distance, has_segments=has_segments)
+
+# Proven empty incident rays still follow the production DDA's exact stepping.
+# Only their geometric segment writes are omitted; public ray paths stay full.
+function _trace_voxel_ray_dda_terminal!(segments::Vector{VoxelRaySegment{Float64}},
+    grid::VoxelGrid, ray_origin, setup)
+    return _trace_voxel_ray_dda_prepared!(segments, grid, ray_origin,
+        setup, false, false, Val(true))
 end
 
 function _trace_voxel_transport_ray(

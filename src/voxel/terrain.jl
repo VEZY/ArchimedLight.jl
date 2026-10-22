@@ -1048,32 +1048,49 @@ function _truncate_voxel_path_at_terrain_prepared!(
         terrain, workspace, cached_surface, prepared_direction)
 end
 
-function _truncate_voxel_path_at_terrain_body!(
-    grid, path, origin, direction, terrain, workspace, cached_surface, prepared_direction,
-)
+function _check_voxel_terrain_origin!(origin, terrain, workspace, cached_surface)
     surface_at_origin = cached_surface === nothing ?
         terrain_elevation_at(terrain, origin[1], origin[2], workspace.terrain_stack) : cached_surface
     origin_tolerance = 512eps(Float64) * max(abs(surface_at_origin), abs(origin[3]), 1.0)
     origin[3] >= surface_at_origin - origin_tolerance || throw(ArgumentError(
         "voxel ray origin lies below the terrain surface",
     ))
-    if isempty(path.segments)
-        path.exit_reason == :bottom && throw(ArgumentError(
+    return nothing
+end
+
+function _voxel_terrain_terminal_hit(origin, direction, terrain, workspace,
+    prepared_direction, has_segments, exit_reason, maximum_distance)
+    if !has_segments
+        exit_reason == :bottom && throw(ArgumentError(
             "ray reached the voxel bottom without intersecting the supplied terrain",
         ))
-        return path
+        return nothing
     end
-    maximum_distance = path.segments[end].t_exit
     hit = _intersect_terrain_prepared_with_stack(terrain, origin, direction, maximum_distance,
         workspace.terrain_stack, prepared_direction)
     if hit === nothing
-        path.exit_reason == :bottom && throw(ArgumentError(
+        exit_reason == :bottom && throw(ArgumentError(
             "terrain has a horizontal coverage gap along a ray reaching the voxel bottom",
         ))
-        return path
+        return nothing
     end
     tolerance = _voxel_tolerance(maximum_distance)
-    hit.distance <= maximum_distance + tolerance || return path
+    hit.distance <= maximum_distance + tolerance || return nothing
+    return hit
+end
+
+function _truncate_voxel_path_at_terrain_body!(
+    grid, path, origin, direction, terrain, workspace, cached_surface, prepared_direction,
+)
+    _check_voxel_terrain_origin!(origin, terrain, workspace, cached_surface)
+    # Query custom terrain before reading path storage, matching the original
+    # validation/intersection ordering even for user-defined query methods.
+    has_segments = !isempty(path.segments)
+    maximum_distance = has_segments ? path.segments[end].t_exit : 0.0
+    hit = _voxel_terrain_terminal_hit(origin, direction, terrain, workspace,
+        prepared_direction, has_segments, path.exit_reason, maximum_distance)
+    hit === nothing && return path
+    tolerance = _voxel_tolerance(maximum_distance)
 
     segments = path.segments
     retained = 0

@@ -344,6 +344,12 @@ Compact paths are indexed within each source's direction row; sparse source IDs
 do not require a grid-sized index table. Preparation reuses DDA scratch and
 copies each retained compact path before tracing the next ray.
 
+Within each active spectral band, scattering orders reuse internal transport
+arrays and alternate two terrain-reflection buffers. Each order consumes the
+previous order before clearing its scratch arrays. Public transport and light
+results still own independent arrays; this workspace is local to one band solve
+and does not increase the retained geometry cache.
+
 Within a newly traced response, rays sharing one direction reuse its DDA
 stepping constants and built-in terrain normalization. Built-in terrain is
 validated once per response; standalone ray calls and custom terrain retain
@@ -353,6 +359,13 @@ Directional batches reuse a fresh built-in terrain fingerprint across their
 launch checks, avoiding repeated full MNT scans. Each native row checks retained
 launch geometry afresh, including when all directional responses are cached;
 explicit public cache calls and custom terrain keep their validation.
+
+For finite DDA responses, a conservative bound of occupied voxels is prepared
+once per batch or native row. Rays that provably miss vegetation keep the same
+DDA steps and terrain-intersection checks, but omit the segment list and its
+attenuation pass. Boundary grazes retain the full path. Periodic rays, reference
+traversal, custom terrain and vegetation spanning the full grid retain their
+existing paths; public geometric ray queries always return complete paths.
 
 For an individual/organ model, a change to component densities or projection
 coefficients changes the equivalent extinction field and therefore invalidates

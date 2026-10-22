@@ -53,8 +53,9 @@ function scene_mesh(scene)
 end
 
 function export_view(; directory=joinpath(@__DIR__, "build", "scattering"),
-                     reference_path=joinpath(directory, "native_reference.json"),
-                     colour_maximum::Real=20000.0)
+    reference_path=joinpath(directory, "native_reference.json"),
+    asset_directory=joinpath(@__DIR__, "..", "src", "assets", "live-voxel"),
+    colour_maximum::Real=20000.0)
     reference_text = read(reference_path, String)
     reference = JSON3.read(reference_text)
     wasm = read(joinpath(directory, "voxel.wasm"))
@@ -119,16 +120,19 @@ self.onmessage = async event => {
 """
     worker_literal = Bonito.JSCode(JSON3.write(worker_source))
     WGLMakie.activate!()
-    figure = WGLMakie.Figure(size=(1040, 650), fontsize=17)
+    figure = WGLMakie.Figure(size=(1000, 490), fontsize=19,
+        figure_padding=40, backgroundcolor=:white)
+    WGLMakie.Label(figure[0, 1], "Voxel tree + terrain"; fontsize=25, tellwidth=false)
     axis = WGLMakie.LScene(figure[1, 1]; show_axis=true)
     plot = WGLMakie.mesh!(axis, mesh; color=zeros(Float32, length(receiver_ids)),
         colormap=:thermal, colorrange=(0.0, colour_maximum), shading=WGLMakie.NoShading,
         visible=false)
     WGLMakie.update_cam!(axis.scene, (12.0, -14.0, 12.0), (4.0, 4.0, 4.4), (0.0, 0.0, 1.0))
     WGLMakie.Colorbar(figure[2, 1], plot; vertical=false,
-        label="Intercepted PAR energy (J per voxel or terrain triangle)")
+        label="Intercepted PAR energy (J per element)")
 
-    app = Bonito.App(; title="Voxel + terrain Wasm prototype") do session
+    shell_path = joinpath(@__DIR__, "..", "live_wheat", "shell.css")
+    app = Bonito.App(; title="Voxel tree + terrain light interception") do session
         hour_slider = Bonito.DOM.input(; id="voxel-hour", type="range", min="5", max="21",
             step=string(1 / 12), value="12", disabled=true,
             style="width:100%;accent-color:#b94c48")
@@ -140,29 +144,30 @@ self.onmessage = async event => {
             id="voxel-sampling", disabled=true)
         scattering = Bonito.DOM.input(; id="voxel-scattering", type="checkbox", disabled=true)
         status_line_style = "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0"
-        status_summary = Bonito.DOM.div("Loading Julia WebAssembly…";
+        status_summary = Bonito.DOM.div("Loading…";
             id="voxel-status-summary", style=status_line_style)
-        status_details = Bonito.DOM.div("Duration: $(duration) s";
+        status_details = Bonito.DOM.div("Duration: $(Int(duration)) s";
             id="voxel-status-details", style=status_line_style)
         # Reserve both lines during loading, calculation and completed states,
         # so changing the status never shifts the WebGL canvas or its camera.
-        status = Bonito.DOM.div(status_summary, status_details; id="voxel-status",
-            style="display:grid;grid-template-rows:1.5em 1.5em;line-height:1.5;height:3em;margin:1em 0")
+        status = Bonito.DOM.div(status_summary, status_details; id="voxel-status", class="live-demo-status",
+            style="display:grid;grid-template-rows:1.5em 1.5em;height:3em")
         page = Bonito.DOM.main(
-            Bonito.DOM.h1("Voxel + terrain · live Wasm prototype"),
-            Bonito.DOM.p("Shared Julia PAR interception with optional scattering, finite scene and black soil. Move the hour slider to change the illumination."),
+            Bonito.DOM.style(read(shell_path, String)),
             Bonito.DOM.div(Bonito.DOM.label("Hour (UTC)"), hour_slider, hour_label;
-                style="display:grid;grid-template-columns:100px minmax(180px,1fr) 75px;align-items:center;gap:18px;margin-bottom:16px"),
-            Bonito.DOM.div(Bonito.DOM.label("Sky sectors ", sector_menu), Bonito.DOM.label("Rays per voxel ", sampling),
-                Bonito.DOM.label(scattering, " Scattering");
-                style="display:flex;flex-wrap:wrap;gap:22px"),
+                class="live-demo-sliders"),
+            Bonito.DOM.div(Bonito.DOM.label(scattering, " Scattering"),
+                Bonito.DOM.label("Sky sectors ", sector_menu), Bonito.DOM.label("Rays per voxel ", sampling);
+                class="live-demo-options"),
             status, figure,
-            Bonito.DOM.p("Drag to rotate · scroll to zoom · right-drag to pan. Coordinates in metres. Occupied voxels remain visible when unlit."),
-            Bonito.DOM.p("15 May 2025 · interpolated Montpellier weather · same weather inputs as the wheat demo"),
-            Bonito.DOM.p("The fixed sky is prepared once per sky/sampling setting. Each daylight update traces the moving sun; night needs no ray tracing."),
-            Bonito.DOM.p("Illustrative leaf PAR optics: reflectance 0.08, transmittance 0.07; wood is black. Voxel mixtures use point proportions. Isotropic scattering; these are not calibrated species parameters."),
-            Bonito.DOM.p("The fixed colour scale shows total intercepted energy per voxel and processed incident energy per terrain triangle, including repeated interactions when scattering is enabled. Elements have different sizes.");
-            style="font:16px system-ui,sans-serif;max-width:1080px;margin:auto;padding:18px")
+            Bonito.DOM.p("Drag to rotate · scroll or pinch to zoom · right-drag to pan. Coordinates in metres.";
+                class="live-demo-caption"),
+            Bonito.DOM.p("15 May 2025 · interpolated Montpellier weather"; class="live-demo-caption"),
+            Bonito.DOM.details(Bonito.DOM.summary("Model notes"),
+                Bonito.DOM.p("Point-based leaf/wood mixtures; illustrative leaf reflectance 0.08 and transmittance 0.07, black wood and soil, isotropic scattering and finite boundaries."),
+                Bonito.DOM.p("Colours show intercepted voxel energy and incident terrain energy in joules per element over $(Int(duration)) s, including repeated interactions with scattering. Elements have different sizes; shaded voxels remain visible.");
+                class="live-demo-notes");
+            style="font:16px system-ui,sans-serif;width:100%;margin:auto")
         Bonito.on_document_load(session, js"""
         (async () => {
             const status = $(status), statusSummary = $(status_summary), statusDetails = $(status_details);
@@ -173,6 +178,17 @@ self.onmessage = async event => {
             sampling.value = String($(default_ray_count));
             sectors.value = String($(last(sectors)));
             let worker;
+            let embeddedReady = false;
+            const notifyParent = type => {
+                if (window.parent === window) return;
+                window.parent.postMessage({type:'archimedlight:voxel-' + type,
+                    height:Math.ceil($(page).getBoundingClientRect().height + 16)}, window.location.origin);
+            };
+            window.addEventListener('message', event => {
+                if (event.source === window.parent && event.origin === window.location.origin
+                    && event.data?.type === 'archimedlight:voxel-status' && embeddedReady) notifyParent('ready');
+            });
+            new ResizeObserver(() => {if (embeddedReady) notifyParent('resize');}).observe($(page));
             try {
                 const meshes = await $(plot), mesh = meshes[0];
                 const colours = mesh.geometry.attributes.vertex_color;
@@ -197,6 +213,7 @@ self.onmessage = async event => {
                     status.style.color = '#b91c1c'; state.error = String(error); state.busy = false;
                     state.ready = false; mesh.visible = false;
                     controls.forEach(control => {control.disabled = true;});
+                    notifyParent('error');
                     if (current) current.reject(error);
                     if (queued) queued.reject(error);
                     current = queued = null;
@@ -204,7 +221,7 @@ self.onmessage = async event => {
                 const dispatch = () => {
                     if (!workerReady || current || !queued) return;
                     current = queued; queued = null; state.busy = true;
-                    showStatus('Calculating in Julia WebAssembly…');
+                    showStatus('Calculating…');
                     worker.postMessage({type:'calculate', input:current.input});
                 };
                 state.run = (options = {}) => {
@@ -236,6 +253,9 @@ self.onmessage = async event => {
                         state.values = message.values;
                         for (let i=0; i<receiverIDs.length; i++) colours.array[i] = message.values[receiverIDs[i]];
                         colours.needsUpdate = true; mesh.visible = true;
+                        if (!embeddedReady) requestAnimationFrame(() => requestAnimationFrame(() => {
+                            embeddedReady = true; notifyParent('ready');
+                        }));
                         state.runs++; state.ready = true; state.busy = false;
                         state.solveMilliseconds = message.solveMilliseconds;
                         state.responsePreparationMilliseconds = message.responsePreparationMilliseconds;
@@ -260,15 +280,13 @@ self.onmessage = async event => {
                         status.dataset.diagnostics = JSON.stringify(message.diagnostics);
                         status.dataset.setupMilliseconds = String(message.setupMilliseconds);
                         status.dataset.readbackMilliseconds = String(message.readbackMilliseconds);
-                        const setupKind = [message.skyPrepared ? 'sky' : '',
-                            message.scatteringPrepared ? 'scattering' : ''].filter(Boolean).join(' + ');
-                        const setupStatus = setupKind
-                            ? ' · initial ' + setupKind + ' setup: ' + message.responsePreparationMilliseconds.toFixed(2) + ' ms'
+                        const setupStatus = message.skyPrepared || message.scatteringPrepared
+                            ? ' · setup: ' + message.responsePreparationMilliseconds.toFixed(0) + ' ms'
                             : '';
                         const convergenceStatus = current.input.scattering && !message.diagnostics.converged
                             ? ' · not converged; unresolved: ' + message.diagnostics.unresolved.toExponential(2) + ' J'
                             : '';
-                        showStatus('Julia/Wasm live: ' + message.solveMilliseconds.toFixed(2) + ' ms' + setupStatus,
+                        showStatus('Calculation: ' + message.solveMilliseconds.toFixed(1) + ' ms' + setupStatus,
                             'Duration: ' + current.input.seconds + ' s · horizontal PAR: '
                             + message.snapshot[1].toFixed(1) + ' W m⁻² · sun elevation: '
                             + message.snapshot[4].toFixed(1) + '°' + convergenceStatus);
@@ -284,6 +302,7 @@ self.onmessage = async event => {
                 statusSummary.textContent = 'Initialization failed: ' + error.message;
                 statusSummary.title = statusSummary.textContent;
                 window.voxelLightError = String(error.stack || error);
+                notifyParent('error');
                 if (worker) worker.terminate();
             }
         })();
@@ -292,6 +311,18 @@ self.onmessage = async event => {
     end
     output = joinpath(directory, "index.html")
     Bonito.export_static(output, app)
+    if asset_directory !== nothing
+        mkpath(asset_directory)
+        cp(output, joinpath(asset_directory, "index.html"); force=true)
+        receipt = (html_sha256=bytes2hex(sha256(read(output))),
+            wasm_sha256=bytes2hex(sha256(wasm)), runtime_sha256=bytes2hex(sha256(runtime)),
+            native_reference_sha256=bytes2hex(sha256(codeunits(reference_text))),
+            view_sha256=bytes2hex(sha256(read(@__FILE__))), cases=length(reference.cases),
+            shell_sha256=bytes2hex(sha256(read(shell_path))),
+            input_sha256=reference.provenance.input_sha256,
+            source_sha256=reference.provenance.source_sha256)
+        write(joinpath(asset_directory, "artifact_receipt.json"), JSON3.write(receipt))
+    end
     return (path=output, vertices=length(receiver_ids), cases=length(reference.cases),
         colour_maximum=colour_maximum, expected_outputs_embedded=false)
 end

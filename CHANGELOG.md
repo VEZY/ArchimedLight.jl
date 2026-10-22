@@ -23,9 +23,17 @@
   foliage, wood, and unattributed vegetation in the `point_proxy` workflow.
   Bundle matching small `.vox`/`.jsonl.gz` tree inputs, a PLY terrain, and a
   dedicated voxel documentation section with runnable examples.
+- Offer both live wheat and voxel/terrain demos on the documentation home page,
+  with a shared presentation and lazy loading of the selected scene.
 
 ### Performance
 
+- Avoid segment writes and attenuation passes for finite incident DDA rays
+  that provably miss occupied voxels, preserving exact traversal terminals,
+  terrain checks, periodic/reference fallbacks and public geometric paths.
+- Reuse transport arrays across voxel scattering orders and alternate terrain
+  reflection buffers within each band solve, preserving independent public
+  results and the terrain-bounce residual.
 - Reuse a fresh built-in terrain fingerprint across directional launch checks
   within each response batch or native row. Keep public cache validation and
   custom terrain dispatch, and streamline compact scattering accumulation.
