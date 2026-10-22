@@ -62,9 +62,9 @@ and on reuses those paths. Each illuminated update still traces the moving
 sun, recomputes radiation weights and iterates the common scattering solver.
 The generic native stopping criteria and convergence diagnostics are retained.
 
-The current UI retains at most six configurations: two sky resolutions times
-three ray samplings. Returning to a previous setting reuses its sky responses;
-changing the hour never adds a cache entry. Scene arrays, optical parameters
+The current UI retains at most ten configurations: two sky resolutions times
+five ray samplings (1, 4, 16, 64 and 256). Returning to a previous setting reuses
+its sky responses; changing the hour never adds a cache entry. Scene arrays, optical parameters
 and quadratures are owned by the runtime and stay fixed. Replacing the scene
 or weather creates new states; in-place mutation after preparation is outside
 this private adapter's contract. The native series uses a general directional
@@ -75,6 +75,9 @@ The 144 comparison cases cover 12 hours, including sunrise, sunset, 19:10 and
 night, with 16/46 sectors, requested sampling of 1/4/16 rays per voxel face,
 and scattering disabled/enabled.
 The displayed default uses 16 rays per face for a less sparse terrain image.
+Select 64 or 256 to compare denser incident-ray sampling. Higher counts increase
+initial sky preparation and live sun tracing work; they retain the same sampler
+and scattering angular quadrature.
 
 This phase does not expose NIR, toricity or individual optical controls.
 The supplied sloped MNT is not periodic. The `.jsonl.gz` reader is checked

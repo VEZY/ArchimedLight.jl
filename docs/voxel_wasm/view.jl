@@ -84,6 +84,8 @@ function export_view(; directory=joinpath(@__DIR__, "build", "scattering"),
     weather_literal = Bonito.JSCode(JSON3.write(JSON3.write(reference.meteorology)))
     sectors = sort(unique(Int(case.sectors) for case in reference.cases))
     ray_counts = sort(unique(Int(case.rays_per_voxel) for case in reference.cases))
+    default_ray_count = last(ray_counts)
+    ray_counts = sort(union(ray_counts, [64, 256]))
     durations = unique(Float64(case.seconds) for case in reference.cases)
     length(durations) == 1 || error("The view expects one calculation duration")
     duration = only(durations)
@@ -168,7 +170,7 @@ self.onmessage = async event => {
             const sectors = $(sector_menu), sampling = $(sampling), scattering = $(scattering);
             const controls = [slider, sectors, sampling, scattering], receiverIDs = $(receiver_ids);
             const meteorology = JSON.parse($(weather_literal)), scene = JSON.parse($(scene_literal));
-            sampling.value = String($(last(ray_counts)));
+            sampling.value = String($(default_ray_count));
             sectors.value = String($(last(sectors)));
             let worker;
             try {
