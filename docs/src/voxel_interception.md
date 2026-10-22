@@ -349,6 +349,10 @@ stepping constants and built-in terrain normalization. Built-in terrain is
 validated once per response; standalone ray calls and custom terrain retain
 their validation. This reduces repeated setup in native Julia and WebAssembly
 without changing ray positions, weights, or interception equations.
+Directional batches reuse a fresh built-in terrain fingerprint across their
+launch checks, avoiding repeated full MNT scans. Each native row checks retained
+launch geometry afresh, including when all directional responses are cached;
+explicit public cache calls and custom terrain keep their validation.
 
 For an individual/organ model, a change to component densities or projection
 coefficients changes the equivalent extinction field and therefore invalidates

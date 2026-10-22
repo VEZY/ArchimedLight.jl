@@ -183,7 +183,7 @@ changes. Long text is ellipsized with its full value available on hover.
 
 ## Validation on 22 October 2026
 
-The complete default Julia 1.13.1 package suite passes **36,071 assertions**, including
+The complete default Julia 1.13.1 package suite passes **36,156 assertions**, including
 **636 workspace/cache regressions** for launch-cache validation, non-cubic and periodic
 scenes, missing terrain coverage, custom mutable terrains, independent concurrent
 calls and retained output ownership. Custom terrain extensions keep their
@@ -200,12 +200,14 @@ PAR/NIR parity.
 Another **104 assertions** cover sparse indexed paths, missing directions,
 independent compact storage and reusable DDA scratch with both traversals and
 periodic/non-periodic terrain.
+Another **85 assertions** check batch/standalone directional parity, native
+PAR/NIR step/series results and stale geometry rejection on all-hit rows.
 
 The public mixed-vegetation pipeline, uncached adapter, explicit-direction
 adapter and cached adapter agree exactly on **144 × 1,098 output values**.
 Those native outputs and the supplemental **24 × 1,098** high-ray outputs are
-also exactly equal to the preserved compact-path version at commit
-`e809ca0`. Ray positions, weights, triangle geometry and scattering quadrature
+also exactly equal to the preserved indexed-path version at commit
+`38ec697`. Ray positions, weights, triangle geometry and scattering quadrature
 are unchanged. The disabled-scattering first-order outputs still match the
 preserved 72-case PAD-only baseline within **5.457e-12 J**.
 
@@ -219,9 +221,9 @@ and six further lifecycle revisits, with a maximum native/Wasm output difference
 of **4.657e-10 J**. Their largest energy-balance residual is **2.305e-6 J**,
 within the same relative tolerance applied to the summed incoming energy.
 
-The numerical module is **969,843 bytes**, compiled in 132.5 s with no compiler
+The numerical module is **993,416 bytes**, compiled in 120.8 s with no compiler
 diagnostics. Its SHA256 is
-`336b24e7ba7ebbac4dde3f905f4b70b44fc6ced61734f39179ebbb6402162d6f`.
+`0fe4cf8431e4783f317b765bf2c32adc1e5162a90db6defb6d56a6c556f0d17a`.
 Build-only adaptations ignore native capacity hints, clear segment vectors in
 one operation and route dense multidimensional arrays through WasmTarget's
 existing matrix registry. The clearing overlay is restricted to voxel segment
@@ -433,3 +435,47 @@ isolate scattering preparation after sky preparation: medians at 16/64/256 rays
 change from **59.32 / 55.90 / 56.78 ms** to **56.91 / 54.42 / 53.88 ms**.
 These timings exclude rendering and confirm that indexed table construction
 does not introduce a Wasm startup penalty in this scene.
+
+## Terrain fingerprint reuse across directional batches
+
+Launch validation previously scanned every built-in terrain vertex and triangle
+again for each new incident direction. A fresh fingerprint is now reused across
+the launch checks within a response batch or native row. Existing public cache
+checks remain separate; each new native row checks retained launch geometry,
+including rows whose directional responses are all cached. Custom terrain keeps
+its original validation and query dispatch. The browser sky preparation forwards
+one fresh shared fingerprint; its moving-sun calls retain fresh validation.
+
+Native scaling measurements compare frozen `38ec697` with current Julia 1.13.1:
+12 voxels, a variable-resolution synthetic MNT, 46 sectors, four rays per face,
+scattering disabled. Readers and JIT are excluded; three alternating blocks use
+11 samples and `evals=1`. Each step owns fresh caches and each four-row series
+uses distinct suns. Every compared response and PAR/NIR result agrees exactly.
+
+| Terrain triangles | Public step before → after (ms) | Four-sun series before → after (ms) |
+| ---: | ---: | ---: |
+| 128 | 0.57 → 0.52 | 0.91 → 0.80 |
+| 2,048 | 2.21 → 0.70 | 2.94 → 1.26 |
+| 12,800 | 11.34 → 1.61 | 14.36 → 3.90 |
+
+A same-current-package control runs the same directional kernel with repeated
+hashing or one fresh batch fingerprint: 12,800-triangle batch preparation changes
+from **10.46 to 0.94 ms**, with exact outputs. This gain addresses fine MNTs;
+the earlier four scattering fixtures do not show a reliable whole-solver gain
+(their medians vary by about 1–2% in this campaign).
+
+Compact accumulation also omits bounds checks for retained grid-linear indices;
+terrain/bottom destinations and public inputs retain their checks. A separate
+same-current-type path sweep improves **5–8%** in the final campaign, with exact
+arrays and escape totals; this isolates the path kernel, not the complete solver.
+Retained caches and scattering allocations are unchanged. Public batches add
+**752 bytes / 47 allocations** for 47 directions; four-row series add 3,008 bytes.
+These small temporary allocations are included in the timings above.
+
+The ignored `hotpaths-round6/` directory retains the frozen package/module,
+profiles, same-package controls, raw timings, fresh native/Wasm references and
+`comparison.md`. All checked native outputs and budgets equal `38ec697` exactly.
+Matched warmed Node timings and an order-reversed repeat vary substantially,
+including disabled-scattering controls, so they establish no whole-update gain
+or regression for the small browser scene. Every measured output still passes
+its fresh native reference and exactly matches the frozen module.

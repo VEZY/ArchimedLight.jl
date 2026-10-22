@@ -66,20 +66,29 @@ function _voxel_cache_for_turtle!(
     launch_cache::VoxelLaunchGeometryCache=VoxelLaunchGeometryCache(grid, terrain, backend, options.toricity),
     workspace::VoxelRayWorkspace=VoxelRayWorkspace(),
 )
+    # Built-in geometry is read-only during a row. Hash it freshly once, check
+    # the retained launch cache even on response-cache hits, and reuse that
+    # value for new directions and the response cache returned below.
+    terrain_fingerprint = _voxel_launch_cacheable(terrain) ?
+        _terrain_geometry_fingerprint(terrain) : nothing
+    if terrain_fingerprint !== nothing
+        _validate_voxel_launch_cache(launch_cache, grid, terrain, backend,
+            options.toricity, terrain_fingerprint)
+    end
     directions = NTuple{3,Float64}[]
     responses = VoxelDirectionResponse{Float64}[]
     for sector in turtle.sectors
         direction = _normalise_voxel_direction(ntuple(i -> -Float64(sector.direction[i]), 3))
         response = get!(response_by_direction, direction) do
             _compute_voxel_direction_response(grid, direction, backend, terrain,
-                options, launch_cache, workspace)
+                options, launch_cache, workspace, terrain_fingerprint)
         end
         push!(directions, direction)
         push!(responses, response)
     end
     return VoxelResponseCache(
         _voxel_grid_fingerprint(grid),
-        _terrain_geometry_fingerprint(terrain),
+        terrain_fingerprint === nothing ? _terrain_geometry_fingerprint(terrain) : terrain_fingerprint,
         backend,
         options.toricity,
         directions,

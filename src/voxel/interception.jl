@@ -136,13 +136,16 @@ function VoxelLaunchGeometryCache(grid::VoxelGrid, terrain::AbstractVoxelTerrain
 end
 
 function _validate_voxel_launch_cache(cache::VoxelLaunchGeometryCache, grid,
-                                      terrain, backend, toricity)
+                                      terrain, backend, toricity,
+                                      terrain_fingerprint::Union{Nothing,UInt}=nothing)
     cache.minimum == grid.minimum && cache.maximum == grid.maximum &&
         cache.dimensions == size(grid) || throw(ArgumentError("voxel launch cache does not match grid geometry"))
     cache.rays_per_voxel == backend.rays_per_voxel ||
         throw(ArgumentError("voxel launch cache uses different ray sampling"))
     cache.toricity == toricity || throw(ArgumentError("voxel launch cache uses different toricity"))
-    cache.terrain_fingerprint == _voxel_launch_fingerprint(terrain) ||
+    current_fingerprint = terrain_fingerprint === nothing ?
+        _voxel_launch_fingerprint(terrain) : terrain_fingerprint
+    cache.terrain_fingerprint == current_fingerprint ||
         throw(ArgumentError("voxel launch cache does not match terrain geometry"))
     return cache
 end
@@ -269,9 +272,11 @@ end
 
 function _compute_voxel_direction_response(grid::VoxelGrid, propagation_direction,
     backend::VoxelCPUBackend, terrain::AbstractVoxelTerrain, options::LightOptions,
-    launch_cache::VoxelLaunchGeometryCache, workspace::VoxelRayWorkspace)
+    launch_cache::VoxelLaunchGeometryCache, workspace::VoxelRayWorkspace,
+    terrain_fingerprint::Union{Nothing,UInt}=nothing)
     _validate_terrain_for_grid(grid, terrain, options.toricity)
-    _validate_voxel_launch_cache(launch_cache, grid, terrain, backend, options.toricity)
+    _validate_voxel_launch_cache(launch_cache, grid, terrain, backend,
+        options.toricity, terrain_fingerprint)
     direction = _normalise_voxel_direction(propagation_direction)
     rays, effective_ray_count = _voxel_incident_rays(
         grid, direction, backend.rays_per_voxel, options.toricity,
@@ -373,6 +378,10 @@ function prepare_voxel_responses(
 )
     _validate_terrain_for_grid(grid, terrain, options.toricity)
     launch_cache = VoxelLaunchGeometryCache(grid, terrain, backend, options.toricity)
+    # The just-created cache already hashed this built-in geometry. Reuse that
+    # fresh value only within this batch; custom terrain keeps its dispatch.
+    terrain_fingerprint = _voxel_launch_cacheable(terrain) ?
+        launch_cache.terrain_fingerprint : nothing
     workspace = VoxelRayWorkspace()
     directions = NTuple{3,Float64}[]
     responses = VoxelDirectionResponse{Float64}[]
@@ -383,11 +392,11 @@ function prepare_voxel_responses(
         direction = _normalise_voxel_direction(propagation)
         push!(directions, direction)
         push!(responses, _compute_voxel_direction_response(grid, direction, backend,
-            terrain, options, launch_cache, workspace))
+            terrain, options, launch_cache, workspace, terrain_fingerprint))
     end
     return VoxelResponseCache(
         _voxel_grid_fingerprint(grid),
-        _terrain_geometry_fingerprint(terrain),
+        terrain_fingerprint === nothing ? _terrain_geometry_fingerprint(terrain) : terrain_fingerprint,
         backend,
         options.toricity,
         directions,

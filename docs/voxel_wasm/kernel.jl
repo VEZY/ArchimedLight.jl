@@ -57,10 +57,12 @@ end
 # invalidates these responses. The moving sun is kept in one replaceable slot.
 function prepare_sky!(state::HourState)
     state.sky_ready && return Int32(0)
+    terrain_fingerprint = AL._voxel_launch_fingerprint(state.data.terrain)
     @inbounds for i in eachindex(state.weather.sky_up)
         direction = state.weather.sky_up[i]
         state.responses[i] = direction_response(state.data,
-            -direction[1], -direction[2], -direction[3], state.launch_cache, state.workspace)
+            -direction[1], -direction[2], -direction[3], state.launch_cache, state.workspace,
+            terrain_fingerprint)
     end
     state.sky_ready = true
     state.sky_builds += 1
@@ -198,11 +200,12 @@ end
 
 function direction_response(data::Data, x::Float64, y::Float64, z::Float64,
                             launch_cache::AL.VoxelLaunchGeometryCache,
-                            workspace::AL.VoxelRayWorkspace)
+                            workspace::AL.VoxelRayWorkspace,
+                            terrain_fingerprint::Union{Nothing,UInt}=nothing)
     # Preserve prepare_voxel_responses' normalization before the shared response.
     direction = AL._normalise_voxel_direction((x, y, z))
     AL._compute_voxel_direction_response(data.grid, direction, data.backend, data.terrain,
-                                        OPTIONS, launch_cache, workspace)
+                                        OPTIONS, launch_cache, workspace, terrain_fingerprint)
 end
 
 """Shared interception/scattering; output includes display energy and an absorption budget."""
@@ -215,7 +218,7 @@ function solve(data::Data, weather::WeatherData, propagation::Vector{Float64},
     @inbounds for i in 1:count
         k = 3i - 2
         responses[i] = direction_response(data, propagation[k], propagation[k + 1], propagation[k + 2],
-                                         launch_cache, workspace)
+                                         launch_cache, workspace, launch_cache.terrain_fingerprint)
     end
     result = AL._apply_voxel_first_order(data.grid, responses, par, zeros(Float64, count),
                                         seconds, false, AL.terrain_patch_count(data.terrain))

@@ -26,6 +26,9 @@
 
 ### Performance
 
+- Reuse a fresh built-in terrain fingerprint across directional launch checks
+  within each response batch or native row. Keep public cache validation and
+  custom terrain dispatch, and streamline compact scattering accumulation.
 - Index compact scattering paths by source and direction, with one sparse row
   lookup per emitter. Reuse DDA scratch during compact preparation while
   retaining independently owned cached paths and geometric diagnostics.

@@ -352,10 +352,11 @@ function _accumulate_voxel_path_transport!(
     path::VoxelCompactScatteringPath, grid::VoxelGrid, backend::VoxelCPUBackend,
 )
     incoming = energy
+    # Compact indices come from the matching, validated grid and terrain cache.
     for segment in path.segments
         removed = incoming * segment.interception
         incoming = incoming * segment.transmission
-        intercepted[segment.index] += removed
+        @inbounds intercepted[segment.index] += removed
     end
     if path.exit_reason == :terrain
         terrain_incident[path.terrain_patch_id] += incoming
