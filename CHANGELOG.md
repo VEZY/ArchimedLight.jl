@@ -24,6 +24,12 @@
   Bundle matching small `.vox`/`.jsonl.gz` tree inputs, a PLY terrain, and a
   dedicated voxel documentation section with runnable examples.
 
+### Performance
+
+- Cache exact terrain heights at fixed voxel-ray launch positions and reuse
+  DDA and terrain traversal buffers, preserving ray sampling and energy
+  accounting in native Julia and the browser adapter.
+
 ### Fixed
 
 - Keep clipped terrain source-point calculations type-stable without changing

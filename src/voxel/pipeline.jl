@@ -62,13 +62,16 @@ function _voxel_cache_for_turtle!(
     backend::VoxelCPUBackend,
     terrain::AbstractVoxelTerrain,
     options::LightOptions,
+    launch_cache::VoxelLaunchGeometryCache=VoxelLaunchGeometryCache(grid, terrain, backend, options.toricity),
+    workspace::VoxelRayWorkspace=VoxelRayWorkspace(),
 )
     directions = NTuple{3,Float64}[]
     responses = VoxelDirectionResponse{Float64}[]
     for sector in turtle.sectors
         direction = _normalise_voxel_direction(ntuple(i -> -Float64(sector.direction[i]), 3))
         response = get!(response_by_direction, direction) do
-            compute_voxel_direction_response(grid, direction, backend, terrain; options=options)
+            _compute_voxel_direction_response(grid, direction, backend, terrain,
+                options, launch_cache, workspace)
         end
         push!(directions, direction)
         push!(responses, response)
@@ -93,6 +96,8 @@ function _run_voxel_light_step_resolved(
     optics::Union{Nothing,VoxelOpticalProperties}=nothing,
     ground::Union{Nothing,VoxelGroundOptics}=nothing,
     terrain::AbstractVoxelTerrain=NoVoxelTerrain(),
+    launch_cache::VoxelLaunchGeometryCache=VoxelLaunchGeometryCache(grid, terrain, backend, options.toricity),
+    workspace::VoxelRayWorkspace=VoxelRayWorkspace(),
     scattering_cache_by_configuration::Union{
         Nothing,
         Dict{VoxelScatteringCacheKey,VoxelScatteringTransportCache{Float64}},
@@ -115,7 +120,8 @@ function _run_voxel_light_step_resolved(
         check_boundaries=check_boundaries,
         resolved_step=resolved,
     )
-    cache = _voxel_cache_for_turtle!(response_by_direction, grid, turtle, backend, terrain, options)
+    cache = _voxel_cache_for_turtle!(response_by_direction, grid, turtle, backend, terrain,
+        options, launch_cache, workspace)
     first_order = compute_voxel_first_order(
         grid,
         turtle,
@@ -227,6 +233,8 @@ function run_voxel_light_series(
                             VoxelScatteringTransportCache{Float64},
                         }() : nothing
     results = Vector{VoxelLightStepResult{Float64}}(undef, length(rows))
+    launch_cache = VoxelLaunchGeometryCache(grid, terrain, backend, options.toricity)
+    workspace = VoxelRayWorkspace()
     for (index, row) in enumerate(rows)
         results[index] = _run_voxel_light_step_resolved(
             grid,
@@ -238,6 +246,8 @@ function run_voxel_light_series(
             optics=optics,
             ground=ground,
             terrain=terrain,
+            launch_cache=launch_cache,
+            workspace=workspace,
             scattering_cache_by_configuration=scattering_caches,
             check_boundaries=check_boundaries,
         )

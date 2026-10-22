@@ -174,6 +174,36 @@ VoxelRayPath(segments::Vector{VoxelRaySegment{T}}, exit_reason::Symbol) where {T
 Base.length(path::VoxelRayPath) = length(path.segments)
 Base.iterate(path::VoxelRayPath, state...) = iterate(path.segments, state...)
 
+# Internal scratch is owned by one response call/batch. Paths using these
+# segments must be consumed before tracing the next ray; public paths own
+# separately allocated segments.
+struct VoxelRayWorkspace
+    segments::Vector{VoxelRaySegment{Float64}}
+    terrain_stack::Vector{Int}
+end
+
+VoxelRayWorkspace() = VoxelRayWorkspace(VoxelRaySegment{Float64}[], Int[])
+
+# Exact, lazy elevations on the existing launch lattice. Side faces repeat the
+# same xy at multiple heights, so each face stores only its horizontal samples.
+# NaN denotes an unqueried origin; a genuine coverage gap is still queried and
+# rejected when that origin is first visited.
+struct VoxelLaunchGeometryCache
+    minimum::NTuple{3,Float64}
+    maximum::NTuple{3,Float64}
+    dimensions::NTuple{3,Int}
+    rays_per_voxel::Int
+    toricity::Bool
+    terrain_fingerprint::UInt
+    x_count::Int
+    y_count::Int
+    top::Vector{Float64}
+    x_min::Vector{Float64}
+    x_max::Vector{Float64}
+    y_min::Vector{Float64}
+    y_max::Vector{Float64}
+end
+
 const VoxelOpticalField3D = Union{Float64,Array{Float64,3}}
 const VoxelOpticalField2D = Union{Float64,Array{Float64,2}}
 """Operational voxel PAR wavelength interval in nanometres."""

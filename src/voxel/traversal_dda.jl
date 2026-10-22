@@ -18,12 +18,21 @@ function _trace_voxel_ray_dda(
     toricity::Bool;
     allow_upward::Bool=false,
 )
+    return _trace_voxel_ray_dda!(VoxelRaySegment{Float64}[], grid, origin,
+        direction, toricity, allow_upward, true)
+end
+
+function _trace_voxel_ray_dda!(
+    segments::Vector{VoxelRaySegment{Float64}}, grid::VoxelGrid, origin,
+    direction, toricity::Bool, allow_upward::Bool=false, reserve::Bool=false,
+)
+    empty!(segments)
     ray_direction = allow_upward ? _normalise_voxel_transport_direction(direction) :
                     _normalise_voxel_direction(direction)
     ray_origin = _canonical_voxel_origin(grid, origin, toricity)
     t_end, exit_reason = _voxel_exit_time(grid, ray_origin, ray_direction, toricity)
     tolerance = _voxel_tolerance(t_end)
-    t_end <= tolerance && return VoxelRayPath(VoxelRaySegment{Float64}[], exit_reason)
+    t_end <= tolerance && return VoxelRayPath(segments, exit_reason)
 
     probe_time = min(t_end / 2, 256eps(Float64) * max(maximum(grid.maximum) - minimum(grid.minimum), 1.0))
     probe_time = max(probe_time, min(t_end / 2, tolerance))
@@ -53,8 +62,7 @@ function _trace_voxel_ray_dda(
         abs(ray_direction[axis]) / grid.voxel_size[axis] for axis in 1:3
     )
     max_steps = max(8, ceil(Int, t_end * crossing_rate) + 8)
-    segments = VoxelRaySegment{Float64}[]
-    sizehint!(segments, max_steps)
+    reserve && sizehint!(segments, max_steps)
     current_time = 0.0
 
     for _ in 1:max_steps
@@ -126,13 +134,16 @@ function _trace_voxel_transport_ray(
     end
     ray_direction = _normalise_voxel_transport_direction(direction)
     ray_origin = _canonical_voxel_origin(grid, origin, toricity)
-    return _truncate_voxel_path_at_terrain(
+    terrain isa NoVoxelTerrain && return path
+    return _truncate_voxel_path_at_terrain!(
         grid,
         path,
         ray_origin,
         ray_direction,
         terrain,
         toricity,
+        VoxelRayWorkspace(path.segments, Int[]),
+        nothing,
     )
 end
 
@@ -166,12 +177,15 @@ function trace_voxel_ray(
     end
     ray_direction = _normalise_voxel_direction(direction)
     ray_origin = _canonical_voxel_origin(grid, origin, toricity)
-    return _truncate_voxel_path_at_terrain(
+    terrain isa NoVoxelTerrain && return path
+    return _truncate_voxel_path_at_terrain!(
         grid,
         path,
         ray_origin,
         ray_direction,
         terrain,
         toricity,
+        VoxelRayWorkspace(path.segments, Int[]),
+        nothing,
     )
 end

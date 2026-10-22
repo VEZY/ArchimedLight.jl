@@ -514,9 +514,15 @@ function _ray_triangle_intersection(origin, direction, a, b, c, maximum_distance
 end
 
 function _intersect_triangulated_base(terrain::TriangulatedTerrain, origin, direction, maximum_distance)
+    return _intersect_triangulated_base(terrain, origin, direction, maximum_distance, Int[])
+end
+
+function _intersect_triangulated_base(terrain::TriangulatedTerrain, origin, direction,
+                                     maximum_distance, stack::Vector{Int})
     best_distance = maximum_distance
     best_patch = 0
-    stack = Int[1]
+    empty!(stack)
+    push!(stack, 1)
     bounds = terrain_bounds(terrain)
     geometry_scale = maximum(ntuple(axis -> bounds[2][axis] - bounds[1][axis], 3))
     tolerance = 256eps(Float64) * max(geometry_scale, 1.0)
@@ -633,12 +639,20 @@ function intersect_terrain(
     direction,
     maximum_distance::Real=Inf,
 )
+    return _intersect_terrain_with_stack(terrain, origin, direction, maximum_distance, Int[])
+end
+
+_intersect_terrain_with_stack(terrain::AbstractVoxelTerrain, origin, direction,
+    maximum_distance, stack::Vector{Int}) = intersect_terrain(terrain, origin, direction, maximum_distance)
+
+function _intersect_terrain_with_stack(terrain::TriangulatedTerrain, origin, direction,
+                                      maximum_distance, stack::Vector{Int})
     ray_origin = ntuple(axis -> Float64(origin[axis]), 3)
     ray_direction = _normalise_terrain_vector(direction, "terrain ray direction")
     limit = Float64(maximum_distance)
     (isfinite(limit) && limit >= 0) || limit == Inf ||
         throw(ArgumentError("maximum terrain distance must be non-negative"))
-    return _intersect_triangulated_base(terrain, ray_origin, ray_direction, limit)
+    return _intersect_triangulated_base(terrain, ray_origin, ray_direction, limit, stack)
 end
 
 function intersect_terrain(
@@ -647,6 +661,11 @@ function intersect_terrain(
     direction,
     maximum_distance::Real=Inf,
 )
+    return _intersect_terrain_with_stack(terrain, origin, direction, maximum_distance, Int[])
+end
+
+function _intersect_terrain_with_stack(terrain::HeightFieldTerrain, origin, direction,
+                                      maximum_distance, stack::Vector{Int})
     ray_origin = ntuple(axis -> Float64(origin[axis]), 3)
     ray_direction = _normalise_terrain_vector(direction, "terrain ray direction")
     limit = Float64(maximum_distance)
@@ -657,6 +676,7 @@ function intersect_terrain(
         ray_origin,
         ray_direction,
         limit,
+        stack,
     )
 
     lower, upper = terrain_bounds(terrain)
@@ -669,7 +689,7 @@ function intersect_terrain(
             ray_origin[2] - tile_j * height,
             ray_origin[3],
         )
-        hit = _intersect_triangulated_base(terrain.mesh, shifted_origin, ray_direction, limit)
+        hit = _intersect_triangulated_base(terrain.mesh, shifted_origin, ray_direction, limit, stack)
         hit === nothing && continue
         if best === nothing || hit.distance < best.distance - tolerance ||
            (abs(hit.distance - best.distance) <= tolerance && hit.patch_id < best.patch_id)
@@ -680,12 +700,25 @@ function intersect_terrain(
 end
 
 function terrain_elevation_at(terrain::AbstractVoxelTerrain, x::Real, y::Real)
+    return _terrain_elevation_at(terrain, x, y, Int[])
+end
+
+# Custom terrain implementations may specialize the original three-argument
+# query. Preserve that dispatch unless the built-in geometry supports scratch.
+terrain_elevation_at(terrain::AbstractVoxelTerrain, x::Real, y::Real, stack::Vector{Int}) =
+    terrain_elevation_at(terrain, x, y)
+
+terrain_elevation_at(terrain::Union{PlanarTerrain,TriangulatedTerrain,HeightFieldTerrain},
+    x::Real, y::Real, stack::Vector{Int}) = _terrain_elevation_at(terrain, x, y, stack)
+
+function _terrain_elevation_at(terrain::AbstractVoxelTerrain, x::Real, y::Real, stack::Vector{Int})
     bounds = terrain_bounds(terrain)
     bounds === nothing && throw(ArgumentError("open-bottom terrain has no elevation"))
     lower, upper = bounds
     margin = max(upper[3] - lower[3], 1.0)
     origin = (Float64(x), Float64(y), upper[3] + margin)
-    hit = intersect_terrain(terrain, origin, (0.0, 0.0, -1.0), 2margin + (upper[3] - lower[3]))
+    hit = _intersect_terrain_with_stack(terrain, origin, (0.0, 0.0, -1.0),
+        2margin + (upper[3] - lower[3]), stack)
     hit === nothing && throw(ArgumentError("terrain has no surface at ($x, $y)"))
     return hit.point[3]
 end
@@ -933,8 +966,22 @@ function _truncate_voxel_path_at_terrain(
     toricity::Bool,
 )
     terrain isa NoVoxelTerrain && return path
+    # This helper retains its independently owned return path. Production
+    # tracing instead calls the mutating variant on its fresh/private storage.
+    owned = VoxelRayPath{Float64}(copy(path.segments), path.exit_reason, path.terrain_hit)
+    return _truncate_voxel_path_at_terrain!(grid, owned, origin, direction,
+        terrain, toricity, VoxelRayWorkspace(owned.segments, Int[]), nothing)
+end
+
+function _truncate_voxel_path_at_terrain!(
+    grid::VoxelGrid, path::VoxelRayPath, origin, direction,
+    terrain::AbstractVoxelTerrain, toricity::Bool, workspace::VoxelRayWorkspace,
+    cached_surface::Union{Nothing,Real},
+)
+    terrain isa NoVoxelTerrain && return path
     _validate_terrain_for_grid(grid, terrain, toricity)
-    surface_at_origin = terrain_elevation_at(terrain, origin[1], origin[2])
+    surface_at_origin = cached_surface === nothing ?
+        terrain_elevation_at(terrain, origin[1], origin[2], workspace.terrain_stack) : cached_surface
     origin_tolerance = 512eps(Float64) * max(abs(surface_at_origin), abs(origin[3]), 1.0)
     origin[3] >= surface_at_origin - origin_tolerance || throw(ArgumentError(
         "voxel ray origin lies below the terrain surface",
@@ -946,7 +993,8 @@ function _truncate_voxel_path_at_terrain(
         return path
     end
     maximum_distance = path.segments[end].t_exit
-    hit = intersect_terrain(terrain, origin, direction, maximum_distance)
+    hit = _intersect_terrain_with_stack(terrain, origin, direction, maximum_distance,
+        workspace.terrain_stack)
     if hit === nothing
         path.exit_reason == :bottom && throw(ArgumentError(
             "terrain has a horizontal coverage gap along a ray reaching the voxel bottom",
@@ -956,13 +1004,25 @@ function _truncate_voxel_path_at_terrain(
     tolerance = _voxel_tolerance(maximum_distance)
     hit.distance <= maximum_distance + tolerance || return path
 
-    segments = VoxelRaySegment{Float64}[]
-    sizehint!(segments, length(path.segments))
-    for segment in path.segments
+    segments = path.segments
+    retained = 0
+    for read in eachindex(segments)
+        segment = segments[read]
         segment.t_enter < hit.distance - tolerance || break
         segment_exit = min(segment.t_exit, hit.distance)
-        _append_voxel_segment!(segments, segment.index, segment.t_enter, segment_exit)
+        length = segment_exit - segment.t_enter
+        if length > _voxel_tolerance(segment_exit)
+            if retained > 0 && segments[retained].index == segment.index
+                previous = segments[retained]
+                segments[retained] = VoxelRaySegment(segment.index, previous.length + length,
+                    previous.t_enter, segment_exit)
+            else
+                retained += 1
+                segments[retained] = VoxelRaySegment(segment.index, length, segment.t_enter, segment_exit)
+            end
+        end
         segment.t_exit >= hit.distance - tolerance && break
     end
+    resize!(segments, retained)
     return VoxelRayPath{Float64}(segments, :terrain, hit)
 end

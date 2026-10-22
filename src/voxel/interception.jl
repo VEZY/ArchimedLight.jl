@@ -1,8 +1,13 @@
-function _voxel_face_ray_offsets(dx, dy, requested::Integer)
+function _voxel_face_ray_counts(dx, dy, requested::Integer)
     requested > 0 || throw(ArgumentError("requested ray count must be positive"))
     spacing = sqrt(dx * dy / requested)
     count_x = max(1, floor(Int, dx / spacing))
     count_y = max(1, floor(Int, dy / spacing))
+    return count_x, count_y
+end
+
+function _voxel_face_ray_offsets(dx, dy, requested::Integer)
+    count_x, count_y = _voxel_face_ray_counts(dx, dy, requested)
     step_x = dx / count_x
     step_y = dy / count_y
     offsets = NTuple{2,Float64}[]
@@ -107,6 +112,80 @@ function _voxel_incident_rays(grid::VoxelGrid, direction, requested, toricity)
     return rays, length(offsets)
 end
 
+_voxel_launch_cacheable(::AbstractVoxelTerrain) = false
+_voxel_launch_cacheable(::Union{PlanarTerrain,TriangulatedTerrain,HeightFieldTerrain}) = true
+_voxel_launch_fingerprint(terrain) = _voxel_launch_cacheable(terrain) ?
+    _terrain_geometry_fingerprint(terrain) : UInt(0)
+
+function VoxelLaunchGeometryCache(grid::VoxelGrid, terrain::AbstractVoxelTerrain,
+                                  backend::VoxelCPUBackend, toricity::Bool)
+    _validate_terrain_for_grid(grid, terrain, toricity)
+    nx, ny, nz = size(grid)
+    dx, dy, dz = grid.voxel_size
+    top_x, top_y = _voxel_face_ray_counts(dx, dy, backend.rays_per_voxel)
+    x_count, _ = _voxel_face_ray_counts(dy, dz, backend.rays_per_voxel)
+    y_count, _ = _voxel_face_ray_counts(dx, dz, backend.rays_per_voxel)
+    cacheable = _voxel_launch_cacheable(terrain)
+    top_size = cacheable ? nx * ny * top_x * top_y : 0
+    x_size = cacheable && !toricity ? ny * x_count : 0
+    y_size = cacheable && !toricity ? nx * y_count : 0
+    return VoxelLaunchGeometryCache(grid.minimum, grid.maximum, (nx, ny, nz),
+        backend.rays_per_voxel, toricity, _voxel_launch_fingerprint(terrain),
+        x_count, y_count, fill(NaN, top_size), fill(NaN, x_size), fill(NaN, x_size),
+        fill(NaN, y_size), fill(NaN, y_size))
+end
+
+function _validate_voxel_launch_cache(cache::VoxelLaunchGeometryCache, grid,
+                                      terrain, backend, toricity)
+    cache.minimum == grid.minimum && cache.maximum == grid.maximum &&
+        cache.dimensions == size(grid) || throw(ArgumentError("voxel launch cache does not match grid geometry"))
+    cache.rays_per_voxel == backend.rays_per_voxel ||
+        throw(ArgumentError("voxel launch cache uses different ray sampling"))
+    cache.toricity == toricity || throw(ArgumentError("voxel launch cache uses different toricity"))
+    cache.terrain_fingerprint == _voxel_launch_fingerprint(terrain) ||
+        throw(ArgumentError("voxel launch cache does not match terrain geometry"))
+    return cache
+end
+
+function _voxel_launch_height!(cache::VoxelLaunchGeometryCache, rays::VoxelIncidentRays,
+                                ray_index::Int, origin, terrain, workspace::VoxelRayWorkspace)
+    # Tracing canonicalizes periodic coordinates before its origin query.
+    x = cache.toricity ? cache.minimum[1] +
+        mod(origin[1] - cache.minimum[1], cache.maximum[1] - cache.minimum[1]) : origin[1]
+    y = cache.toricity ? cache.minimum[2] +
+        mod(origin[2] - cache.minimum[2], cache.maximum[2] - cache.minimum[2]) : origin[2]
+    _voxel_launch_cacheable(terrain) ||
+        return terrain_elevation_at(terrain, x, y, workspace.terrain_stack)
+    nx, ny, nz = rays.dimensions
+    top_count = length(rays.offsets) * nx * ny
+    side_x_count = length(rays.offsets_x) * ny * nz
+    values, index = if ray_index <= top_count
+        cache.top, ray_index
+    elseif ray_index <= top_count + side_x_count
+        position = ray_index - top_count - 1
+        offset_count = length(rays.offsets_x)
+        cell = div(position, offset_count)
+        j = mod(cell, ny)
+        horizontal_offset = mod(mod(position, offset_count), cache.x_count)
+        (rays.x_face == rays.minimum[1] ? cache.x_min : cache.x_max),
+            j * cache.x_count + horizontal_offset + 1
+    else
+        position = ray_index - top_count - side_x_count - 1
+        offset_count = length(rays.offsets_y)
+        cell = div(position, offset_count)
+        i = mod(cell, nx)
+        horizontal_offset = mod(mod(position, offset_count), cache.y_count)
+        (rays.y_face == rays.minimum[2] ? cache.y_min : cache.y_max),
+            i * cache.y_count + horizontal_offset + 1
+    end
+    surface = values[index]
+    if isnan(surface)
+        surface = terrain_elevation_at(terrain, x, y, workspace.terrain_stack)
+        values[index] = surface
+    end
+    return surface
+end
+
 function _voxel_grid_fingerprint(grid::VoxelGrid)
     state = hash(size(grid), hash(grid.minimum, hash(grid.maximum)))
     for value in grid.pad
@@ -144,6 +223,21 @@ function _voxel_path_for_backend(
     )
 end
 
+function _voxel_path_for_backend!(grid, origin, direction, backend::VoxelCPUBackend,
+    terrain, options, workspace::VoxelRayWorkspace, surface::Union{Nothing,Real})
+    path = if backend.traversal == :dda
+        _trace_voxel_ray_dda!(workspace.segments, grid, origin, direction, options.toricity)
+    elseif backend.traversal == :reference
+        _trace_voxel_ray_reference(grid, origin, direction, options.toricity)
+    else
+        throw(ArgumentError("algorithm must be :dda or :reference"))
+    end
+    ray_direction = _normalise_voxel_direction(direction)
+    ray_origin = _canonical_voxel_origin(grid, origin, options.toricity)
+    return _truncate_voxel_path_at_terrain!(grid, path, ray_origin, ray_direction,
+        terrain, options.toricity, workspace, surface)
+end
+
 """
     compute_voxel_direction_response(grid, propagation_direction, backend; options=LightOptions())
 
@@ -159,8 +253,20 @@ function compute_voxel_direction_response(
     backend::VoxelCPUBackend=VoxelCPUBackend(),
     terrain::AbstractVoxelTerrain=NoVoxelTerrain();
     options::LightOptions=LightOptions(),
+    launch_cache::Union{Nothing,VoxelLaunchGeometryCache}=nothing,
+    workspace::VoxelRayWorkspace=VoxelRayWorkspace(),
 )
+    cache = launch_cache === nothing ?
+        VoxelLaunchGeometryCache(grid, terrain, backend, options.toricity) : launch_cache
+    return _compute_voxel_direction_response(grid, propagation_direction, backend,
+        terrain, options, cache, workspace)
+end
+
+function _compute_voxel_direction_response(grid::VoxelGrid, propagation_direction,
+    backend::VoxelCPUBackend, terrain::AbstractVoxelTerrain, options::LightOptions,
+    launch_cache::VoxelLaunchGeometryCache, workspace::VoxelRayWorkspace)
     _validate_terrain_for_grid(grid, terrain, options.toricity)
+    _validate_voxel_launch_cache(launch_cache, grid, terrain, backend, options.toricity)
     direction = _normalise_voxel_direction(propagation_direction)
     rays, effective_ray_count = _voxel_incident_rays(
         grid, direction, backend.rays_per_voxel, options.toricity,
@@ -174,16 +280,18 @@ function compute_voxel_direction_response(
     terrain_incident_fraction = zeros(Float64, terrain_patch_count(terrain))
     terrain_incident_weight = 0.0
     incoming_weight = Float64(size(grid)[1] * size(grid)[2])
-    for (origin, ray_weight, from_side) in rays
+    for (ray_index, (origin, ray_weight, from_side)) in enumerate(rays)
+        surface = terrain isa NoVoxelTerrain ? nothing :
+            _voxel_launch_height!(launch_cache, rays, ray_index, origin, terrain, workspace)
         if from_side
             if !(terrain isa NoVoxelTerrain)
-                surface = terrain_elevation_at(terrain, origin[1], origin[2])
                 tolerance = 512eps(Float64) * max(abs(surface), abs(origin[3]), 1.0)
                 origin[3] > surface + tolerance || continue
             end
             incoming_weight += ray_weight
         end
-        path = _voxel_path_for_backend(grid, origin, direction, backend, terrain; options=options)
+        path = _voxel_path_for_backend!(grid, origin, direction, backend, terrain,
+            options, workspace, surface)
         incoming = ray_weight
         last_index = nothing
         for segment in path
@@ -254,6 +362,8 @@ function prepare_voxel_responses(
     options::LightOptions=LightOptions(),
 )
     _validate_terrain_for_grid(grid, terrain, options.toricity)
+    launch_cache = VoxelLaunchGeometryCache(grid, terrain, backend, options.toricity)
+    workspace = VoxelRayWorkspace()
     directions = NTuple{3,Float64}[]
     responses = VoxelDirectionResponse{Float64}[]
     sizehint!(directions, length(turtle.sectors))
@@ -262,7 +372,8 @@ function prepare_voxel_responses(
         propagation = ntuple(i -> -Float64(sector.direction[i]), 3)
         direction = _normalise_voxel_direction(propagation)
         push!(directions, direction)
-        push!(responses, compute_voxel_direction_response(grid, direction, backend, terrain; options=options))
+        push!(responses, _compute_voxel_direction_response(grid, direction, backend,
+            terrain, options, launch_cache, workspace))
     end
     return VoxelResponseCache(
         _voxel_grid_fingerprint(grid),
