@@ -1,14 +1,33 @@
 function _dda_first_boundary_time(origin, component, minimum, spacing)
+    delta = component == 0 ? Inf : spacing / abs(component)
+    return _dda_first_boundary_time(origin, component, minimum, spacing, delta)
+end
+
+function _dda_first_boundary_time(origin, component, minimum, spacing, delta)
     component == 0 && return Inf
     # Plane times stay in unwrapped ray coordinates; only voxel indices wrap.
     relative = (origin - minimum) / spacing
     plane_index = component > 0 ? floor(Int, relative) + 1 : ceil(Int, relative) - 1
     boundary = minimum + plane_index * spacing
     time = (boundary - origin) / component
-    delta = spacing / abs(component)
     tolerance = _voxel_tolerance(time)
     time <= tolerance && (time += delta)
     return time
+end
+
+# One incident direction traces many rays through the same grid. Keep these
+# direction-only quantities outside that loop without changing their arithmetic.
+function _voxel_dda_setup(grid::VoxelGrid, ray_direction)
+    steps = ntuple(axis -> Int(sign(ray_direction[axis])), 3)
+    deltas = ntuple(axis -> ray_direction[axis] == 0 ? Inf :
+        grid.voxel_size[axis] / abs(ray_direction[axis]), 3)
+    crossing_rate = sum(
+        abs(ray_direction[axis]) / grid.voxel_size[axis] for axis in 1:3
+    )
+    probe_distance = 256eps(Float64) *
+        max(maximum(grid.maximum) - minimum(grid.minimum), 1.0)
+    return (direction=ray_direction, steps=steps, deltas=deltas,
+        crossing_rate=crossing_rate, dimensions=size(grid), probe_distance=probe_distance)
 end
 
 function _trace_voxel_ray_dda(
@@ -30,38 +49,41 @@ function _trace_voxel_ray_dda!(
     ray_direction = allow_upward ? _normalise_voxel_transport_direction(direction) :
                     _normalise_voxel_direction(direction)
     ray_origin = _canonical_voxel_origin(grid, origin, toricity)
+    return _trace_voxel_ray_dda_prepared!(segments, grid, ray_origin,
+        _voxel_dda_setup(grid, ray_direction), toricity, reserve)
+end
+
+function _trace_voxel_ray_dda_prepared!(
+    segments::Vector{VoxelRaySegment{Float64}}, grid::VoxelGrid, ray_origin,
+    setup, toricity::Bool, reserve::Bool=false,
+)
+    empty!(segments)
+    ray_direction = setup.direction
     t_end, exit_reason = _voxel_exit_time(grid, ray_origin, ray_direction, toricity)
     tolerance = _voxel_tolerance(t_end)
     t_end <= tolerance && return VoxelRayPath(segments, exit_reason)
 
-    probe_time = min(t_end / 2, 256eps(Float64) * max(maximum(grid.maximum) - minimum(grid.minimum), 1.0))
+    probe_time = min(t_end / 2, setup.probe_distance)
     probe_time = max(probe_time, min(t_end / 2, tolerance))
     probe = _path_point(grid, ray_origin, ray_direction, probe_time, toricity)
-    dimensions = size(grid)
+    dimensions = setup.dimensions
     i = _voxel_axis_index(probe[1], grid.minimum[1], grid.voxel_size[1], dimensions[1])
     j = _voxel_axis_index(probe[2], grid.minimum[2], grid.voxel_size[2], dimensions[2])
     k = _voxel_axis_index(probe[3], grid.minimum[3], grid.voxel_size[3], dimensions[3])
 
-    step_x = Int(sign(ray_direction[1]))
-    step_y = Int(sign(ray_direction[2]))
-    step_z = Int(sign(ray_direction[3]))
-    delta_x = ray_direction[1] == 0 ? Inf : grid.voxel_size[1] / abs(ray_direction[1])
-    delta_y = ray_direction[2] == 0 ? Inf : grid.voxel_size[2] / abs(ray_direction[2])
-    delta_z = ray_direction[3] == 0 ? Inf : grid.voxel_size[3] / abs(ray_direction[3])
+    step_x, step_y, step_z = setup.steps
+    delta_x, delta_y, delta_z = setup.deltas
     next_x = _dda_first_boundary_time(
-        ray_origin[1], ray_direction[1], grid.minimum[1], grid.voxel_size[1]
+        ray_origin[1], ray_direction[1], grid.minimum[1], grid.voxel_size[1], delta_x
     )
     next_y = _dda_first_boundary_time(
-        ray_origin[2], ray_direction[2], grid.minimum[2], grid.voxel_size[2]
+        ray_origin[2], ray_direction[2], grid.minimum[2], grid.voxel_size[2], delta_y
     )
     next_z = _dda_first_boundary_time(
-        ray_origin[3], ray_direction[3], grid.minimum[3], grid.voxel_size[3]
+        ray_origin[3], ray_direction[3], grid.minimum[3], grid.voxel_size[3], delta_z
     )
 
-    crossing_rate = sum(
-        abs(ray_direction[axis]) / grid.voxel_size[axis] for axis in 1:3
-    )
-    max_steps = max(8, ceil(Int, t_end * crossing_rate) + 8)
+    max_steps = max(8, ceil(Int, t_end * setup.crossing_rate) + 8)
     reserve && sizehint!(segments, max_steps)
     current_time = 0.0
 

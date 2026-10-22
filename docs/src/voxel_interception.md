@@ -335,6 +335,12 @@ patch material assignment. Optical albedos and soil reflectance
 are applied during iteration rather than baked into geometric paths, so changing
 only optics does not require rebuilding those paths.
 
+Within a newly traced response, rays sharing one direction reuse its DDA
+stepping constants and built-in terrain normalization. Built-in terrain is
+validated once per response; standalone ray calls and custom terrain retain
+their validation. This reduces repeated setup in native Julia and WebAssembly
+without changing ray positions, weights, or interception equations.
+
 For an individual/organ model, a change to component densities or projection
 coefficients changes the equivalent extinction field and therefore invalidates
 attenuated responses. Changing only component band optics preserves those

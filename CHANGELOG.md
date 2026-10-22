@@ -26,6 +26,10 @@
 
 ### Performance
 
+- Prepare voxel DDA direction constants and built-in terrain ray normalization
+  once per incident direction, and validate built-in terrain once per response
+  rather than per ray. The native step and series APIs and the browser adapter
+  share this path, preserving ray positions and numerical results.
 - Cache exact terrain heights at fixed voxel-ray launch positions and reuse
   DDA and terrain traversal buffers, preserving ray sampling and energy
   accounting in native Julia and the browser adapter.

@@ -173,13 +173,16 @@ changes. Long text is ellipsized with its full value available on hover.
 
 ## Validation on 22 October 2026
 
-The complete Julia 1.13.1 package suite passes **30,593 assertions**, including
+The complete default Julia 1.13.1 package suite passes **32,681 assertions**, including
 **636 workspace/cache regressions** for launch-cache validation, non-cubic and periodic
 scenes, missing terrain coverage, custom mutable terrains, independent concurrent
 calls and retained output ownership. Custom terrain extensions keep their
 original elevation dispatch and are queried afresh rather than cached. Another
 **186 buffer regressions** exercise deep BVH growth, stale storage, repeated
 hit/miss queries, periodic terrain and DDA reset/ownership.
+The shared direction preparation adds **2,088 regressions** covering exact ray
+paths, public per-ray terrain responses, custom terrain validation, and native
+step/series parity through changing suns, night and scattering switches.
 
 The public mixed-vegetation pipeline, uncached adapter, explicit-direction
 adapter and cached adapter agree exactly on **144 × 1,098 output values**.
@@ -199,9 +202,9 @@ and six further lifecycle revisits, with a maximum native/Wasm output difference
 of **4.657e-10 J**. Their largest energy-balance residual is **2.305e-6 J**,
 within the same relative tolerance applied to the summed incoming energy.
 
-The numerical module is **860,187 bytes**, compiled in 114.8 s with no compiler
+The numerical module is **863,311 bytes**, compiled in 119.9 s with no compiler
 diagnostics. Its SHA256 is
-`e44502e79db51a34eab7eff84e9d1b33242ca7cd587ab2615a335379fccd5f84`.
+`646dcc259cb7faf59851810bf87f793adadb7f12a0f8036ba3f43bbee7def7c6`.
 Build-only adaptations ignore native capacity hints, clear segment vectors in
 one operation and route dense multidimensional arrays through WasmTarget's
 existing matrix registry. The clearing overlay is restricted to voxel segment
@@ -249,8 +252,8 @@ as paired native speedups.
 
 At 256 rays, warmed native allocation remains **97,248 bytes / 69 allocations**
 with scattering off and **165,056 bytes / 119 allocations** with it on.
-Output arrays remain independently owned. The main target of this pass is
-Wasm's per-node copying rather than native allocations.
+Output arrays remain independently owned. The indexed-stack pass primarily
+addresses Wasm's per-node copying rather than native allocations.
 
 Separate single first-use Node fixed-sky preparation observations at 16/64/256
 rays fall from **241.97 / 792.05 / 3105.45 ms** to
@@ -265,3 +268,52 @@ holds the native profiles, paired-response checks, package and browser receipts.
 Every matched Wasm sample passes comparison against fresh independent native
 outputs and the preserved earlier outputs. The native-regressing intermediate
 variant is retained under `diagnostic1/` and is excluded from final results.
+
+## Native Julia Direction Preparation
+
+The next pass targets the shared native solver. For each incident direction,
+the response prepares DDA signs, boundary increments, crossing rates and grid
+span once. Built-in terrain validation also runs once per response, and its
+existing direction normalization is reused across rays. Public standalone ray
+calls and custom terrain retain their validation. The same intersection and
+clipping bodies serve both paths; ray sampling and the normalization rounding
+sequence are preserved.
+
+Native measurements compare the public `run_voxel_light_step` and
+`run_voxel_light_series` APIs against an isolated complete package module frozen
+at `e355fcc`. Both run in the same Julia 1.13.1 process. Each timed call starts
+with fresh internal caches; readers, compilation and warm-up are excluded.
+Three alternating before/after blocks contain 11 samples each with `evals=1`.
+Series use four distinct consecutive minute suns, so the comparison includes
+both fixed-sky reuse and fresh solar responses.
+
+| Scene, 16 rays per face | Public API | Before (ms) | After (ms) |
+| --- | --- | ---: | ---: |
+| Example tree + triangle terrain, scattering off | step | 50.33 | 44.50 |
+| Example tree + triangle terrain, scattering off | series | 54.57 | 47.66 |
+| Synthetic 16 × 12 × 16 canopy + triangle terrain, scattering off | step | 154.31 | 132.16 |
+| Synthetic 16 × 12 × 16 canopy + triangle terrain, scattering off | series | 159.83 | 133.95 |
+
+Across the measured first-order step/series configurations, the gain is
+**1.13×–1.20×**. Allocation counts and bytes are unchanged, and all compared
+first-order and scattering fields agree exactly. Scattering setup and iteration
+are outside this optimization: a longer five-block, 31-sample repeat measures
+**85.84 → 79.96 ms** for the tree's 16-ray scattering series (**1.07×**).
+At four rays, scattering series has no reliable overall gain: the initial
+campaign improves while the repeat regresses, within substantial block-to-block
+variation. These are native public API measurements, distinct from the earlier
+Wasm-only and private-response timings above.
+
+The ignored `native-round3/` directory retains the frozen complete package,
+native profile, benchmark driver, source hashes and raw results. Its
+`comparison.md` includes all ten configurations and the scattering repeats.
+
+Rebuilding the unchanged browser adapter from this shared Julia path passes all
+**168 native/Wasm cases** and 19 cache lifecycle checks. A separate matched Node
+campaign compares `e355fcc` with the new module using the same runtime and
+fresh native references: 46 sectors, 16/64/256 rays, noon/15:40, scattering
+off/on, five warm-ups and 31 warmed samples per case, with other Julia jobs
+stopped. Its twelve median speedups range from **1.04× to 1.12×**; before/after
+Wasm output arrays agree exactly in every timing case. These warmed live-update
+timings exclude sky/scattering preparation, array readback and rendering, and
+are separate from the fresh-cache native public API measurements above.

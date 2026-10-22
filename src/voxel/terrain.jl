@@ -616,6 +616,10 @@ function intersect_terrain(
     limit = Float64(maximum_distance)
     isfinite(limit) && limit >= 0 || limit == Inf ||
         throw(ArgumentError("maximum terrain distance must be non-negative"))
+    return _intersect_planar_base(terrain, ray_origin, ray_direction, limit)
+end
+
+function _intersect_planar_base(terrain::PlanarTerrain, ray_origin, ray_direction, limit)
     abs(ray_direction[3]) > eps(Float64) || return nothing
     distance = (terrain.elevation - ray_origin[3]) / ray_direction[3]
     tolerance = 256eps(Float64) * max(isfinite(limit) ? limit : abs(distance), 1.0)
@@ -684,6 +688,11 @@ function _intersect_terrain_with_stack(terrain::HeightFieldTerrain, origin, dire
     limit = Float64(maximum_distance)
     (isfinite(limit) && limit >= 0) || limit == Inf ||
         throw(ArgumentError("maximum terrain distance must be non-negative"))
+    return _intersect_height_field_base(terrain, ray_origin, ray_direction, limit, stack)
+end
+
+function _intersect_height_field_base(terrain::HeightFieldTerrain, ray_origin,
+                                      ray_direction, limit, stack::Vector{Int})
     terrain.periodic || return _intersect_triangulated_base(
         terrain.mesh,
         ray_origin,
@@ -711,6 +720,29 @@ function _intersect_terrain_with_stack(terrain::HeightFieldTerrain, origin, dire
     end
     return best
 end
+
+# A directional response validates the scene once and reuses one exact terrain
+# normalization for all its rays. Custom terrain retains its original dispatch.
+_prepare_voxel_terrain_direction(::AbstractVoxelTerrain, direction) = nothing
+_prepare_voxel_terrain_direction(
+    ::Union{PlanarTerrain,TriangulatedTerrain,HeightFieldTerrain}, direction,
+) = _normalise_terrain_vector(direction, "terrain ray direction")
+
+_intersect_terrain_prepared_with_stack(terrain::AbstractVoxelTerrain, origin,
+    direction, maximum_distance, stack::Vector{Int}, ::Nothing) =
+    _intersect_terrain_with_stack(terrain, origin, direction, maximum_distance, stack)
+
+_intersect_terrain_prepared_with_stack(terrain::PlanarTerrain, origin, direction,
+    maximum_distance, stack::Vector{Int}, prepared_direction::NTuple{3,Float64}) =
+    _intersect_planar_base(terrain, origin, prepared_direction, maximum_distance)
+
+_intersect_terrain_prepared_with_stack(terrain::TriangulatedTerrain, origin, direction,
+    maximum_distance, stack::Vector{Int}, prepared_direction::NTuple{3,Float64}) =
+    _intersect_triangulated_base(terrain, origin, prepared_direction, maximum_distance, stack)
+
+_intersect_terrain_prepared_with_stack(terrain::HeightFieldTerrain, origin, direction,
+    maximum_distance, stack::Vector{Int}, prepared_direction::NTuple{3,Float64}) =
+    _intersect_height_field_base(terrain, origin, prepared_direction, maximum_distance, stack)
 
 function terrain_elevation_at(terrain::AbstractVoxelTerrain, x::Real, y::Real)
     return _terrain_elevation_at(terrain, x, y, Int[])
@@ -993,6 +1025,32 @@ function _truncate_voxel_path_at_terrain!(
 )
     terrain isa NoVoxelTerrain && return path
     _validate_terrain_for_grid(grid, terrain, toricity)
+    return _truncate_voxel_path_at_terrain_body!(grid, path, origin, direction,
+        terrain, workspace, cached_surface, nothing)
+end
+
+# The generic fallback deliberately retains validation and custom intersection
+# methods on every ray. Only built-in terrain uses the already-validated route.
+function _truncate_voxel_path_at_terrain_prepared!(
+    grid, path, origin, direction, terrain::AbstractVoxelTerrain, toricity,
+    workspace, cached_surface, prepared_direction,
+)
+    return _truncate_voxel_path_at_terrain!(grid, path, origin, direction,
+        terrain, toricity, workspace, cached_surface)
+end
+
+function _truncate_voxel_path_at_terrain_prepared!(
+    grid, path, origin, direction,
+    terrain::Union{PlanarTerrain,TriangulatedTerrain,HeightFieldTerrain}, toricity,
+    workspace, cached_surface, prepared_direction::NTuple{3,Float64},
+)
+    return _truncate_voxel_path_at_terrain_body!(grid, path, origin, direction,
+        terrain, workspace, cached_surface, prepared_direction)
+end
+
+function _truncate_voxel_path_at_terrain_body!(
+    grid, path, origin, direction, terrain, workspace, cached_surface, prepared_direction,
+)
     surface_at_origin = cached_surface === nothing ?
         terrain_elevation_at(terrain, origin[1], origin[2], workspace.terrain_stack) : cached_surface
     origin_tolerance = 512eps(Float64) * max(abs(surface_at_origin), abs(origin[3]), 1.0)
@@ -1006,8 +1064,8 @@ function _truncate_voxel_path_at_terrain!(
         return path
     end
     maximum_distance = path.segments[end].t_exit
-    hit = _intersect_terrain_with_stack(terrain, origin, direction, maximum_distance,
-        workspace.terrain_stack)
+    hit = _intersect_terrain_prepared_with_stack(terrain, origin, direction, maximum_distance,
+        workspace.terrain_stack, prepared_direction)
     if hit === nothing
         path.exit_reason == :bottom && throw(ArgumentError(
             "terrain has a horizontal coverage gap along a ray reaching the voxel bottom",

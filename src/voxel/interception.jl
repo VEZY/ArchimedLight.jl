@@ -224,18 +224,19 @@ function _voxel_path_for_backend(
 end
 
 function _voxel_path_for_backend!(grid, origin, direction, backend::VoxelCPUBackend,
-    terrain, options, workspace::VoxelRayWorkspace, surface::Union{Nothing,Real})
+    terrain, options, workspace::VoxelRayWorkspace, surface::Union{Nothing,Real},
+    setup, terrain_direction)
+    ray_origin = _canonical_voxel_origin(grid, origin, options.toricity)
     path = if backend.traversal == :dda
-        _trace_voxel_ray_dda!(workspace.segments, grid, origin, direction, options.toricity)
+        _trace_voxel_ray_dda_prepared!(workspace.segments, grid, ray_origin,
+            setup, options.toricity)
     elseif backend.traversal == :reference
         _trace_voxel_ray_reference(grid, origin, direction, options.toricity)
     else
         throw(ArgumentError("algorithm must be :dda or :reference"))
     end
-    ray_direction = _normalise_voxel_direction(direction)
-    ray_origin = _canonical_voxel_origin(grid, origin, options.toricity)
-    return _truncate_voxel_path_at_terrain!(grid, path, ray_origin, ray_direction,
-        terrain, options.toricity, workspace, surface)
+    return _truncate_voxel_path_at_terrain_prepared!(grid, path, ray_origin,
+        setup.direction, terrain, options.toricity, workspace, surface, terrain_direction)
 end
 
 """
@@ -280,6 +281,11 @@ function _compute_voxel_direction_response(grid::VoxelGrid, propagation_directio
     terrain_incident_fraction = zeros(Float64, terrain_patch_count(terrain))
     terrain_incident_weight = 0.0
     incoming_weight = Float64(size(grid)[1] * size(grid)[2])
+    # Preserve the tracing/terrain normalization chain, but perform it once per
+    # incident direction instead of once for every sampled ray.
+    ray_direction = _normalise_voxel_direction(direction)
+    setup = _voxel_dda_setup(grid, ray_direction)
+    terrain_direction = _prepare_voxel_terrain_direction(terrain, ray_direction)
     for (ray_index, (origin, ray_weight, from_side)) in enumerate(rays)
         surface = terrain isa NoVoxelTerrain ? nothing :
             _voxel_launch_height!(launch_cache, rays, ray_index, origin, terrain, workspace)
@@ -291,7 +297,7 @@ function _compute_voxel_direction_response(grid::VoxelGrid, propagation_directio
             incoming_weight += ray_weight
         end
         path = _voxel_path_for_backend!(grid, origin, direction, backend, terrain,
-            options, workspace, surface)
+            options, workspace, surface, setup, terrain_direction)
         incoming = ray_weight
         last_index = nothing
         for segment in path
