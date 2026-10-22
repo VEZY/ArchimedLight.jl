@@ -521,13 +521,16 @@ function _intersect_triangulated_base(terrain::TriangulatedTerrain, origin, dire
                                      maximum_distance, stack::Vector{Int})
     best_distance = maximum_distance
     best_patch = 0
-    empty!(stack)
-    push!(stack, 1)
+    # Retain scratch storage between rays; only `top` is the active stack.
+    isempty(stack) && resize!(stack, 8)
+    @inbounds stack[1] = 1
+    top = 1
     bounds = terrain_bounds(terrain)
     geometry_scale = maximum(ntuple(axis -> bounds[2][axis] - bounds[1][axis], 3))
     tolerance = 256eps(Float64) * max(geometry_scale, 1.0)
-    while !isempty(stack)
-        node = pop!(stack)
+    while top > 0
+        node = @inbounds stack[top]
+        top -= 1
         _ray_aabb_intersects(
             origin,
             direction,
@@ -555,8 +558,18 @@ function _intersect_triangulated_base(terrain::TriangulatedTerrain, origin, dire
             end
         else
             # Push the higher index first so equal-distance traversal remains deterministic.
-            terrain.bvh.right[node] > 0 && push!(stack, terrain.bvh.right[node])
-            terrain.bvh.left[node] > 0 && push!(stack, terrain.bvh.left[node])
+            right = terrain.bvh.right[node]
+            left = terrain.bvh.left[node]
+            needed = top + (right > 0) + (left > 0)
+            needed > length(stack) && resize!(stack, max(needed, 2length(stack)))
+            if right > 0
+                top += 1
+                @inbounds stack[top] = right
+            end
+            if left > 0
+                top += 1
+                @inbounds stack[top] = left
+            end
         end
     end
     best_patch == 0 && return nothing

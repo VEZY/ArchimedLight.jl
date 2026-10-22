@@ -29,6 +29,8 @@
 - Cache exact terrain heights at fixed voxel-ray launch positions and reuse
   DDA and terrain traversal buffers, preserving ray sampling and energy
   accounting in native Julia and the browser adapter.
+- Reuse indexed terrain-search stacks and clear DDA buffers in one operation
+  in the WebAssembly compatibility layer, retaining native clearing performance.
 
 ### Fixed
 

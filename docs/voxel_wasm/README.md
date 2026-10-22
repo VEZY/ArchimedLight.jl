@@ -65,6 +65,10 @@ batches and meteorological series reuse this preparation too.
 Each calculation owns reusable DDA segment and terrain-search buffers. Clipping
 compacts the current path in place; returned responses and public ray paths
 retain independent storage. Neither ray positions nor their weights change.
+The terrain search tracks an active stack length inside retained storage.
+A build-only compatibility method clears DDA segments in one operation in
+WebAssembly, avoiding repeated array copying by the compiler's vector mutation
+helpers. Native Julia retains its faster `empty!` operation.
 
 Turning scattering on lazily prepares the shared Julia full-sphere transport
 paths once per configuration. Changing the hour or switching scattering off
@@ -169,11 +173,13 @@ changes. Long text is ellipsized with its full value available on hover.
 
 ## Validation on 22 October 2026
 
-The complete Julia 1.13.1 package suite passes **30,407 assertions**, including
-**636 new regressions** for launch-cache validation, non-cubic and periodic
+The complete Julia 1.13.1 package suite passes **30,593 assertions**, including
+**636 workspace/cache regressions** for launch-cache validation, non-cubic and periodic
 scenes, missing terrain coverage, custom mutable terrains, independent concurrent
 calls and retained output ownership. Custom terrain extensions keep their
-original elevation dispatch and are queried afresh rather than cached.
+original elevation dispatch and are queried afresh rather than cached. Another
+**186 buffer regressions** exercise deep BVH growth, stale storage, repeated
+hit/miss queries, periodic terrain and DDA reset/ownership.
 
 The public mixed-vegetation pipeline, uncached adapter, explicit-direction
 adapter and cached adapter agree exactly on **144 × 1,098 output values**.
@@ -193,12 +199,13 @@ and six further lifecycle revisits, with a maximum native/Wasm output difference
 of **4.657e-10 J**. Their largest energy-balance residual is **2.305e-6 J**,
 within the same relative tolerance applied to the summed incoming energy.
 
-The numerical module is **862,609 bytes**, compiled in 114.9 s with no compiler
+The numerical module is **860,187 bytes**, compiled in 114.8 s with no compiler
 diagnostics. Its SHA256 is
-`10502ce7924a1f7ff54e32a4564f441324c1bd169f53befd22e3fdbb11080b2b`.
-The existing build-only adaptations ignore native capacity hints and route
-dense multidimensional arrays through WasmTarget's existing matrix registry.
-These optimizations require no new compiler overlay or duplicated light equations.
+`e44502e79db51a34eab7eff84e9d1b33242ca7cd587ab2615a335379fccd5f84`.
+Build-only adaptations ignore native capacity hints, clear segment vectors in
+one operation and route dense multidimensional arrays through WasmTarget's
+existing matrix registry. The clearing overlay is restricted to voxel segment
+vectors; native array methods and the shared light equations are unchanged.
 
 Generated receipts in `build/scattering/` record source, input and environment
 hashes. A passing compilation receipt, matching module hash, fresh native
@@ -207,43 +214,54 @@ export. Incidental timings from semantic checks are not performance results.
 Benchmark campaigns run after compilation and package tests stop, with fresh
 state for cold samples and prepared geometric caches for warmed samples.
 
-Matched before/after warmed medians in milliseconds, with **46 sky sectors**.
-The native campaign uses five samples per cell and `evals=1`; the Node 24.10
-campaign uses 31 samples per cell after five warm-ups, with the same engine,
-runtime and benchmark driver before and after. Both campaigns ran without
-other compilation or test jobs. Each update retraces the current sun and
-includes weather, accumulation, optional scattering and output packing;
-preparation, array readback and WGL rendering are separate.
+Matched before/after warmed Wasm medians below compare **commit `d79caf6`**
+(which already caches launch heights and owns traversal buffers) with the indexed
+BVH stack and target-only buffer clearing. Both use **46 sky sectors**, Node
+24.10, the same runtime and unchanged benchmark driver, 31 samples per cell
+after five warm-ups, and no concurrent compilation or test jobs. Each update
+retraces the current sun and includes weather, accumulation, optional scattering
+and output packing; preparation, array readback and WGL rendering are separate.
 
-| UTC hour | Rays per face | Native off, before → after | Native on, before → after | Wasm off, before → after | Wasm on, before → after |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| 12:00 | 16 | 2.75 → 1.07 | 3.94 → 2.22 | 12.65 → 6.74 | 14.52 → 9.01 |
-| 15:40 | 16 | 2.57 → 0.91 | 3.14 → 1.72 | 9.60 → 4.71 | 12.81 → 7.37 |
-| 12:00 | 64 | 10.86 → 4.42 | 11.78 → 5.54 | 46.09 → 25.38 | 47.86 → 28.50 |
-| 15:40 | 64 | 9.25 → 3.35 | 11.35 → 4.32 | 38.27 → 17.88 | 41.52 → 21.14 |
-| 12:00 | 256 | 45.35 → 16.33 | 45.56 → 17.31 | 185.94 → 98.56 | 188.31 → 105.74 |
-| 15:40 | 256 | 37.76 → 14.42 | 38.38 → 17.29 | 156.53 → 73.68 | 157.46 → 74.21 |
+| UTC hour | Rays per face | Wasm off, before → after (ms) | Wasm on, before → after (ms) |
+| --- | ---: | ---: | ---: |
+| 12:00 | 16 | 6.39 → 4.48 | 9.16 → 6.92 |
+| 15:40 | 16 | 4.77 → 3.26 | 7.39 → 5.93 |
+| 12:00 | 64 | 24.17 → 16.47 | 30.98 → 19.91 |
+| 15:40 | 64 | 19.41 → 12.00 | 20.61 → 14.81 |
+| 12:00 | 256 | 96.26 → 64.84 | 100.95 → 67.48 |
+| 15:40 | 256 | 69.12 → 47.71 | 73.15 → 51.26 |
 
-The matched Wasm median gain ranges from **1.61× to 2.14×**. Tail latency is
-not uniformly better: at 15:40 with 256 rays and scattering off, p95 changes
-from 163.71 to 174.49 ms despite the median falling from 156.53 to 73.68 ms.
-These Node timings describe numerical execution, not browser frame latency.
+The matched Wasm median gain ranges from **1.25× to 1.62×**. Every measured p95
+is lower, although the late-afternoon 256-ray scattering tail changes little
+(85.70 → 85.38 ms). These Node timings describe numerical execution, not browser
+frame latency or a guaranteed tail bound.
 
-At midday with 256 rays and scattering off, native allocation per warmed update
-falls from **96,483,984 bytes / 690,729 allocations** to
-**97,248 bytes / 69 allocations**. The isolated sun-response stage falls to
-22,624 bytes / 19 allocations. Output arrays remain independently owned.
+Native Julia retains `empty!`: replacing it with `resize!(..., 0)` slowed DDA
+in an alternating same-process check, so that replacement is confined to the
+Wasm compatibility method. Paired native directional-response checks alternate
+the preserved and current implementations in one process, with 11 samples in
+each of three order-reversed blocks. Every response field agrees exactly.
+Across the six hour/sampling configurations, the median of the three block
+medians improves by **1.08×–1.19×**. These isolate the unit-irradiance ray response;
+they exclude weather, scattering and packing. Separate five-sample whole-solve
+campaigns varied, so they are retained in the receipts without treating them
+as paired native speedups.
 
-Fresh fixed-sky preparation has native five-sample medians of
-**39.19 / 146.83 / 518.30 ms** at 16/64/256 rays, compared with
-114.77 / 440.39 / 1743.19 ms before. Separate single first-use Node observations
-fall from **491.93 / 1788.19 / 6909.36 ms** to
-**257.18 / 799.48 / 3165.39 ms**. Scattering transport preparation remains
-separate: the corresponding Node observations are about 149 / 121 / 117 ms.
-These preparation observations are not warmed 31-sample medians.
+At 256 rays, warmed native allocation remains **97,248 bytes / 69 allocations**
+with scattering off and **165,056 bytes / 119 allocations** with it on.
+Output arrays remain independently owned. The main target of this pass is
+Wasm's per-node copying rather than native allocations.
 
-The ignored `performance-before/` snapshot preserves the old module, sources
-and references. `performance-after/` records the matched campaign, and
-`performance-audit/native_performance_before_after.json` records native timing
-and allocation scopes. Every matched Wasm sample passes comparison against
-fresh independent native outputs and the preserved earlier outputs.
+Separate single first-use Node fixed-sky preparation observations at 16/64/256
+rays fall from **241.97 / 792.05 / 3105.45 ms** to
+**182.63 / 543.82 / 2139.91 ms**. Scattering path preparation is separate;
+its final observations are about 140 / 101 / 95 ms. These preparation
+observations are not warmed 31-sample medians.
+
+The ignored `performance-round2/before/` snapshot preserves the exact old
+module, sources and references. `performance-round2/wasm_campaign_receipt.json`
+and `comparison.md` record the matched Wasm campaign; the `after/` directory
+holds the native profiles, paired-response checks, package and browser receipts.
+Every matched Wasm sample passes comparison against fresh independent native
+outputs and the preserved earlier outputs. The native-regressing intermediate
+variant is retained under `diagnostic1/` and is excluded from final results.

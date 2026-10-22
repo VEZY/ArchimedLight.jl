@@ -10,6 +10,10 @@ const VoxelWasmHintVector = Union{
 
 @overlay WasmTarget.WASM_METHOD_TABLE Base.sizehint!(v::VoxelWasmHintVector, n::Integer) = v
 
+# Native empty! is faster; Wasm's generic overlay otherwise copies on each pop!.
+@overlay WasmTarget.WASM_METHOD_TABLE Base.empty!(
+    v::Vector{VoxelWasmKernel.AL.VoxelRaySegment{Float64}}) = resize!(v, 0)
+
 # The generic array-field/new path currently chooses the vector registry even
 # for Array{T,N}. Reuse its existing N-dimensional registry so :size is NTuple{N}.
 function WasmTarget.register_vector_type!(module_::WasmTarget.WasmModule,
