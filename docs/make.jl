@@ -41,6 +41,13 @@ makedocs(;
     pages=[
         "Home" => "index.md",
         "Getting Started" => "getting_started.md",
+        "Applications" => [
+            "Overview" => "applications/index.md",
+            "Wheat–Maize Intercropping" => "applications/intercropping.md",
+            "Agrivoltaics" => "applications/agrivoltaics.md",
+            "Reconstructed Rice" => "applications/rice.md",
+            "Oil-Palm Digital Twins" => "applications/oil-palm.md",
+        ],
         "Tutorials" => [
             "Beginner Workflows" => "tutorial_beginner_workflows.md",
             "File-Based Workflow" => "tutorial_files.md",
