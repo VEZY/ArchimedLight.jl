@@ -121,7 +121,7 @@ The figure below uses that attached `Ri_PAR_f` field, so you can verify that the
 
 ```@example file_workflow
 using PlantGeom, CairoMakie
-CairoMakie.activate!(type = "png") # Save as PNG to save sa-pace (wrt SVG)
+CairoMakie.activate!(type = "image/png") # Save as PNG to save sa-pace (wrt SVG)
 par_max = maximum(values(step.budget.incident_flux.total.par))
 
 fig, ax, p = plantviz(

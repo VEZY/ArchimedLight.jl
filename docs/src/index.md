@@ -10,31 +10,56 @@ absorbed radiation for each organ.
 
 ## Try it in your browser
 
-Here's a live example of a wheat plant in a field generated using ArchiCrop (Braud et al. 2026), with incident PAR irradiance coloured on the plant and ground.
-
-**This example is not precomputed; it runs the simulations live in your browser** like it would in a real-world scenario. Change the hour of simulation, explore the effect of light scattering, periodic boundaries (`toricity=true`), pixel resolution (lower is better), and number of sky sectors (higher is better).
+Choose a wheat mesh or a voxel tree above terrain. Change the hour and options;
+**light calculations run live in your browser.**
 
 ```@raw html
-<figure id="live-wheat" data-state="preview">
+<div id="live-demo-switcher" role="group" aria-label="Choose a live scene" hidden>
+  <button type="button" data-demo-target="live-wheat" aria-controls="live-wheat" aria-pressed="true">Wheat mesh</button>
+  <button type="button" data-demo-target="live-voxel" aria-controls="live-voxel" aria-pressed="false">Voxel tree + terrain</button>
+</div>
+<figure id="live-wheat" class="live-light-demo" data-live-demo="wheat" data-title="Interactive wheat light interception" data-state="preview">
   <div class="live-wheat-stage" aria-busy="false">
     <img class="live-wheat-preview" src="assets/live-wheat/preview.png"
-      width="1280" height="720" loading="eager" fetchpriority="high"
-      alt="A three-dimensional wheat plant and its shadow on the ground, coloured by incident PAR irradiance, with controls for hour, resolution, scattering, toricity, and sky sectors.">
+      width="1000" height="679" loading="eager" fetchpriority="high"
+      alt="A three-dimensional wheat plant and its shadow on the ground, coloured by incident PAR irradiance, with controls for hour, resolution, scattering, toricity and sky sectors.">
   </div>
   <figcaption class="live-wheat-caption">
+    <p>Wheat architecture generated with ArchiCrop (Braud et al. 2026).
+    Colours show incident PAR irradiance on the plant and ground.</p>
     <span class="live-wheat-status" role="status" aria-live="polite"></span>
-    <a class="live-wheat-open" href="assets/live-wheat/index.html" target="_blank" rel="noopener">Open the standalone demo</a>.
-    All light calculations run in your browser.
+    <a class="live-wheat-open" href="assets/live-wheat/index.html" target="_blank" rel="noopener">Open standalone demo</a>.
   </figcaption>
-  <noscript><p>Enable JavaScript to interact with the scene.</p></noscript>
+  <noscript><p>Enable JavaScript to interact with the scene. The preview remains available above.</p></noscript>
+</figure>
+<figure id="live-voxel" class="live-light-demo" data-live-demo="voxel" data-title="Interactive voxel tree and terrain light interception" data-state="preview">
+  <div class="live-wheat-stage" aria-busy="false">
+    <img class="live-wheat-preview" src="assets/live-voxel/preview.jpg"
+      width="1000" height="694" loading="lazy"
+      alt="A voxel tree above a triangulated terrain, coloured by incident PAR irradiance, with hour, sky-sector, ray-count and scattering controls.">
+  </div>
+  <figcaption class="live-wheat-caption">
+    <p>A tree from the bundled JSONL.gz example above a PLY terrain.
+    Colours show incident PAR irradiance on the plant and ground.</p>
+    <span class="live-wheat-status" role="status" aria-live="polite"></span>
+    <a class="live-wheat-open" href="assets/live-voxel/index.html" target="_blank" rel="noopener">Open standalone demo</a>.
+    <a href="voxel_tree_tutorial.html">Follow the voxel workflow</a>.
+  </figcaption>
+  <noscript><p>Enable JavaScript to interact with the scene. The preview remains available above.</p></noscript>
 </figure>
 ```
 
 ```@raw html
 <details>
-  <summary>About the example and more scenes</summary>
-  <p>Weather was downloaded using PlantMeteo for the Montpellier location on 15 May 2025.
-  The browser runs ArchimedLight compiled to WASM.</p>
+  <summary>About the examples and more scenes</summary>
+  <p>Both examples use interpolated Montpellier weather for 15 May 2025
+  and ArchimedLight compiled to WebAssembly.</p>
+  <p>The wheat benchmark has an unspecified cultivar. See the
+  <a href="https://github.com/VEZY/ArchimedLight.jl/tree/main/docs/live_wheat">source, provenance and validation notes</a>
+  for its scope and reproduction.</p>
+  <p>The voxel example uses individual leaf/wood point proportions, illustrative
+  optical properties and finite boundaries. See the
+  <a href="voxel_overview.html">voxel modelling guide</a> for its assumptions.</p>
   <div class="archimed-animations">
     <video autoplay loop muted playsinline
            poster="assets/archimedlight_day_cycle_1.png"
@@ -128,6 +153,7 @@ The simulation results are returned as a `LightBudget`, grouped by quantity and 
 ## Learn More
 
 - [Getting Started](getting_started.md): run your first simulation.
+- [Voxel Modelling](voxel_overview.md): work with PAD grids, individual leaf/wood mixtures, and terrain instead of organ meshes.
 - [File-Based Workflow](tutorial_files.md) and [Interactive Workflow](tutorial_interactive.md): load a scene or build one in memory.
 - [Model Pipeline](theory_pipeline.md) and [Evaluation](evaluation.md): understand the methods and their validation.
 - [PlantSimEngine Coupling](plantsimengine.md): connect light to other plant processes.

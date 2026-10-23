@@ -755,10 +755,12 @@ Fields:
 - `pixel_hit_stack_mode`: typed [`PixelHitStackPolicy`](@ref) used for
   per-pixel hit stacks. The default is `AutoPixelHitStack`.
 - `toricity`: enable horizontal periodic wrapping of the simulated plot.
-  With `true`, projection uses the horizontal plot tile. With `false`, each
-  light direction uses a fitted perpendicular canvas covering the complete
-  scene geometry, so elevated objects are not clipped by the plot footprint.
-  This changes neither the physical ground geometry nor the units of `pixel_size`.
+  For triangle scenes, `true` projects onto the horizontal plot tile; with
+  `false`, each light direction uses a fitted perpendicular canvas covering the
+  complete scene geometry, so elevated objects are not clipped by the plot
+  footprint. This changes neither the physical ground geometry nor the units
+  of `pixel_size`. For voxel grids, `true` wraps rays horizontally and `false`
+  terminates them at the first lateral grid boundary.
 - `radiation_timestep_minutes`: internal radiative substep used when a meteo
   row covers a coarser interval.
 - `radiation_input_semantics`: interpretation of supplied irradiances.

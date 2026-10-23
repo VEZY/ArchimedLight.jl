@@ -1,0 +1,15 @@
+VOXEL SPACE
+#build-version:2.4.2
+#fraction-digits:7
+#max_corner:(2, -52, -3)
+#min_corner:(0, -53, -5)
+#nrecordmax:0
+#nsubvoxel:1
+#res:(1, 1, 1)
+#split:(2, 1, 2)
+#fixture-note:Four cells adapted from the supplied Belinga export, with reduced bounds and remapped indices.
+i j k ground_distance nbEchos nbSampling lgTotal lMeanTotal angleMean bsPotential bsEntering bsIntercepted attenuation_FPL_biasedMLE attenuation_FPL_biasCorrection attenuation_FPL_unbiasedMLE weightedEffectiveFreepathLength weightedFreepathLength attenuation_PPL_MLE distLaser pad_attenuation_PPL_MLE
+1 0 1 1.5 0 2078 1333.4520253 0.6416997 89.4742114 10.4951927 0.6166305 0 0 0 0 0.3867042 0.3864932 0 40.8346479 0
+0 0 0 0.5 0 0 0 0 NaN 9.8936859 0 0 NaN NaN NaN 0 0 NaN NaN NaN
+1 0 0 0.5 7 2066 1354.2972805 0.6555166 91.431087 10.498663 0.6109067 0.0012229 0.0031508 0.0000007 0.0031501 0.3881121 0.3878873 0.0031538 39.3534209 0.0063076
+0 0 1 1.5 8 318 246.0913988 0.7738723 92.5521814 10.6470217 0.067252 0.000931 0.021534 0.0000474 0.0214867 0.043236 0.0432122 0.021557 35.7756699 0.043114

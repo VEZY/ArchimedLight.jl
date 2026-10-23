@@ -2,8 +2,91 @@
 
 ## Unreleased
 
+### Added
+
+- Unify voxel and triangle workflows around `read_scene`, `add_ground!`,
+  `run_light`, `light_metric_values`, `component_values`, and `lightplot`.
+  Add mutable `VoxelScene` containers retaining imported observations and
+  explicit individual/organ models, plus a triangle-to-voxel migration guide.
+- Construct flat voxel ground directly from point inputs or vegetation, using
+  the scene extent by default and optional ground patch counts.
+- Add a CPU voxel interception workflow with historical `.vox`
+  I/O, open and periodic horizontal boundaries, reference and DDA traversals,
+  first-order PAR/NIR Beer–Lambert interception, directional-response caching,
+  meteorological step and series APIs, and a frozen Java compatibility oracle.
+- Add explicit scalar or spatial voxel optical properties, deterministic
+  matrix-free isotropic PAR/NIR multiple scattering, top/side/bottom energy
+  accounting, an optional Lambertian ground, reusable internal transport paths,
+  convergence diagnostics, energy-balance residuals, tests, documentation, and
+  CPU setup-versus-warmed benchmarks.
+- Add facet-based height-field and PLY triangle terrain, affine DTM import,
+  spatial soil materials, terrain-aware transport, and energy diagnostics.
+- Report cumulative incident, absorbed and reflected scattering energy per
+  terrain patch, preserving aggregate soil budgets and older positional result
+  constructors.
+- Read merged AMAPVox/individual JSONL and JSONL.gz inputs with explicit
+  missing-PAD diagnostics. Allocate PAD conservatively among individuals,
+  foliage, wood, and unattributed vegetation in the `point_proxy` workflow.
+  Bundle matching small `.vox`/`.jsonl.gz` tree inputs, a PLY terrain, and a
+  dedicated voxel documentation section with runnable examples.
+- Offer both live wheat and voxel/terrain demos on the documentation home page,
+  with a shared presentation and lazy loading of the selected scene.
+
+### Changed
+
+- Replace the unreleased public `voxelplot`/`voxelplot!` helpers with
+  `lightplot`/`lightplot!`. Use `colormap` and `colorrange` instead of
+  `voxel_colormap` and `voxel_colorrange`; without light results, plots show
+  PAD or individual/organ composition.
+
+### Performance
+
+- Avoid segment writes and attenuation passes for finite incident DDA rays
+  that provably miss occupied voxels, preserving exact traversal terminals,
+  terrain checks, periodic/reference fallbacks and public geometric paths.
+- Reuse transport arrays across voxel scattering orders and alternate terrain
+  reflection buffers within each band solve, preserving independent public
+  results and the terrain-bounce residual.
+- Reuse a fresh built-in terrain fingerprint across directional launch checks
+  within each response batch or native row. Keep public cache validation and
+  custom terrain dispatch, and streamline compact scattering accumulation.
+- Index compact scattering paths by source and direction, with one sparse row
+  lookup per emitter. Reuse DDA scratch during compact preparation while
+  retaining independently owned cached paths and geometric diagnostics.
+- Reuse prepared direction constants, terrain origin elevations and BVH scratch
+  when building voxel scattering paths, and omit legacy flat-ground paths for
+  concrete terrain. Use compact occupied-segment paths with cached stable
+  Beer–Lambert fractions in the native pipeline and browser adapter; preserve
+  geometric caches and their historical constructors for explicit callers.
+- Prepare voxel DDA direction constants and built-in terrain ray normalization
+  once per incident direction, and validate built-in terrain once per response
+  rather than per ray. The native step and series APIs and the browser adapter
+  share this path, preserving ray positions and numerical results.
+- Cache exact terrain heights at fixed voxel-ray launch positions and reuse
+  DDA and terrain traversal buffers, preserving ray sampling and energy
+  accounting in native Julia and the browser adapter.
+- Reuse indexed terrain-search stacks and clear DDA buffers in one operation
+  in the WebAssembly compatibility layer, retaining native clearing performance.
+
 ### Fixed
 
+- Avoid false voxel directional energy-balance failures at dense sampling by
+  compensating the scalar incident and escape sums, preserving sampled paths.
+- Keep clipped terrain source-point calculations type-stable without changing
+  their geometry or equations.
+- Respect raster-cell footprints for AAIGrid soil materials without changing
+  the interpolated terrain surface or shifting material boundaries by half a
+  cell.
+- Include unresolved soil-to-soil reflection energy in voxel convergence
+  diagnostics, including highly reflective concave terrain.
+- Preserve georeferenced voxel and terrain geometry precision when plotting,
+  with a common local rendering frame and `Axis3` as the default voxel axis.
+- Stop inferring spherical leaf-angle distribution provenance in `.vox`
+  exports: a PAD grid does not retain the input inversion's LAD metadata.
+- Handle periodic voxel rays starting exactly on a boundary, ignore unused PLY
+  vertices, honor `nir_interception=false` in low-level voxel calls, and read
+  AMAPVox 2.4.2 coordinate headers and named PAD estimators with explicit
+  handling of unknown PAD.
 - Keep fixed diffuse directional responses and their scattering graph cached
   when the explicit sun moves with `cache_radiation=true` and
   `all_in_turtle=false`. Replace only the current solar response, including

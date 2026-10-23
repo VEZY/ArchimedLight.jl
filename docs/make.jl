@@ -1,6 +1,13 @@
 using ArchimedLight
 using Documenter
 using Bonito
+using WGLMakie
+using CairoMakie
+
+# Load WGL before examples can activate it, and keep ordinary figures as PNG.
+# Bonito's HTML figure renderer otherwise uses WGL even with Cairo active.
+# The interactive voxel App selects WebGL explicitly with WGLMakie.WithConfig.
+CairoMakie.activate!(type="image/png")
 
 # For interactive rendering:
 # using LiveServer
@@ -8,6 +15,14 @@ using Bonito
 # or LiveServer.serve(dir=joinpath(@__DIR__, "build"))
 
 DocMeta.setdocmeta!(ArchimedLight, :DocTestSetup, :(using ArchimedLight); recursive=true)
+
+# Serve downloadable copies while keeping examples/ as the single data source.
+tree_example_assets = joinpath(@__DIR__, "src", "assets", "voxel-tree")
+mkpath(tree_example_assets)
+for name in ("tree.vox", "tree.jsonl.gz", "terrain.ply")
+    cp(joinpath(@__DIR__, "..", "examples", "voxel_tree", name),
+       joinpath(tree_example_assets, name); force=true)
+end
 
 # Update the videos:
 # include(joinpath(@__DIR__, "make_video", "make_video.jl"))
@@ -54,6 +69,17 @@ makedocs(;
             "Interactive Workflow" => "tutorial_interactive.md",
             "Copy-Paste Templates" => "onboarding_templates.md",
         ],
+        "Voxel Modelling" => [
+            "Start Here" => "voxel_overview.md",
+            "From Triangles To Voxels" => "triangles_to_voxels.md",
+            "One Tree, Two Input Files" => "voxel_tree_tutorial.md",
+            "Run A Simulation" => "voxel_interception.md",
+            "Input Files And Individuals" => "voxel_inputs.md",
+            "Interception And Assumptions" => "theory_voxel_interception.md",
+            "Terrain And Soil" => "voxel_terrain.md",
+            "Scattering And Optical Parameters" => "theory_voxel_scattering.md",
+            "Future Directions" => "voxel_future_directions.md",
+        ],
         "Reference" => [
             "Configuration And Options" => "reference_config.md",
             "Scene Files And Semantics" => "reference_scene.md",
@@ -84,6 +110,9 @@ makedocs(;
 
 include(joinpath(@__DIR__, "check_static_export.jl"))
 finish_static_export()
+
+include(joinpath(@__DIR__, "check_inline_voxel_plot.jl"))
+check_inline_voxel_plot(joinpath(@__DIR__, "build"))
 
 if get(ENV, "ARCHIMEDLIGHT_DOCS_BUILD_ONLY", "false") != "true"
     deploydocs(;

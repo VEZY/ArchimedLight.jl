@@ -1,7 +1,8 @@
 # API Reference
 
 This page is a compact guide to the public entry points of `ArchimedLight.jl`.
-For normal use, create a `LightSimulation` and call `run_light`.
+For normal use, create a triangle `LightSimulation` or import a `VoxelScene`,
+then call `run_light`.
 
 ## API Stability
 
@@ -143,6 +144,72 @@ snippet is schematic because it assumes an existing `scene` and output `path`:
 PlantGeom.add_ground!(scene; z=0.0, nx=9, ny=9, xy_bounds=nothing, group="pavement", type="Cobblestone")
 write_scene(path, scene)
 ```
+
+## Voxel Inputs And Individual/Organ Mixtures
+
+Use the dedicated [Voxel Modelling](voxel_overview.md) section for workflows
+and model assumptions. The existing merged JSONL.gz format is read directly:
+
+```julia
+leaf = VoxelMaterial(; g=0.5, par_reflectance=0.08, par_transmittance=0.07,
+                     nir_reflectance=0.45, nir_transmittance=0.40)
+scene = read_scene(path; mode=:point_proxy, leaf=leaf,
+                   wood=VoxelMaterial(), unknown=VoxelMaterial(),
+                   individuals=Dict(), missing_pad=:error)
+add_ground!(scene, terrain)
+result = run_light(scene, meteo_row; options, backend=VoxelCPUBackend())
+series = run_light(scene, meteo; options, backend=VoxelCPUBackend())
+values = light_metric_values(scene, result, :incident_par_flux)
+totals = component_values(result; level=:individual)
+```
+
+This is a call-shape reference; `path`, forcing, options, and terrain must be
+defined. The mode and default leaf material are explicit. Reading without a
+mode retains the observations for inspection; `run_light` then requires
+`update_models!(scene; mode=:point_proxy, leaf, wood, unknown, individuals=...)`.
+A plain `.vox` scene needs no point-proxy model. `VoxelScene(grid; terrain)`
+and `VoxelScene(vegetation; terrain)` wrap existing in-memory objects. Wood
+transmittance must be zero. `missing_pad=:zero_with_diagnostics` is the opt-in alternative
+for unknown densities. `VoxelVegetationStepResult` keeps the native result in
+`.light`, sparse `VoxelComponentLight` records in `.components`, and the
+original `.missing_pad` mask. Aggregation retains `individual_id=nothing`
+for unattributed vegetation. Energies are joules per step; component
+`plant_area` is proxy area in square metres.
+
+See [Input Files And Individuals](voxel_inputs.md) for an executable example,
+the actual file fields, material overrides, and coverage assumptions.
+
+## Voxel Terrain API
+
+The voxel workflow has an independent continuous terrain interface.
+`add_ground!(scene; optics=soil)` creates a horizontal plane covering the voxel
+domain at its minimum Z. Optional `elevation`, `cells=(nx, ny)` and `periodic`
+control its level, patch count and boundary compatibility. Use
+`NoVoxelTerrain()` for the historical open bottom, or construct a
+`PlanarTerrain`, `HeightFieldTerrain`, or `TriangulatedTerrain` with explicit
+`SoilOpticalProperties`. Attach it with `add_ground!(scene, terrain)` or pass
+`terrain=` to the lower-level grid/vegetation methods.
+
+AAIGrid and AMAPVox workflows use:
+
+```julia
+aai = read_aai_grid(dtm_path; crs="EPSG:2154")
+terrain = height_field_terrain(aai, soil; transform=dtm_to_voxel)
+input = VoxelTerrainSceneInput(voxel_path, dtm_path; dtm_to_voxel=dtm_to_voxel)
+scene = read_voxel_terrain_scene(input, soil)
+```
+
+An existing triangle PLY is converted directly to the internal terrain mesh:
+
+```julia
+terrain = read_ply_terrain(ply_path, soil; transform=dtm_to_voxel)
+```
+
+The transform defaults to identity. No CRS conversion, translation, or domain
+extension is inferred; triangulated PLY terrain is non-periodic.
+
+See [Voxel Terrain And Soil](voxel_terrain.md) for coordinate, coverage,
+periodicity, `ground_distance`, cache, and energy-balance contracts.
 
 ## Validation
 
@@ -461,11 +528,34 @@ lightplot!(axis, step; color=:incident_par_flux, timestep=1, interpolate=false, 
 lightplot!(axis, steps; color=:incident_par_flux, timestep=1, interpolate=false, ...)
 lightplot(scene, models, options, data; color=:incident_par_flux, timestep=1, interpolate=false, ...)
 lightplot!(axis, scene, models, options, data; color=:incident_par_flux, timestep=1, interpolate=false, ...)
+lightplot(voxel_scene_or_grid_or_vegetation; ...)
+lightplot(voxel_scene_or_grid_or_vegetation, result; color=:incident_par_flux, timestep=1, ...)
+lightplot!(axis, voxel_scene_or_grid_or_vegetation, result; color=:incident_par_flux, timestep=1, ...)
+lightplot(grid, terrain; rays=(), quadrature=nothing, cutaway=:none, ...)
+lightplot!(axis, grid, terrain; rays=(), quadrature=nothing, cutaway=:none, ...)
+light_metric_values(voxel_scene_or_grid_or_vegetation, result_or_series, selector)
 ```
 
 For `lightplot(steps; colorrange=automatic)`, the Makie extension keeps a
 single color range across the whole series so animated timesteps remain
 comparable.
+
+`lightplot` without results renders nonzero PAD for a plain grid or organ
+composition for a point-input/vegetation scene. Supplying a voxel light result
+uses the same selector vocabulary as triangle plots, with fixed series colour
+ranges. Absorption selectors require an output that retains absorption;
+first-order scalar-grid results alone cannot reconstruct material absorption.
+Use the original source and terrain for voxel queries and plots; voxel results
+do not snapshot subsequent edits to the mutable scene. Voxel values remain
+constant within each cell, so the triangle `interpolate` option does not apply.
+
+For geometric diagnostics, `lightplot(grid, terrain; ...)` renders the terrain mesh
+and optional ray paths computed by [`trace_voxel_ray`](@ref). Supplying a
+[`VoxelScatteringQuadrature`](@ref) adds the fixed-direction Lambertian
+redistribution at each terrain hit. Use `cutaway=:front` to inspect the
+interior without changing the source [`VoxelGrid`](@ref).
+Pass the simulation's `options` to use the same `LightOptions.toricity` for
+displayed ray paths. Plotting defaults to `LightOptions(toricity=false)`.
 
 ## Backend Types
 
@@ -476,6 +566,7 @@ This block lists schematic constructor calls:
 ```julia
 RasterCPUBackend()
 RaycastScatteringBackend()
+VoxelCPUBackend(; rays_per_voxel=1000, g=0.5, traversal=:dda)
 ```
 
 They can be passed explicitly to the pipeline helpers when you want to control

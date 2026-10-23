@@ -2,12 +2,14 @@
 
 This page is the shortest path to your first light simulation.
 It uses the bundled coffee example from `example_2/`, which is also the source of the image on the home page.
+For plant area density grids and a separate terrain mesh, start with
+[Voxel Modelling](voxel_overview.md).
 Here is how to plot it:
 
 ```@setup getting_started
 using CairoMakie, ArchimedLight, PlantGeom, PlantMeteo
 using Dates
-CairoMakie.activate!(type = "png")
+CairoMakie.activate!(type = "image/png")
 ```
 
 ```@example getting_started
@@ -175,6 +177,7 @@ The `toricity` parameter is activated here, this is why we see the shade of the 
 - [Beginner Workflows](tutorial_beginner_workflows.md) shows file-based, interactive, and coupled-model usage.
 - [File-Based Workflow](tutorial_files.md) explains how the example directory is organised and how each file contributes to the simulation.
 - [Interactive Workflow](tutorial_interactive.md) shows how to build a scene directly in Julia and run light on it without `.ops` / `.opf` input files.
+- [From Triangles To Voxels](triangles_to_voxels.md) applies the same run, metric and plotting names to PAD scenes.
 - [Configuration And Options Reference](reference_config.md) lists the configuration keys that the current Julia package actually uses.
 
 ## One Important Difference From The Historical Java App

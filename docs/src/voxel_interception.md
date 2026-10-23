@@ -1,0 +1,501 @@
+# Run A Voxel Simulation
+
+Use the voxel workflow when vegetation is represented by plant area density
+(`PAD`) in a regular 3D grid rather than by triangles. It reuses ArchimedLight's
+meteorology, sky discretization, and directional irradiances, then applies
+Beer–Lambert attenuation inside each voxel, with optional deterministic
+multiple scattering.
+
+For merged JSONL.gz inputs with per-individual leaf/wood proportions, see
+[Input Files And Individuals](voxel_inputs.md). For the model assumptions and
+their differences from triangle scenes, see
+[Interception And Assumptions](theory_voxel_interception.md).
+
+```@contents
+Pages = ["voxel_interception.md"]
+Depth = 3
+```
+
+## Minimal In-Memory Run
+
+This example builds a small homogeneous canopy. Its values are pedagogical;
+they are not a calibrated canopy model.
+
+```@example voxel
+using ArchimedLight
+
+grid = VoxelGrid(
+    (0.0, 0.0, 0.0),
+    (2.0, 2.0, 3.0),
+    fill(0.4, 2, 2, 3),
+)
+
+options = LightOptions(
+    toricity=true,
+    turtle_sectors=6,
+    all_in_turtle=true,
+    scattering=false,
+    radiation_timestep_minutes=5.0,
+)
+
+row = (
+    step_duration=3600.0,
+    Ri_PAR_f=100.0,
+    Ri_NIR_f=50.0,
+    sun_azimuth=180.0,
+    sun_elevation=35.0,
+    direct_fraction=0.5,
+)
+
+backend = VoxelCPUBackend(
+    rays_per_voxel=4,
+    traversal=:dda,
+)
+scene = VoxelScene(grid)
+step = run_light(scene, row; options, backend)
+```
+
+The first-order result contains one 3D array per waveband and output unit. The
+energy balance includes light that reaches the bottom or, with open horizontal
+boundaries, leaves through a side:
+
+```@example voxel
+result = step.first_order
+(
+    par_intercepted=sum(result.par_energy),
+    par_escaped=result.par_escaped_energy,
+    par_incoming=result.par_incoming_energy,
+    balance_closes=isapprox(
+        sum(result.par_energy) + result.par_escaped_energy,
+        result.par_incoming_energy;
+        rtol=1e-10,
+    ),
+)
+```
+
+## Grid And Direction Conventions
+
+`VoxelGrid(minimum, maximum, pad)` defines a regular Cartesian grid in metres.
+The shape of `pad` is `(nx, ny, nz)`, and `pad[i, j, k]` is expressed in
+`m² plant m⁻³`. Julia uses 1-based indices. Historical `.vox` rows are 0-based
+and use `k` as the fastest-varying index; conversion is explicit at the file
+boundary.
+
+`trace_voxel_ray` accepts a **propagation direction**: the direction in which
+light travels. It is normalized internally and must have a strictly negative
+vertical component. Directions stored in a `TurtleGrid` point upward toward
+the light source, so the voxel pipeline negates them before tracing.
+
+```@example voxel
+path = trace_voxel_ray(
+    grid,
+    (0.5, 0.5, grid.maximum[3]),
+    (0.5, 0.0, -1.0);
+    options=options,
+    algorithm=:dda,
+)
+[(segment.index, segment.length) for segment in path]
+```
+
+`LightOptions.toricity` controls horizontal boundaries throughout the voxel
+workflow, including ray diagnostics and cached transport:
+
+- `toricity=true`: horizontal exits wrap to the opposite side while retaining
+  the current ray intensity;
+- `toricity=false`: the ray leaves permanently at the first horizontal boundary.
+
+The backend configures ray sampling, numerical traversal, and the scalar-grid
+projection coefficient `g` (default `0.5`). Pass the same `options` to standalone
+ray tracing and `lightplot` to inspect simulation paths.
+
+First-order illumination enters through the top and, for a finite scene, every
+upwind lateral face. Lateral ray weights include the face area projected onto
+the horizontal irradiance reference plane. Rays entering a side below the soil
+surface are excluded. Adding empty air above a finite canopy therefore does
+not remove its lateral illumination.
+
+`rays_per_voxel` requests midpoint samples per incident voxel face; the effective
+count depends on face aspect ratio. Terrain visibility and interception use
+this quadrature. Refine sampling until soil and foliage results converge:
+coarse samples can alias a diagonal boundary, especially on tall, thin voxels.
+
+The production traversal is `:dda`. `:reference` is a correct sorted-plane
+implementation used to validate the DDA. Historical Java behavior is kept only
+as test provenance.
+
+An origin exactly on the top or a horizontal grid plane is classified using a
+small forward probe in the propagation direction. Simultaneous edge and corner
+crossings advance every affected axis and do not produce zero-length segments.
+
+## Beer–Lambert Attenuation And Units
+
+For a path of length ``\ell`` through a voxel, the transmitted fraction is
+
+```math
+T = \exp(-G\,PAD\,\ell).
+```
+
+The scalar-grid workflow uses a constant projection coefficient, with the
+spherical leaf-angle assumption `G = 0.5` by default. `VoxelGrid` rejects negative and non-finite `PAD`
+values. A zero-`PAD` voxel intercepts no light and its plant-area-normalized
+flux is reported as zero.
+
+| Julia field | Historical `.vox` column | Unit |
+| --- | --- | --- |
+| `par_energy` | `Ri_PAR_0_q` | `J voxel⁻¹ step⁻¹` |
+| `nir_energy` | `Ri_NIR_0_q` | `J voxel⁻¹ step⁻¹` |
+| `par_flux` | `Ri_PAR_0_f` | `W m⁻² plant` |
+| `nir_flux` | `Ri_NIR_0_f` | `W m⁻² plant` |
+
+`par_incoming_energy` and `nir_incoming_energy` include all energy entering the
+computational domain. With periodic boundaries, this is horizontal irradiance
+times horizontal area and step duration. A finite scene also includes lateral
+inflow above the terrain, so its incoming energy can exceed that product. The
+corresponding `*_escaped_energy` fields close the energy balance, including
+light that passes through empty air.
+
+## Add Terrain And Soil
+
+Use an independent surface whenever the lower boundary represents real soil,
+especially when the terrain lies above the grid minimum or is sloped:
+
+```@example voxel
+soil = SoilOpticalProperties(
+    par_reflectance=0.10,
+    nir_reflectance=0.30,
+)
+add_ground!(scene; optics=soil, periodic=options.toricity)
+terrain = scene.terrain
+```
+
+The scene retains its terrain for subsequent `run_light` calls. First-order
+energy reaching soil is stored by patch in `par_terrain_energy` and `nir_terrain_energy`; it is not bottom escape.
+Height fields, triangle meshes, local-normal reflection, and aligned AMAPVox
+DTM import are documented in [Voxel Terrain And Soil](voxel_terrain.md).
+
+## Add Multiple Scattering
+
+Voxel scattering requires explicit optical properties. It deliberately does
+not inherit the triangle-model fallbacks (`0.15` PAR and `0.30` NIR), because
+those values may not describe the voxelized material.
+
+```@example voxel
+optics = VoxelOpticalProperties(
+    grid;
+    par_reflectance=0.08,
+    par_transmittance=0.07,
+    nir_reflectance=0.45,
+    nir_transmittance=0.40,
+)
+
+scattering_options = LightOptions(
+    options;
+    scattering=true,
+    scattering_max_iter=30,
+    scattering_stop_ratio=1e-8,
+)
+
+scattered_step = run_light(
+    scene, row; options=scattering_options, backend, optics,
+)
+```
+
+Reflectance and transmittance are material-scale fractions of intercepted energy.
+Their sum is the single-scattering albedo ``\omega``; the foliage absorptance
+is ``1-\omega``. Geometric gaps remain controlled by `PAD` and are not leaf
+transmittance.
+
+The complete result keeps first-order interception and multiple-scattering
+outputs separate:
+
+```@example voxel
+par = scattered_step.scattering.par
+(
+    first_order_intercepted=sum(scattered_step.first_order.par_energy),
+    added_intercepted=sum(par.added_intercepted_energy),
+    foliage_absorbed=sum(par.absorbed_energy),
+    ground_absorbed=par.ground_absorbed_energy,
+    top_escape=par.escaped_top_energy,
+    side_escape=par.escaped_side_energy,
+    bottom_escape=par.escaped_bottom_energy,
+    unresolved=par.unresolved_energy,
+    iterations=par.iterations,
+    converged=par.converged,
+    relative_residual=par.relative_balance_residual,
+)
+```
+
+`total_intercepted_energy` may exceed first-order interception because the same
+energy can encounter foliage more than once. Use `absorbed_energy`, boundary
+escapes, ground absorption, and `unresolved_energy` for the terminal budget.
+The arrays called `absorbed_flux` use plant area as the reference and have units
+`W m⁻² plant`.
+
+### One Order Versus Convergence
+
+One iteration is useful as a diagnostic, but it is not automatically a
+converged solution:
+
+```@example voxel
+one_order_options = LightOptions(
+    scattering_options;
+    scattering_max_iter=1,
+    scattering_stop_ratio=0.0,
+)
+one_order = run_light(
+    scene, row; options=one_order_options, backend, optics,
+)
+
+(
+    first_order_PAR=sum(step.first_order.par_energy),
+    one_order_PAR_absorbed=sum(one_order.scattering.par.absorbed_energy),
+    converged_PAR_absorbed=sum(scattered_step.scattering.par.absorbed_energy),
+    one_order_converged=one_order.scattering.par.converged,
+    converged_iterations=scattered_step.scattering.par.iterations,
+    converged_PAR_added=sum(scattered_step.scattering.par.added_intercepted_energy),
+    converged_NIR_added=sum(scattered_step.scattering.nir.added_intercepted_energy),
+)
+```
+
+NIR usually has a larger single-scattering albedo than PAR, so its redistributed
+fraction can be much larger. That expectation is qualitative, not a substitute
+for species- and condition-specific optical data. See
+[Voxel Scattering Theory And Optical Parameters](theory_voxel_scattering.md)
+for spectral averaging, parameter sources, equations, and limitations.
+
+## Historical `.vox` Files And Series
+
+`read_voxel_grid` accepts `PAD`, `PadBVTotal`, or AMAPVox's
+`pad_attenuation_PPL_MLE` column and ignores
+additional result columns. Every 0-based grid coordinate must occur exactly
+once. `write_voxel_grid` can write either the grid alone or the grid plus a
+`VoxelFirstOrderResult`. The export does not add a `LAD_TYPE` header: a
+`VoxelGrid` stores PAD, not the leaf-angle distribution used to estimate it.
+Record the input inversion assumptions and the simulation's effective `g`
+separately; choosing `g=0.5` does not establish that the source PAD was inverted
+with a spherical distribution.
+
+```@example voxel
+vox_path = joinpath(mktempdir(), "canopy.vox")
+write_voxel_grid(vox_path, grid, step.first_order)
+restored_scene = read_scene(vox_path)
+restored = restored_scene.grid
+
+rows = [
+    row,
+    merge(row, (Ri_PAR_f=80.0, Ri_NIR_f=40.0, sun_azimuth=200.0)),
+]
+series = run_light(
+    restored_scene, rows; options=scattering_options,
+    backend=backend,
+    optics=VoxelOpticalProperties(
+        restored;
+        par_reflectance=0.08,
+        par_transmittance=0.07,
+        nir_reflectance=0.45,
+        nir_transmittance=0.40,
+    ),
+)
+
+(
+    grid_size=size(restored),
+    steps=length(series),
+    second_step_par_absorbed=sum(series[2].scattering.par.absorbed_energy),
+)
+```
+
+Directional geometric responses and internal scattering paths are cached
+across a series. The cache key
+includes grid bounds, dimensions, all `PAD` values, the normalized direction,
+`G`, `options.toricity`, traversal, and ray sampling settings. A changed grid,
+toricity, or backend cannot silently reuse an incompatible explicit cache.
+With terrain, the key also includes surface geometry, topology, periodicity, and
+patch material assignment. Optical albedos and soil reflectance
+are applied during iteration rather than baked into geometric paths, so changing
+only optics does not require rebuilding those paths.
+
+The step and series APIs use compact scattering paths that retain only occupied
+segments and their stable Beer–Lambert fractions. Explicit
+`prepare_voxel_scattering_transport(...; compact=true)` selects the same storage.
+Its default `compact=false` retains geometric paths for diagnostics and existing
+cache callers. Both representations use the same transport and energy balance.
+Compact paths are indexed within each source's direction row; sparse source IDs
+do not require a grid-sized index table. Preparation reuses DDA scratch and
+copies each retained compact path before tracing the next ray.
+
+Within each active spectral band, scattering orders reuse internal transport
+arrays and alternate two terrain-reflection buffers. Each order consumes the
+previous order before clearing its scratch arrays. Public transport and light
+results still own independent arrays; this workspace is local to one band solve
+and does not increase the retained geometry cache.
+
+Within a newly traced response, rays sharing one direction reuse its DDA
+stepping constants and built-in terrain normalization. Built-in terrain is
+validated once per response; standalone ray calls and custom terrain retain
+their validation. This reduces repeated setup in native Julia and WebAssembly
+without changing ray positions, weights, or interception equations.
+Directional batches reuse a fresh built-in terrain fingerprint across their
+launch checks, avoiding repeated full MNT scans. Each native row checks retained
+launch geometry afresh, including when all directional responses are cached;
+explicit public cache calls and custom terrain keep their validation.
+
+For finite DDA responses, a conservative bound of occupied voxels is prepared
+once per batch or native row. Rays that provably miss vegetation keep the same
+DDA steps and terrain-intersection checks, but omit the segment list and its
+attenuation pass. Boundary grazes retain the full path. Periodic rays, reference
+traversal, custom terrain and vegetation spanning the full grid retain their
+existing paths; public geometric ray queries always return complete paths.
+
+For an individual/organ model, a change to component densities or projection
+coefficients changes the equivalent extinction field and therefore invalidates
+attenuated responses. Changing only component band optics preserves those
+paths. The mixed workflow uses the existing cache checks rather than keeping
+a separate transport implementation.
+
+## Successive PAD Files
+
+Use one `.vox` file and one `run_light(scene, meteo; ...)` call for each period of
+constant PAD. Here the bundled tree describes the first period. We create a
+second file by adding `0.2 m² plant m⁻³` to its occupied cells, leaving empty
+air and the grid geometry unchanged. This is a synthetic phenology example,
+not a growth model.
+
+```@example voxel_periods
+using ArchimedLight, Dates
+
+first_path = joinpath(pkgdir(ArchimedLight), "examples", "voxel_tree", "tree.vox")
+first_scene = read_scene(first_path)
+first_grid = first_scene.grid
+later_pad = ifelse.(first_grid.pad .> 0, first_grid.pad .+ 0.2, 0.0)
+later_grid = VoxelGrid(first_grid.minimum, first_grid.maximum, later_pad)
+later_path = joinpath(mktempdir(), "tree_later.vox")
+write_voxel_grid(later_path, later_grid)
+
+@assert read_scene(later_path).grid.pad == later_pad
+@assert size(later_grid) == size(first_grid)
+nothing # hide
+```
+
+The second file is written to a temporary directory; choose an output path
+of your own to keep it. In a real workflow, both paths can simply refer to
+successive exports from your voxelization tool.
+
+Define four illustrative hourly radiation records. Each timestamp marks the
+**start** of its one-hour interval: the first file applies from 08:00 to 10:00,
+and the second from 10:00 to 12:00, without a gap or overlap. The irradiances
+and sun positions below are teaching values, not measured weather.
+
+```@example voxel_periods
+meteo = [
+    (
+        date=Date(2025, 5, 15), hour=Time(h),
+        radiation_timestamp=:start, step_duration=3600.0,
+        Ri_PAR_f=100.0 + 20.0 * (h - 8), Ri_NIR_f=50.0,
+        direct_fraction=0.6,
+        sun_azimuth=90.0 + 15.0 * (h - 8),
+        sun_elevation=25.0 + 10.0 * (h - 8),
+    ) for h in 8:11
+]
+periods = [
+    (path=first_path, meteo=meteo[1:2]),
+    (path=later_path, meteo=meteo[3:4]),
+]
+nothing # hide
+```
+
+Read each file, attach a flat ground, and run its complete period. Both states
+use the same soil properties and ground dimensions.
+
+```@example voxel_periods
+options = LightOptions(
+    toricity=false, scattering=false, turtle_sectors=16, all_in_turtle=true,
+)
+backend = VoxelCPUBackend(rays_per_voxel=16)
+soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
+
+period_results = map(periods) do period
+    scene = read_scene(period.path)
+    add_ground!(scene; optics=soil)
+    run_light(scene, period.meteo; options, backend)
+end
+results = vcat(period_results...)
+
+@assert length(results) == length(meteo)
+@assert all(step.duration_seconds == 3600.0 for step in results)
+(steps_per_period=length.(period_results), total_steps=length(results))
+```
+
+Each series call creates fresh caches for its file's PAD and reuses them
+throughout that period. With `all_in_turtle=true`, direct sunlight is
+distributed among the fixed sky sectors, so changing the hour introduces no
+new ray direction. This is an angular approximation; increase the sector
+count when finer sun and shadow directions are needed.
+
+The second call prepares new responses for the increased PAD. Caches are
+not carried between files, and the first period's results remain independent.
+Keep PAD constant during each call; split a meteorological interval at a
+vegetation change if necessary. If scattering is enabled, also supply the
+optical properties for each imported grid as in the preceding example.
+
+## Current Limitations
+
+!!! warning
+    The voxel workflow currently supports constant projection coefficients,
+    isotropic vegetation scattering, effective optical fields and
+    point-proxy individual/organ mixtures on regular Cartesian voxels,
+    planar/height-field/triangle Lambertian terrain, and CPU execution.
+    Specular or anisotropic scattering, non-spherical angular leaf distributions,
+    adaptive grids, wavelength-resolved transport, and GPU
+    execution are not implemented. Internal foliage emission uses the voxel
+    centre (or the above-surface part of a terrain-straddling voxel) as a
+    deterministic sub-voxel approximation; terrain emission uses the centroid
+    of each patch's overlap with the horizontal grid domain.
+
+The voxel and triangle workflows share `read_scene`, `add_ground!`, `run_light`,
+`light_metric_values`, and `lightplot`. Their transport and result storage remain
+adapted to their different representations; see
+[From Triangles To Voxels](triangles_to_voxels.md).
+
+## Public API
+
+The primary workflow uses a scene and the shared entry points:
+
+```julia
+read_scene(path; missing_pad=:error)
+VoxelScene(source; terrain=NoVoxelTerrain())
+add_ground!(scene; optics, elevation, cells, periodic=false)
+add_ground!(scene, terrain)
+update_models!(scene; mode=:point_proxy, leaf, wood, unknown, individuals)
+run_light(scene, meteo_row_or_table; options, backend, optics)
+light_metric_values(scene, result_or_series, selector)
+component_values(mixed_result)
+lightplot(scene)
+lightplot(scene, result; color=:incident_par_flux, timestep=1)
+```
+
+The grid and explicit stage APIs remain available for diagnostics and advanced
+workflows:
+
+```julia
+VoxelGrid(minimum, maximum, pad)
+VoxelCPUBackend(; rays_per_voxel, g, traversal, lidf)
+VoxelOpticalProperties(grid; par_reflectance, par_transmittance,
+                       nir_reflectance, nir_transmittance)
+VoxelGroundOptics(grid; par_reflectance, nir_reflectance)
+read_voxel_grid(path)
+write_voxel_grid(path, grid, result=nothing)
+trace_voxel_ray(grid, origin, direction; options, algorithm)
+prepare_voxel_responses(grid, turtle, backend; options)
+compute_voxel_first_order(grid, turtle, fluxes, backend; options, duration_seconds, cache)
+prepare_voxel_scattering_quadrature(turtle)
+prepare_voxel_scattering_transport(grid, quadrature, backend; options)
+apply_voxel_scattering_transport(grid, emitted, quadrature, backend; options, ...)
+compute_voxel_scattering(grid, turtle, first, optics, options, backend; ...)
+run_voxel_light_step(grid, meteo_row, options; backend, optics, ground)
+run_voxel_light_series(grid, meteo, options; backend, optics, ground)
+```
+
+The result and diagnostic containers are `VoxelRaySegment`, `VoxelRayPath`,
+`VoxelDirectionResponse`, `VoxelResponseCache`, `VoxelFirstOrderResult`,
+`VoxelScatteringResult`, and `VoxelLightStepResult`. Their generated docstrings are listed in the
+[Public API](api.md) page.
