@@ -373,6 +373,91 @@ attenuated responses. Changing only component band optics preserves those
 paths. The mixed workflow uses the existing cache checks rather than keeping
 a separate transport implementation.
 
+## Successive PAD Files
+
+Use one `.vox` file and one `run_voxel_light_series` call for each period of
+constant PAD. Here the bundled tree describes the first period. We create a
+second file by adding `0.2 m² plant m⁻³` to its occupied cells, leaving empty
+air and the grid geometry unchanged. This is a synthetic phenology example,
+not a growth model.
+
+```@example voxel_periods
+using ArchimedLight, Dates
+
+first_path = joinpath(pkgdir(ArchimedLight), "examples", "voxel_tree", "tree.vox")
+first_grid = read_voxel_grid(first_path)
+later_pad = ifelse.(first_grid.pad .> 0, first_grid.pad .+ 0.2, 0.0)
+later_grid = VoxelGrid(first_grid.minimum, first_grid.maximum, later_pad)
+later_path = joinpath(mktempdir(), "tree_later.vox")
+write_voxel_grid(later_path, later_grid)
+
+@assert read_voxel_grid(later_path).pad == later_pad
+@assert size(later_grid) == size(first_grid)
+nothing # hide
+```
+
+The second file is written to a temporary directory; choose an output path
+of your own to keep it. In a real workflow, both paths can simply refer to
+successive exports from your voxelization tool.
+
+Define four illustrative hourly radiation records. Each timestamp marks the
+**start** of its one-hour interval: the first file applies from 08:00 to 10:00,
+and the second from 10:00 to 12:00, without a gap or overlap. The irradiances
+and sun positions below are teaching values, not measured weather.
+
+```@example voxel_periods
+meteo = [
+    (
+        date=Date(2025, 5, 15), hour=Time(h),
+        radiation_timestamp=:start, step_duration=3600.0,
+        Ri_PAR_f=100.0 + 20.0 * (h - 8), Ri_NIR_f=50.0,
+        direct_fraction=0.6,
+        sun_azimuth=90.0 + 15.0 * (h - 8),
+        sun_elevation=25.0 + 10.0 * (h - 8),
+    ) for h in 8:11
+]
+periods = [
+    (path=first_path, meteo=meteo[1:2]),
+    (path=later_path, meteo=meteo[3:4]),
+]
+nothing # hide
+```
+
+Read each file and run its complete period. The same flat ground can be used
+for both states because their grid bounds are identical.
+
+```@example voxel_periods
+options = LightOptions(
+    toricity=false, scattering=false, turtle_sectors=16, all_in_turtle=true,
+)
+backend = VoxelCPUBackend(rays_per_voxel=16)
+terrain = PlanarTerrain(first_grid, SoilOpticalProperties(
+    par_reflectance=0.0, nir_reflectance=0.0,
+))
+
+period_results = map(periods) do period
+    grid = read_voxel_grid(period.path)
+    run_voxel_light_series(grid, period.meteo, options; backend, terrain)
+end
+results = vcat(period_results...)
+
+@assert length(results) == length(meteo)
+@assert all(step.duration_seconds == 3600.0 for step in results)
+(steps_per_period=length.(period_results), total_steps=length(results))
+```
+
+Each series call creates fresh caches for its file's PAD and reuses them
+throughout that period. With `all_in_turtle=true`, direct sunlight is
+distributed among the fixed sky sectors, so changing the hour introduces no
+new ray direction. This is an angular approximation; increase the sector
+count when finer sun and shadow directions are needed.
+
+The second call prepares new responses for the increased PAD. Caches are
+not carried between files, and the first period's results remain independent.
+Keep PAD constant during each call; split a meteorological interval at a
+vegetation change if necessary. If scattering is enabled, also supply the
+optical properties for each imported grid as in the preceding example.
+
 ## Current Limitations
 
 !!! warning

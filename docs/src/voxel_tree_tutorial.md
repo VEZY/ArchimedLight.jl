@@ -299,6 +299,10 @@ PLY. A `.vox` file is sufficient for a generic PAD calculation. Use the JSONL
 when individual/organ information is available, and keep its optical
 parameters in the model rather than editing observational input values.
 
+For changing PAD over time, see [Successive PAD Files](voxel_interception.md#Successive-PAD-Files):
+create a denser second `.vox`, run each file over its own meteorological
+period, and reuse caches within each period.
+
 Unlike this fully labelled synthetic example, real exports can contain
 positive-PAD cells without identified points. Those remain unattributed
 unknown-organ vegetation and still intercept light. Unknown PAD requires an
