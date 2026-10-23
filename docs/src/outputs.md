@@ -1,12 +1,16 @@
 # Outputs
 
-The current Julia package exposes light results in three increasingly concrete forms:
+Triangle simulations expose light results in three increasingly concrete forms:
 
 1. in memory as `LightBudget`
 2. attached back onto MTG nodes as ARCHIMED-style attributes
 3. written to disk when you export the enriched scene
 
-This page documents those three layers and then explains the ARCHIMED-style CSV outputs used by the public writer and regression harness.
+This page documents those three layers and the ARCHIMED-style CSV outputs.
+Voxel results use the same metric selectors through
+`light_metric_values(scene, result, selector)`; see
+[From Triangles To Voxels](triangles_to_voxels.md) and the
+[voxel workflow](voxel_interception.md) for their array and table outputs.
 
 ## 1. In-Memory Outputs: `LightBudget`
 

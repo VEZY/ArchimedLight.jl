@@ -119,6 +119,20 @@ end
             terrain_fraction, effective)
     end
 
+    function check_public_response(actual, expected)
+        # Compensated production sums can differ from the naive scalar oracle;
+        # per-voxel/patch arrays, directions and ray counts must remain exact.
+        for name in fieldnames(typeof(expected))
+            if name in (:incoming_weight, :escaped_weight, :escaped_top_weight,
+                        :escaped_side_weight, :escaped_bottom_weight, :terrain_incident_weight)
+                @test isapprox(getproperty(actual, name), getproperty(expected, name);
+                    atol=1e-13, rtol=1e-13)
+            else
+                @test isequal(getproperty(actual, name), getproperty(expected, name))
+            end
+        end
+    end
+
     plane = PlanarTerrain(grid, soil; elevation=0.2, periodic=true)
     height = HeightFieldTerrain(
         collect(range(grid.minimum[1], grid.maximum[1]; length=3)),
@@ -139,9 +153,7 @@ end
         actual = AL.compute_voxel_direction_response(current_grid, direction,
             backend, terrain; options=current_options)
         expected = public_ray_response(current_grid, direction, backend, terrain, current_options)
-        for name in fieldnames(typeof(expected))
-            @test isequal(getproperty(actual, name), getproperty(expected, name))
-        end
+        check_public_response(actual, expected)
     end
     # Zero extinction proves every ray optically empty even for a fully
     # occupied bounding box; its soil and escape destinations remain geometric.
@@ -151,9 +163,7 @@ end
         actual = AL.compute_voxel_direction_response(dense, directions[2], transparent,
             terrain; options)
         expected = public_ray_response(dense, directions[2], transparent, terrain, options)
-        for name in fieldnames(typeof(expected))
-            @test isequal(getproperty(actual, name), getproperty(expected, name))
-        end
+        check_public_response(actual, expected)
     end
     # Even an explicitly supplied optically-empty hint cannot enable this
     # shortcut for reference traversal or periodic rays.
@@ -167,9 +177,7 @@ end
             AL.VoxelRayWorkspace(), nothing, empty_bounds)
         expected = public_ray_response(grid, directions[2], current_backend,
             NoVoxelTerrain(), current_options)
-        for name in fieldnames(typeof(expected))
-            @test isequal(getproperty(actual, name), getproperty(expected, name))
-        end
+        check_public_response(actual, expected)
     end
     # A wrapped ray can reach the occupied column after initially missing the
     # unwrapped vegetation box; toricity must retain the full traversal.

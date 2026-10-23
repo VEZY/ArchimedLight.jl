@@ -51,7 +51,8 @@ backend = VoxelCPUBackend(
     rays_per_voxel=4,
     traversal=:dda,
 )
-step = run_voxel_light_step(grid, row, options; backend=backend)
+scene = VoxelScene(grid)
+step = run_light(scene, row; options, backend)
 ```
 
 The first-order result contains one 3D array per waveband and output unit. The
@@ -105,7 +106,7 @@ workflow, including ray diagnostics and cached transport:
 
 The backend configures ray sampling, numerical traversal, and the scalar-grid
 projection coefficient `g` (default `0.5`). Pass the same `options` to standalone
-ray tracing and `voxelplot` to inspect simulation paths.
+ray tracing and `lightplot` to inspect simulation paths.
 
 First-order illumination enters through the top and, for a finite scene, every
 upwind lateral face. Lateral ray weights include the face area projected onto
@@ -163,17 +164,12 @@ soil = SoilOpticalProperties(
     par_reflectance=0.10,
     nir_reflectance=0.30,
 )
-terrain = PlanarTerrain(
-    grid,
-    soil;
-    elevation=grid.minimum[3],
-    periodic=options.toricity,
-)
+add_ground!(scene; optics=soil, periodic=options.toricity)
+terrain = scene.terrain
 ```
 
-Pass it as `terrain=terrain` to `run_voxel_light_step` or
-`run_voxel_light_series`. First-order energy reaching soil is stored by patch
-in `par_terrain_energy` and `nir_terrain_energy`; it is not bottom escape.
+The scene retains its terrain for subsequent `run_light` calls. First-order
+energy reaching soil is stored by patch in `par_terrain_energy` and `nir_terrain_energy`; it is not bottom escape.
 Height fields, triangle meshes, local-normal reflection, and aligned AMAPVox
 DTM import are documented in [Voxel Terrain And Soil](voxel_terrain.md).
 
@@ -192,12 +188,6 @@ optics = VoxelOpticalProperties(
     nir_transmittance=0.40,
 )
 
-ground = VoxelGroundOptics(
-    grid;
-    par_reflectance=0.10,
-    nir_reflectance=0.30,
-)
-
 scattering_options = LightOptions(
     options;
     scattering=true,
@@ -205,13 +195,8 @@ scattering_options = LightOptions(
     scattering_stop_ratio=1e-8,
 )
 
-scattered_step = run_voxel_light_step(
-    grid,
-    row,
-    scattering_options;
-    backend=backend,
-    optics=optics,
-    ground=ground,
+scattered_step = run_light(
+    scene, row; options=scattering_options, backend, optics,
 )
 ```
 
@@ -257,13 +242,8 @@ one_order_options = LightOptions(
     scattering_max_iter=1,
     scattering_stop_ratio=0.0,
 )
-one_order = run_voxel_light_step(
-    grid,
-    row,
-    one_order_options;
-    backend=backend,
-    optics=optics,
-    ground=ground,
+one_order = run_light(
+    scene, row; options=one_order_options, backend, optics,
 )
 
 (
@@ -298,16 +278,15 @@ with a spherical distribution.
 ```@example voxel
 vox_path = joinpath(mktempdir(), "canopy.vox")
 write_voxel_grid(vox_path, grid, step.first_order)
-restored = read_voxel_grid(vox_path)
+restored_scene = read_scene(vox_path)
+restored = restored_scene.grid
 
 rows = [
     row,
     merge(row, (Ri_PAR_f=80.0, Ri_NIR_f=40.0, sun_azimuth=200.0)),
 ]
-series = run_voxel_light_series(
-    restored,
-    rows,
-    scattering_options;
+series = run_light(
+    restored_scene, rows; options=scattering_options,
     backend=backend,
     optics=VoxelOpticalProperties(
         restored;
@@ -375,7 +354,7 @@ a separate transport implementation.
 
 ## Successive PAD Files
 
-Use one `.vox` file and one `run_voxel_light_series` call for each period of
+Use one `.vox` file and one `run_light(scene, meteo; ...)` call for each period of
 constant PAD. Here the bundled tree describes the first period. We create a
 second file by adding `0.2 m² plant m⁻³` to its occupied cells, leaving empty
 air and the grid geometry unchanged. This is a synthetic phenology example,
@@ -385,13 +364,14 @@ not a growth model.
 using ArchimedLight, Dates
 
 first_path = joinpath(pkgdir(ArchimedLight), "examples", "voxel_tree", "tree.vox")
-first_grid = read_voxel_grid(first_path)
+first_scene = read_scene(first_path)
+first_grid = first_scene.grid
 later_pad = ifelse.(first_grid.pad .> 0, first_grid.pad .+ 0.2, 0.0)
 later_grid = VoxelGrid(first_grid.minimum, first_grid.maximum, later_pad)
 later_path = joinpath(mktempdir(), "tree_later.vox")
 write_voxel_grid(later_path, later_grid)
 
-@assert read_voxel_grid(later_path).pad == later_pad
+@assert read_scene(later_path).grid.pad == later_pad
 @assert size(later_grid) == size(first_grid)
 nothing # hide
 ```
@@ -423,21 +403,20 @@ periods = [
 nothing # hide
 ```
 
-Read each file and run its complete period. The same flat ground can be used
-for both states because their grid bounds are identical.
+Read each file, attach a flat ground, and run its complete period. Both states
+use the same soil properties and ground dimensions.
 
 ```@example voxel_periods
 options = LightOptions(
     toricity=false, scattering=false, turtle_sectors=16, all_in_turtle=true,
 )
 backend = VoxelCPUBackend(rays_per_voxel=16)
-terrain = PlanarTerrain(first_grid, SoilOpticalProperties(
-    par_reflectance=0.0, nir_reflectance=0.0,
-))
+soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
 
 period_results = map(periods) do period
-    grid = read_voxel_grid(period.path)
-    run_voxel_light_series(grid, period.meteo, options; backend, terrain)
+    scene = read_scene(period.path)
+    add_ground!(scene; optics=soil)
+    run_light(scene, period.meteo; options, backend)
 end
 results = vcat(period_results...)
 
@@ -472,13 +451,30 @@ optical properties for each imported grid as in the preceding example.
     deterministic sub-voxel approximation; terrain emission uses the centroid
     of each patch's overlap with the horizontal grid domain.
 
-The voxel workflow is intentionally separate from the triangle-based
-`LightSimulation` / `run_light` API. It reuses the same sky and meteorological
-stages without pretending that a voxel is a triangulated scene component.
+The voxel and triangle workflows share `read_scene`, `add_ground!`, `run_light`,
+`light_metric_values`, and `lightplot`. Their transport and result storage remain
+adapted to their different representations; see
+[From Triangles To Voxels](triangles_to_voxels.md).
 
 ## Public API
 
-The exported workflow is deliberately small:
+The primary workflow uses a scene and the shared entry points:
+
+```julia
+read_scene(path; missing_pad=:error)
+VoxelScene(source; terrain=NoVoxelTerrain())
+add_ground!(scene; optics, elevation, cells, periodic=false)
+add_ground!(scene, terrain)
+update_models!(scene; mode=:point_proxy, leaf, wood, unknown, individuals)
+run_light(scene, meteo_row_or_table; options, backend, optics)
+light_metric_values(scene, result_or_series, selector)
+component_values(mixed_result)
+lightplot(scene)
+lightplot(scene, result; color=:incident_par_flux, timestep=1)
+```
+
+The grid and explicit stage APIs remain available for diagnostics and advanced
+workflows:
 
 ```julia
 VoxelGrid(minimum, maximum, pad)

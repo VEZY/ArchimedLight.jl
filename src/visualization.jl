@@ -554,6 +554,35 @@ Makie plotting entry point provided by the `Makie` package extension.
 Load `Makie` or `CairoMakie` before calling it. The preferred API is
 `lightplot(step; ...)` or `lightplot(steps; ...)`.
 
+For voxels use `lightplot(scene[, results]; ...)`, where `scene` can be a
+[`VoxelScene`](@ref), [`VoxelGrid`](@ref), [`VoxelPointInput`](@ref), or
+[`VoxelVegetation`](@ref). Without results, a raw grid displays PAD; point input
+or mixed vegetation displays the dominant organ in each occupied voxel
+(leaf: green, wood: brown, unknown: grey). This is a classification of each
+existing voxel, not a reconstructed leaf/wood geometry. Select `color=:pad`,
+`:leaf_fraction`, `:wood_fraction`, or `:unknown_fraction` to inspect numerical
+PAD or component fractions. Fractions use point counts for unresolved input
+and component densities for a resolved vegetation model.
+
+With results, the default is `color=:incident_par_flux` in W m⁻². Common light
+selectors and their ARCHIMED aliases also work. `timestep` selects a series
+element; the automatic colour range covers the full series and the terrain.
+Voxel fluxes use PAD × cell volume as their reference area. Terrain fluxes
+use actual patch area. Unavailable metrics raise an error rather than inferring
+missing optical properties. `colormap` and `colorrange` control both vegetation
+and terrain light results.
+
+An imported voxel scene supplies its terrain automatically; for a raw grid or
+vegetation pass `terrain=...`. Pass the original source and terrain that
+produced the results; results do not retain a snapshot of later scene edits.
+Voxel plots use `Axis3` and a local coordinate
+frame with Float64 translation to preserve small features at GIS offsets.
+`cutaway=:front` hides the lower-y half of the cells without changing the grid.
+Diagnostic attributes include `pad_threshold`, `show_lattice`, `show_terrain`,
+`show_rays`, and `show_normals`. `rays` accepts origin/direction named tuples;
+directions must point downward and use the supplied `options.toricity`.
+An optional `quadrature` displays terrain Lambertian redistribution directions.
+
 Arguments:
 
 - `data`: one [`LightStepResult`](@ref) or a vector of results with stored
@@ -580,6 +609,10 @@ function lightplot end
 In-place Makie plotting entry point provided by the `Makie` package extension.
 Load `Makie` or `CairoMakie` before calling it. The preferred API is
 `lightplot!(axis, step; ...)` or `lightplot!(axis, steps; ...)`.
+For voxel scenes use `lightplot!(axis, scene[, results]; ...)`, with the same
+attributes and defaults as [`lightplot`](@ref). Prefer `Axis3` for georeferenced
+coordinates; WebGL `LScene` camera conversion cannot retain small features at
+large offsets.
 
 Arguments:
 
@@ -601,39 +634,3 @@ Keywords:
   `color`, `timestep`, `interpolate`, and `fill_value`.
 """
 function lightplot! end
-
-"""
-    voxelplot(grid, [terrain]; rays=(), quadrature=nothing,
-              options=LightOptions(toricity=false), kwargs...)
-
-Makie plotting entry point for a [`VoxelGrid`](@ref) and its optional
-[`AbstractVoxelTerrain`](@ref). Load a Makie backend before calling it.
-The default axis is `Axis3`. Rendering uses a local coordinate frame with a
-Float64 translation so small features retain their precision at GIS offsets;
-ray diagnostics retain the original coordinates.
-
-`rays` is a collection of named tuples with `origin` and `direction` fields.
-Each direction must point downward; the extension traces it with
-[`trace_voxel_ray`](@ref). When `quadrature` is a
-[`VoxelScatteringQuadrature`](@ref), terrain hits also display the corresponding
-Lambertian redistribution directions.
-
-Ray paths use `options.toricity`, as in the voxel simulation. Plots default to
-open horizontal boundaries; pass the simulation's `options` to show its paths.
-
-The most useful ArchimedLight-specific attributes are `pad_threshold`,
-`cutaway`, `show_voxels`, `show_lattice`, `show_terrain`, `show_rays`, and
-`show_normals`. `cutaway` accepts `:none` or `:front`; the latter hides the
-lower-y half of the PAD array for inspection without modifying the grid.
-"""
-function voxelplot end
-
-"""
-    voxelplot!(parent, grid, [terrain]; rays=(), quadrature=nothing,
-               options=LightOptions(toricity=false), kwargs...)
-
-In-place variant of [`voxelplot`](@ref). Prefer a Makie `Axis3` for georeferenced
-coordinates. `LScene` and `Scene` also work with local coordinates, but their
-WebGL camera/model conversion cannot preserve small features at large offsets.
-"""
-function voxelplot! end

@@ -69,6 +69,10 @@ struct VoxelVegetation
     mode::Symbol
 end
 
+PlanarTerrain(vegetation::VoxelVegetation, optics::SoilOpticalProperties; kwargs...) =
+    PlanarTerrain(vegetation.input, optics; kwargs...)
+PlanarTerrain(vegetation::VoxelVegetation; kwargs...) = PlanarTerrain(vegetation.input; kwargs...)
+
 function _check_voxel_wood(material::VoxelMaterial)
     material.par_transmittance == 0 && material.nir_transmittance == 0 ||
         throw(ArgumentError("wood is opaque: its PAR and NIR transmittance must be zero"))

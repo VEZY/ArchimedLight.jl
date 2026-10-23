@@ -4,6 +4,12 @@
 
 ### Added
 
+- Unify voxel and triangle workflows around `read_scene`, `add_ground!`,
+  `run_light`, `light_metric_values`, `component_values`, and `lightplot`.
+  Add mutable `VoxelScene` containers retaining imported observations and
+  explicit individual/organ models, plus a triangle-to-voxel migration guide.
+- Construct flat voxel ground directly from point inputs or vegetation, using
+  the scene extent by default and optional ground patch counts.
 - Add a CPU voxel interception workflow with historical `.vox`
   I/O, open and periodic horizontal boundaries, reference and DDA traversals,
   first-order PAR/NIR Beer–Lambert interception, directional-response caching,
@@ -25,6 +31,13 @@
   dedicated voxel documentation section with runnable examples.
 - Offer both live wheat and voxel/terrain demos on the documentation home page,
   with a shared presentation and lazy loading of the selected scene.
+
+### Changed
+
+- Replace the unreleased public `voxelplot`/`voxelplot!` helpers with
+  `lightplot`/`lightplot!`. Use `colormap` and `colorrange` instead of
+  `voxel_colormap` and `voxel_colorrange`; without light results, plots show
+  PAD or individual/organ composition.
 
 ### Performance
 
@@ -57,6 +70,8 @@
 
 ### Fixed
 
+- Avoid false voxel directional energy-balance failures at dense sampling by
+  compensating the scalar incident and escape sums, preserving sampled paths.
 - Keep clipped terrain source-point calculations type-stable without changing
   their geometry or equations.
 - Respect raster-cell footprints for AAIGrid soil materials without changing

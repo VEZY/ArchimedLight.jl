@@ -27,6 +27,10 @@ struct VoxelPointInput
     point_count::Array{Int,3}
 end
 
+PlanarTerrain(input::VoxelPointInput, optics::SoilOpticalProperties; kwargs...) =
+    PlanarTerrain(input.grid, optics; kwargs...)
+PlanarTerrain(input::VoxelPointInput; kwargs...) = PlanarTerrain(input.grid; kwargs...)
+
 function _voxel_point_integer(value, label; positive=false)
     value isa Integer && !(value isa Bool) ||
         throw(ArgumentError("$label must be an integer"))

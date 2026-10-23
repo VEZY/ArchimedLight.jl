@@ -333,6 +333,14 @@ function compute_voxel_direction_response(
         terrain, options, cache, workspace)
 end
 
+# Direction totals can include millions of rays. Compensate the scalar sums;
+# the spatial arrays already distribute accumulation over voxels/soil patches.
+@inline function _voxel_add_weight(total::Float64, correction::Float64, value::Float64)
+    adjusted = value - correction
+    updated = total + adjusted
+    return updated, (updated - total) - adjusted
+end
+
 function _compute_voxel_direction_response(grid::VoxelGrid, propagation_direction,
     backend::VoxelCPUBackend, terrain::AbstractVoxelTerrain, options::LightOptions,
     launch_cache::VoxelLaunchGeometryCache, workspace::VoxelRayWorkspace,
@@ -347,14 +355,14 @@ function _compute_voxel_direction_response(grid::VoxelGrid, propagation_directio
         grid, direction, backend.rays_per_voxel, options.toricity,
     )
     interception = zeros(Float64, size(grid))
-    escaped_weight = 0.0
     escaped_top_weight = 0.0
     escaped_side_weight = 0.0
     escaped_bottom_weight = 0.0
+    escaped_top_correction = escaped_side_correction = escaped_bottom_correction = 0.0
     bottom_exit_fraction = zeros(Float64, size(grid)[1:2])
     terrain_incident_fraction = zeros(Float64, terrain_patch_count(terrain))
-    terrain_incident_weight = 0.0
     incoming_weight = Float64(size(grid)[1] * size(grid)[2])
+    incoming_correction = 0.0
     # Preserve the tracing/terrain normalization chain, but perform it once per
     # incident direction instead of once for every sampled ray.
     ray_direction = _normalise_voxel_direction(direction)
@@ -370,7 +378,8 @@ function _compute_voxel_direction_response(grid::VoxelGrid, propagation_directio
                 tolerance = 512eps(Float64) * max(abs(surface), abs(origin[3]), 1.0)
                 origin[3] > surface + tolerance || continue
             end
-            incoming_weight += ray_weight
+            incoming_weight, incoming_correction =
+                _voxel_add_weight(incoming_weight, incoming_correction, ray_weight)
         end
         ray_origin = _canonical_voxel_origin(grid, origin, options.toricity)
         incoming = ray_weight
@@ -406,23 +415,24 @@ function _compute_voxel_direction_response(grid::VoxelGrid, propagation_directio
         if exit_reason == :terrain
             hit = something(terrain_hit)
             terrain_incident_fraction[hit.patch_id] += incoming
-            terrain_incident_weight += incoming
         elseif exit_reason == :bottom
-            escaped_weight += incoming
-            escaped_bottom_weight += incoming
+            escaped_bottom_weight, escaped_bottom_correction =
+                _voxel_add_weight(escaped_bottom_weight, escaped_bottom_correction, incoming)
             last_index === nothing || (bottom_exit_fraction[last_index[1], last_index[2]] += incoming)
         elseif exit_reason == :side
-            escaped_weight += incoming
-            escaped_side_weight += incoming
+            escaped_side_weight, escaped_side_correction =
+                _voxel_add_weight(escaped_side_weight, escaped_side_correction, incoming)
         elseif exit_reason == :top
-            escaped_weight += incoming
-            escaped_top_weight += incoming
+            escaped_top_weight, escaped_top_correction =
+                _voxel_add_weight(escaped_top_weight, escaped_top_correction, incoming)
         else
             error("unsupported voxel exit reason: $exit_reason")
         end
     end
 
     intercepted_weight = sum(interception)
+    terrain_incident_weight = sum(terrain_incident_fraction)
+    escaped_weight = escaped_top_weight + escaped_side_weight + escaped_bottom_weight
     isapprox(
         intercepted_weight + escaped_weight + terrain_incident_weight,
         incoming_weight;

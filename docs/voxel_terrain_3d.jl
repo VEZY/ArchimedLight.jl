@@ -99,7 +99,7 @@ function voxel_terrain_app()
                 clear=true,
             ),
         )
-        plot = voxelplot!(
+        plot = lightplot!(
             axis,
             grid,
             terrain;
@@ -112,14 +112,14 @@ function voxel_terrain_app()
             # trunk opaque so the terrain cannot visually bleed through it.
             voxel_alpha=1.0,
             voxel_gap=0.10,
-            voxel_colormap=[
+            colormap=[
                 WGLMakie.RGBAf(0.43, 0.25, 0.10, 1.00),
                 WGLMakie.RGBAf(0.56, 0.36, 0.12, 1.00),
                 WGLMakie.RGBAf(0.57, 0.74, 0.27, 0.68),
                 WGLMakie.RGBAf(0.27, 0.58, 0.19, 0.64),
                 WGLMakie.RGBAf(0.07, 0.35, 0.12, 0.62),
             ],
-            voxel_colorrange=(0.30, 1.70),
+            colorrange=(0.30, 1.70),
             lattice_color=(WGLMakie.RGBf(0.40, 0.49, 0.56), 0.18),
             lattice_linewidth=0.7,
             terrain_alpha=1.0,

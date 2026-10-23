@@ -27,20 +27,24 @@ for measured scenes, including unknown PAD and unattributed vegetation.
 ```julia
 using ArchimedLight
 
-input = read_voxel_point_input("belinga3_1m_PAD_merged.jsonl.gz")
+scene = read_scene("belinga3_1m_PAD_merged.jsonl.gz")
+input = scene.input
 ```
 
 The reader also accepts an uncompressed `.jsonl`. It retains PAD and
 individual/organ proportions while converting 0-based Cartesian input indices
 to the internal Julia array layout. Plain AMAPVox `.vox` files are supported
-by `read_voxel_grid`; they do not contain the merged individual proportions.
+by `read_scene`; they do not contain the merged individual proportions.
+`scene.grid` exposes their PAD grid. The lower-level readers
+`read_voxel_grid` and `read_voxel_point_input` remain available when only raw
+input structures are needed.
 
 The supplied Belinga file contains unknown PAD values. The default
 `missing_pad=:error` prevents treating unknown density as observed empty
 space. For an explicit sensitivity run, choose:
 
 ```julia
-input = read_voxel_point_input(
+scene = read_scene(
     "belinga3_1m_PAD_merged.jsonl.gz";
     missing_pad=:zero_with_diagnostics,
 )
@@ -59,7 +63,7 @@ the supplied AMAPVox 2.4.2 export, as well as historical ARCHIMED files. Use a
 column name when choosing a specific PAD estimate:
 
 ```julia
-grid = read_voxel_grid(
+scene = read_scene(
     "canopy.vox";
     pad_column="pad_attenuation_PPL_MLE",
 )
@@ -86,8 +90,10 @@ unknown_pad = loaded.missing_pad
 producer_version = loaded.metadata["build-version"]
 ```
 
-The ordinary return remains a `VoxelGrid`. With `return_diagnostics=true`, the
-reader returns a named tuple containing `grid`, the `missing_pad` Boolean mask,
+This lower-level reader returns a `VoxelGrid` by default.
+For scene-based calculations, `read_scene(path; missing_pad=:zero_with_diagnostics)`
+retains the mask as `scene.missing_pad` and metadata as `scene.metadata`.
+With `return_diagnostics=true`, the lower-level reader returns a named tuple containing `grid`, the `missing_pad` Boolean mask,
 and `metadata`. Explicit zero imputation requires this diagnostic return so
 the unknown-cell mask cannot be lost during reading. Keep it with the outputs
 when reporting results; the simulation does not reconstruct the missing PAD.
@@ -172,9 +178,10 @@ distinct from substantial count/ratio disagreements.
 
 ## Build A Point-Proxy Vegetation Model
 
-The file contains observations; optical parameters remain separate. Explicitly
-select `mode=:point_proxy` to acknowledge the assumption that point fractions
-can approximate component area fractions:
+The file contains observations; optical parameters remain separate. A JSONL
+scene can be inspected immediately, but `run_light` rejects it until a model
+is configured. Explicitly select `mode=:point_proxy` to acknowledge the
+assumption that point fractions can approximate component area fractions:
 
 ```julia
 # Pedagogical optical values; these are not a Belinga calibration.
@@ -192,8 +199,8 @@ wood = VoxelMaterial(
 )
 unknown = VoxelMaterial(g=0.5) # explicit black-material simplification
 
-vegetation = VoxelVegetation(
-    input;
+update_models!(
+    scene;
     mode=:point_proxy,
     leaf=leaf,
     wood=wood,
@@ -222,8 +229,8 @@ If independent information supports a lower attributed fraction, provide
 `identified_area_fraction` as a scalar or grid-shaped array in `[0,1]`:
 
 ```julia
-vegetation = VoxelVegetation(
-    input;
+update_models!(
+    scene;
     mode=:point_proxy,
     leaf=leaf,
     wood=wood,
@@ -246,8 +253,8 @@ of species. IDs read from numeric `tree_id` values are represented by strings
 for parameter lookup:
 
 ```julia
-vegetation = VoxelVegetation(
-    input;
+update_models!(
+    scene;
     mode=:point_proxy,
     leaf=leaf,
     wood=wood,
@@ -270,14 +277,10 @@ rejected rather than silently ignored.
 ```julia
 soil = SoilOpticalProperties(par_reflectance=0.10, nir_reflectance=0.30)
 terrain = read_ply_terrain("terrain_covering_the_voxel_grid.ply", soil)
+add_ground!(scene, terrain)
 options = LightOptions(toricity=false, scattering=true)
 
-result = run_voxel_light_step(
-    vegetation,
-    meteo_row,
-    options;
-    terrain=terrain,
-)
+result = run_light(scene, meteo_row; options)
 ```
 
 `meteo_row` follows the same meteorological contract as the
@@ -298,13 +301,13 @@ The underlying voxel result is available as `result.light`. Component records
 in `result.components` retain their voxel, individual identity, organ, proxy
 plant area, first-order intercepted energy, total intercepted energy, and
 absorbed energy for PAR and NIR. The missing-PAD mask remains available as
-`result.missing_pad`. Use `voxel_component_values(result)` to aggregate
+`result.missing_pad`. Use `component_values(result; level=:individual)` to aggregate
 energies by individual and organ, including unattributed vegetation.
 
 For APAR, select absorbed PAR of the `leaf` records. Wood and unknown-organ
 absorption belongs to the scene energy balance but is not leaf APAR.
 
-`run_voxel_light_series(vegetation, meteo, options; terrain=terrain)` returns
+`run_light(scene, meteo; options)` returns
 one mixed result per step and reuses the underlying voxel response and
 scattering caches across the series.
 

@@ -63,7 +63,8 @@ end
 
     # This oracle uses the validating public ray API, rather than the prepared
     # response path. In particular it retains the historical normalization at
-    # each API boundary, terrain origin checks and exact accumulation order.
+    # each API boundary and terrain origin checks. Only aggregate scalar weights
+    # allow roundoff from compensated production sums versus this naive oracle.
     function public_ray_response(raw, backend, terrain, options)
         direction = AL._normalise_voxel_direction(raw)
         rays, effective = AL._voxel_incident_rays(grid, direction,
@@ -125,7 +126,13 @@ end
             terrain; options)
         expected = public_ray_response(direction, backend, terrain, options)
         for field in fieldnames(typeof(actual))
-            @test getproperty(actual, field) == getproperty(expected, field)
+            if field in (:incoming_weight, :escaped_weight, :escaped_top_weight,
+                         :escaped_side_weight, :escaped_bottom_weight, :terrain_incident_weight)
+                @test isapprox(getproperty(actual, field), getproperty(expected, field);
+                    atol=1e-13, rtol=1e-13)
+            else
+                @test getproperty(actual, field) == getproperty(expected, field)
+            end
         end
     end
 end

@@ -40,34 +40,34 @@ optics = VoxelOpticalProperties(
     nir_reflectance=0.45,
     nir_transmittance=0.40,
 )
-ground = VoxelGroundOptics(grid; par_reflectance=0.10, nir_reflectance=0.30)
+scene = VoxelScene(grid)
+add_ground!(scene;
+    optics=SoilOpticalProperties(par_reflectance=0.10, nir_reflectance=0.30),
+    periodic=base_options.toricity,
+)
 
-first_only = run_voxel_light_step(grid, row, base_options; backend=backend)
-one_order = run_voxel_light_step(
-    grid,
-    row,
-    LightOptions(
+first_only = run_light(scene, row; options=base_options, backend)
+one_order = run_light(
+    scene, row;
+    options=LightOptions(
         base_options;
         scattering=true,
         scattering_max_iter=1,
         scattering_stop_ratio=0.0,
-    );
+    ),
     backend=backend,
     optics=optics,
-    ground=ground,
 )
-converged = run_voxel_light_step(
-    grid,
-    row,
-    LightOptions(
+converged = run_light(
+    scene, row;
+    options=LightOptions(
         base_options;
         scattering=true,
         scattering_max_iter=30,
         scattering_stop_ratio=1e-8,
-    );
+    ),
     backend=backend,
     optics=optics,
-    ground=ground,
 )
 
 println("First-order intercepted energy (J)")

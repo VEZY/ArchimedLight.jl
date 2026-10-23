@@ -5,7 +5,8 @@ Use the voxel workflow when vegetation is available as plant area density
 ArchimedLight can retain individual identities and leaf/wood point fractions
 from a merged voxel export, while the terrain remains an independent surface.
 
-Start with [One Tree, Two Input Files](voxel_tree_tutorial.md) to read a small
+If you already use triangle scenes, start with [From Triangles To Voxels](triangles_to_voxels.md).
+Otherwise, start with [One Tree, Two Input Files](voxel_tree_tutorial.md) to read a small
 bundled `.vox`/`.jsonl.gz` pair, assign individual leaf/wood optics, and compare
 the outputs. [Run A Simulation](voxel_interception.md) builds a grid directly
 in Julia. For an existing merged `.jsonl.gz` file and a PLY terrain, follow
@@ -21,7 +22,7 @@ in Julia. For an existing merged `.jsonl.gz` file and a PLY terrain, follow
 | Gaps | Explicit empty space between surfaces | Statistical gaps within the cell |
 | Individuals and organs | Scene component identity | Components inferred from supplied point proportions |
 | Terrain | Scene soil geometry | Independent planar, height-field, or triangle surface |
-| Workflow | `run_light` | `run_voxel_light_step` / `run_voxel_light_series` |
+| Workflow | `run_light(sim, meteo)` | `run_light(scene, meteo; options, backend)` |
 | Shared inputs | Meteorology, sky sectors, spectral forcing, `LightOptions` | Same |
 
 A voxel is a volume containing an unresolved mixture, rather than an opaque
@@ -57,6 +58,8 @@ that distinction when comparing simulations or calibrating parameters.
 
 ## Find A Topic
 
+- [From Triangles To Voxels](triangles_to_voxels.md): keep the same scene, run,
+  metric and plotting vocabulary while choosing voxel-specific resolution.
 - [One Tree, Two Input Files](voxel_tree_tutorial.md): read the same tree from
   `.vox` and JSONL.gz, compare generic PAD with individual/organ accounting,
   and change one tree's optical properties.

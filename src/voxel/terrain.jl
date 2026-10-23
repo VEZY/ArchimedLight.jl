@@ -36,7 +36,23 @@ function _validate_material_ids(material_ids, materials, expected::Integer)
     return ids
 end
 
-"""Horizontal finite plane split into deterministic rectangular soil patches."""
+"""
+    PlanarTerrain(grid, optics; elevation=grid.minimum[3], cells=size(grid)[1:2], kwargs...)
+    PlanarTerrain(input::VoxelPointInput, optics; kwargs...)
+    PlanarTerrain(vegetation::VoxelVegetation, optics; kwargs...)
+    PlanarTerrain(elevation, x_bounds, y_bounds, optics; cells=(1, 1), kwargs...)
+
+Flat ground split into rectangular soil patches, without a triangle mesh.
+The voxel-source constructors use the full horizontal scene extent and its
+bottom elevation by default, with one patch per horizontal voxel. Override
+`elevation` or `cells` to choose a different flat surface or output resolution.
+Pass explicit [`SoilOpticalProperties`](@ref); the plane is an assumed ground
+surface, not an estimate of the terrain beneath the vegetation.
+
+The source is unchanged. Pass the returned terrain as `terrain=ground` to
+[`run_voxel_light_step`](@ref) or [`run_voxel_light_series`](@ref). Set
+`periodic=true` when using `LightOptions(toricity=true)`.
+"""
 struct PlanarTerrain{T<:AbstractFloat} <: AbstractVoxelTerrain
     elevation::T
     x_bounds::NTuple{2,T}
@@ -84,6 +100,7 @@ function PlanarTerrain(
     grid::VoxelGrid,
     optics::SoilOpticalProperties;
     elevation::Real=grid.minimum[3],
+    cells=size(grid)[1:2],
     material_id::Integer=1,
     material_ids=nothing,
     materials=Dict(Int(material_id) => optics),
@@ -94,7 +111,7 @@ function PlanarTerrain(
         (grid.minimum[1], grid.maximum[1]),
         (grid.minimum[2], grid.maximum[2]),
         optics;
-        cells=size(grid)[1:2],
+        cells=cells,
         material_id=material_id,
         material_ids=material_ids,
         materials=materials,
@@ -107,6 +124,7 @@ function PlanarTerrain(
     grid::VoxelGrid;
     optics::SoilOpticalProperties,
     elevation::Real=grid.minimum[3],
+    cells=size(grid)[1:2],
     material_id::Integer=1,
     material_ids=nothing,
     materials=Dict(Int(material_id) => optics),
@@ -117,7 +135,7 @@ function PlanarTerrain(
         (grid.minimum[1], grid.maximum[1]),
         (grid.minimum[2], grid.maximum[2]),
         optics;
-        cells=size(grid)[1:2],
+        cells=cells,
         material_id=material_id,
         material_ids=material_ids,
         materials=materials,

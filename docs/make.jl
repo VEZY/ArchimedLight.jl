@@ -64,6 +64,7 @@ makedocs(;
         ],
         "Voxel Modelling" => [
             "Start Here" => "voxel_overview.md",
+            "From Triangles To Voxels" => "triangles_to_voxels.md",
             "One Tree, Two Input Files" => "voxel_tree_tutorial.md",
             "Run A Simulation" => "voxel_interception.md",
             "Input Files And Individuals" => "voxel_inputs.md",

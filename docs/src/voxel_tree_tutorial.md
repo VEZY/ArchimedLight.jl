@@ -35,25 +35,28 @@ Depth = 3
 using ArchimedLight
 
 example_dir = joinpath(pkgdir(ArchimedLight), "examples", "voxel_tree")
-grid = read_voxel_grid(joinpath(example_dir, "tree.vox"))
-input = read_voxel_point_input(joinpath(example_dir, "tree.jsonl.gz"))
+plain_scene = read_scene(joinpath(example_dir, "tree.vox"))
+mixed_scene = read_scene(joinpath(example_dir, "tree.jsonl.gz"))
+grid = plain_scene.grid
+input = mixed_scene.input
 
 @assert grid.minimum == input.grid.minimum
 @assert grid.maximum == input.grid.maximum
 @assert grid.pad == input.grid.pad
 
-display(grid)
-display(input)
+display(plain_scene)
+display(mixed_scene)
 ```
 
 The plain file already contains a **voxelized density field**, not a raw point
 cloud. It supports generic-material interception without retaining the tree
 or organ identities used to estimate PAD. It cannot reconstruct those
 identities afterward. The JSONL reader retains the same density field plus
-the exported individual and organ proportions.
+the exported individual and organ proportions. Reading it permits inspection;
+`run_light` requires an explicit point-proxy model, configured below.
 
 At the REPL, entering either returned object displays a compact scene summary.
-Use `display(input)` inside a script to request that summary explicitly;
+Use `display(mixed_scene)` inside a script to request that summary explicitly;
 readers do not print during file loading.
 
 Read the independent terrain in the same coordinate frame:
@@ -61,11 +64,19 @@ Read the independent terrain in the same coordinate frame:
 ```@example voxel_tree
 soil = SoilOpticalProperties(par_reflectance=0.12, nir_reflectance=0.32)
 terrain = read_ply_terrain(joinpath(example_dir, "terrain.ply"), soil)
+add_ground!(plain_scene, terrain)
+add_ground!(mixed_scene, terrain)
 (triangles=terrain_patch_count(terrain), bounds_m=terrain_bounds(terrain))
 ```
 
 The PLY triangles are converted to the native terrain representation. Soil
 reflection remains separate from vegetation optics in both workflows.
+
+Without a terrain file, use `add_ground!(plain_scene; optics=soil)` instead.
+This creates flat ground at the voxel domain bottom, covering its full x/y
+extent. See [flat ground without a terrain file](voxel_terrain.md#Flat-Ground-Without-A-Terrain-File)
+for patch resolution and elevation options; the default is a geometric
+assumption rather than an estimated MNT.
 
 ## Check That The File Format Alone Changes Nothing
 
@@ -75,8 +86,9 @@ must then intercept the same amount of radiation in every voxel.
 
 ```@example voxel_tree
 black = VoxelMaterial(g=0.5)
-baseline_model = VoxelVegetation(
-    input;
+baseline_scene = VoxelScene(input; terrain)
+update_models!(
+    baseline_scene;
     mode=:point_proxy,
     leaf=black,
     wood=black,
@@ -95,8 +107,8 @@ first_options = LightOptions(
 )
 backend = VoxelCPUBackend(g=0.5, rays_per_voxel=4)
 
-plain_first = run_voxel_light_step(grid, row, first_options; backend, terrain)
-mixed_first = run_voxel_light_step(baseline_model, row, first_options; backend, terrain)
+plain_first = run_light(plain_scene, row; options=first_options, backend)
+mixed_first = run_light(baseline_scene, row; options=first_options, backend)
 @assert isapprox(
     plain_first.first_order.par_energy,
     mixed_first.light.first_order.par_energy;
@@ -132,14 +144,14 @@ wood = VoxelMaterial(
 )
 unknown = VoxelMaterial(g=0.5)
 
-vegetation = VoxelVegetation(
-    input;
+update_models!(
+    mixed_scene;
     mode=:point_proxy,
     leaf=leaf,
     wood=wood,
     unknown=unknown,
 )
-display(vegetation)
+display(mixed_scene)
 ```
 
 The example has one individual: numeric `tree_id=1` in the file becomes
@@ -148,8 +160,9 @@ reflectance, copy the default material and replace the desired coefficient:
 
 ```@example voxel_tree
 tree_leaf = VoxelMaterial(leaf; nir_reflectance=0.40)
-individual_vegetation = VoxelVegetation(
-    input;
+individual_scene = VoxelScene(input; terrain)
+update_models!(
+    individual_scene;
     mode=:point_proxy,
     leaf=leaf,
     wood=wood,
@@ -190,13 +203,11 @@ generic_optics = VoxelOpticalProperties(
     nir_reflectance=leaf.nir_reflectance,
     nir_transmittance=leaf.nir_transmittance,
 )
-plain_result = run_voxel_light_step(
-    grid, row, options; backend, terrain, optics=generic_optics,
+plain_result = run_light(
+    plain_scene, row; options, backend, optics=generic_optics,
 )
-mixed_result = run_voxel_light_step(
-    individual_vegetation, row, options; backend, terrain,
-)
-components = voxel_component_values(mixed_result)
+mixed_result = run_light(individual_scene, row; options, backend)
+components = component_values(mixed_result; level=:individual)
 components
 ```
 
@@ -204,7 +215,7 @@ The individual override above changes only leaf NIR reflectance. We can check
 its effect against the default materials without changing the source file:
 
 ```@example voxel_tree
-default_result = run_voxel_light_step(vegetation, row, options; backend, terrain)
+default_result = run_light(mixed_scene, row; options, backend)
 (
     default_NIR_absorbed_J=sum(default_result.light.scattering.nir.absorbed_energy),
     modified_NIR_absorbed_J=sum(mixed_result.light.scattering.nir.absorbed_energy),
@@ -221,8 +232,8 @@ The generic result reports absorbed energy for its homogeneous participating
 material, without distinguishing those organs.
 
 ```@example voxel_tree
-leaf_apar = sum(c.absorbed_par_energy for c in components if c.organ == :leaf)
-wood_absorbed = sum(c.absorbed_par_energy for c in components if c.organ == :wood)
+leaf_apar = sum(components.Ra_PAR_q[components.organ .== :leaf])
+wood_absorbed = sum(components.Ra_PAR_q[components.organ .== :wood])
 (
     generic_material_PAR_absorbed_J=sum(plain_result.scattering.par.absorbed_energy),
     tree_leaf_APAR_J=leaf_apar,
@@ -252,12 +263,12 @@ tree_axis = Axis3(
     xlabel="x (m)", ylabel="y (m)", zlabel="z (m)",
     aspect=:data, azimuth=-0.86, elevation=0.40, perspectiveness=0.35,
 )
-voxelplot!(
+lightplot!(
     tree_axis, grid, terrain;
-    voxel_colormap=[RGBAf(0.43, 0.25, 0.10, 1), RGBAf(0.56, 0.36, 0.12, 1),
+    colormap=[RGBAf(0.43, 0.25, 0.10, 1), RGBAf(0.56, 0.36, 0.12, 1),
         RGBAf(0.57, 0.74, 0.27, 1), RGBAf(0.27, 0.58, 0.19, 1),
         RGBAf(0.07, 0.35, 0.12, 1)],
-    voxel_colorrange=(0.3, 1.7),
+    colorrange=(0.3, 1.7),
     cutaway=:front, transparency=false,
     voxel_alpha=1.0, voxel_gap=0.1, terrain_alpha=1.0,
     show_lattice=false, show_rays=false, show_normals=false,

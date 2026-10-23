@@ -1,4 +1,4 @@
-@testitem "Makie voxelplot renders terrain-aware voxel transport" tags=[:core, :voxel, :terrain, :fast] begin
+@testitem "Makie lightplot renders terrain-aware voxel transport" tags=[:core, :voxel, :terrain, :fast] begin
     using CairoMakie
     import GeometryBasics
 
@@ -42,7 +42,7 @@
         (origin=(1.5, 2.2, 4.0), direction=(-0.10, -0.05, -1.0)),
     ]
 
-    figure, axis, plot = voxelplot(
+    figure, axis, plot = lightplot(
         grid,
         terrain;
         rays=rays,
@@ -85,13 +85,13 @@
 
     inplace_figure = Figure()
     inplace_axis = LScene(inplace_figure[1, 1])
-    inplace_plot = voxelplot!(inplace_axis, grid, terrain; rays=rays)
+    inplace_plot = lightplot!(inplace_axis, grid, terrain; rays=rays)
     @test length(inplace_plot.plots) == 9
     @test length(Makie.to_value(inplace_plot[:voxel_ray_paths])) == length(rays)
 
     transparent_figure = Figure()
     transparent_axis = LScene(transparent_figure[1, 1])
-    transparent_plot = voxelplot!(
+    transparent_plot = lightplot!(
         transparent_axis,
         grid,
         terrain;
@@ -101,7 +101,7 @@
     @test Makie.to_value(transparent_plot.plots[2].transparency)
     @test Makie.to_value(transparent_plot.plots[4].transparency)
 
-    no_terrain_figure, _, no_terrain_plot = voxelplot(
+    no_terrain_figure, _, no_terrain_plot = lightplot(
         grid;
         options=LightOptions(toricity=true),
         rays=[(origin=(1.8, 1.5, 4.0), direction=(1.0, 0.0, -1.0))],
@@ -122,13 +122,13 @@
         1:2:(length(periodic_segments) - 1),
     )
 
-    @test_throws ArgumentError voxelplot(grid, terrain; cutaway=:side)
-    @test_throws ArgumentError voxelplot(
+    @test_throws ArgumentError lightplot(grid, terrain; cutaway=:side)
+    @test_throws ArgumentError lightplot(
         grid,
         terrain;
         rays=[(origin=(0.5, 0.5, 4.0), direction=(0.0, 0.0, 1.0))],
     )
-    @test_throws ArgumentError voxelplot(
+    @test_throws ArgumentError lightplot(
         grid,
         terrain;
         rays=[(origin=(3.0, 0.5, 4.0), direction=(0.0, 0.0, -1.0))],
@@ -147,6 +147,121 @@
     CairoMakie.empty!(inplace_figure)
     CairoMakie.empty!(transparent_figure)
     CairoMakie.empty!(no_terrain_figure)
+end
+
+@testitem "Common lightplot shows voxel composition and light series without changing geometry" tags=[:core, :voxel, :terrain, :fast] begin
+    using CairoMakie
+
+    fixture = joinpath(@__DIR__, "fixtures", "voxel", "point_input", "mixed.jsonl.gz")
+    input = read_voxel_point_input(fixture; missing_pad=:zero_with_diagnostics)
+    original_pad = copy(input.grid.pad)
+    figures = Figure[]
+    function makeplot(args...; kwargs...)
+        figure, axis, plot = lightplot(args...; kwargs...)
+        push!(figures, figure)
+        @test axis isa Axis3
+        return plot
+    end
+
+    raw = makeplot(input.grid)
+    @test raw[:voxel_color_values][] == original_pad
+    @test isnan(raw[:voxel_pad_full][][3]) # wood points cannot create PAD in an empty cell
+    @test raw[:voxel_resolved_colormap][] === :viridis
+
+    points = makeplot(input)
+    @test points[:voxel_color_values][][1] == 1 # leaf dominates point fractions
+    @test points[:voxel_color_values][][2] == 3 # no identified points: unknown vegetation
+    @test points[:voxel_resolved_colorrange][] == (0.5, 3.5)
+    palette = points[:voxel_resolved_colormap][]
+    @test palette[[1, 128, 255]] == [:forestgreen, :sienna, :slategray]
+    points_wood = makeplot(input; color=:wood_fraction)
+    @test points_wood[:voxel_color_values][][1] ≈ 0.1
+    @test isnan(points_wood[:voxel_pad_full][][3])
+
+    assigned = Float64.(input.point_count .> 0) .* 0.5
+    model = VoxelVegetation(input; mode=:point_proxy, leaf=VoxelMaterial(g=0.4),
+        wood=VoxelMaterial(g=0.8), identified_area_fraction=assigned)
+    scene = VoxelScene(model)
+    add_ground!(scene; optics=SoilOpticalProperties(par_reflectance=0.25, nir_reflectance=0.35), cells=(3, 2))
+    geometry = makeplot(scene)
+    @test geometry[:voxel_color_values][][1] == 3 # residual PAD is retained, not assigned to leaves
+    fractions = makeplot(scene; color=:leaf_fraction)
+    @test fractions[:voxel_color_values][][1] ≈ 0.3
+    Makie.update!(fractions, color=:unknown_fraction)
+    @test fractions[:voxel_color_values][][1] ≈ 0.65
+    Makie.update!(fractions, color=:pad)
+    @test fractions[:voxel_color_values][] == original_pad
+
+    options = LightOptions(toricity=false, scattering=false, turtle_sectors=6, all_in_turtle=true)
+    row = (step_duration=60.0, Ri_PAR_f=100.0, Ri_NIR_f=30.0,
+        sun_azimuth=120.0, sun_elevation=45.0, direct_fraction=0.6)
+    dark = merge(row, (Ri_PAR_f=0.0, Ri_NIR_f=0.0))
+    series = run_light(scene, [dark, row]; options, backend=VoxelCPUBackend(rays_per_voxel=4))
+    plot = makeplot(scene, series)
+    @test all(iszero, plot[:voxel_color_values][])
+    # Occupancy comes from PAD, so night does not make any plant voxel vanish.
+    occupied = count(>(0), original_pad)
+    @test length(Makie.voxel_positions(plot.plots[1])) == occupied
+    night_range = plot[:voxel_resolved_colorrange][]
+    @test night_range[2] > 0
+    @test plot[:voxel_terrain_colorrange][] == night_range
+
+    Makie.update!(plot, timestep=2)
+    expected = ArchimedLight._voxel_metric_values(scene, series[2], :incident_par_flux)
+    @test plot[:voxel_color_values][] ≈ expected
+    @test plot[:voxel_resolved_colorrange][] == night_range
+    @test length(Makie.voxel_positions(plot.plots[1])) == occupied
+    # Two displayed triangles represent one planar patch; divide by real patch
+    # area and step duration to match the vegetation flux unit W m^-2.
+    light = series[2].light
+    patch_area = 2.0
+    expected_soil = repeat(light.first_order.par_terrain_energy ./ (60.0 * patch_area); inner=2)
+    @test plot[:voxel_terrain_values][] ≈ expected_soil
+    @test plot.plots[1][:colorrange][] == plot.plots[4][:colorrange][]
+
+    Makie.update!(plot, color=:absorbed_par_flux, colorrange=(0.0, 200.0))
+    @test plot[:voxel_color_values][] ≈ ArchimedLight._voxel_metric_values(scene, series[2], :absorbed_par_flux)
+    @test plot[:voxel_terrain_values][] ≈ expected_soil .* 0.75
+    @test plot[:voxel_terrain_colorrange][] == (0.0, 200.0)
+
+    # Terrain first-order and cumulative scattering metrics follow the same
+    # selectors as plant cells, with a common physical unit and colour range.
+    scatter_options = LightOptions(options; scattering=true, scattering_max_iter=20,
+        scattering_stop_ratio=1e-8)
+    scattered = run_light(scene, row; options=scatter_options,
+        backend=VoxelCPUBackend(rays_per_voxel=4))
+    scattered_plot = makeplot(scene, scattered; color=:incident_par_initial_flux)
+    @test scattered_plot[:voxel_terrain_values][] ≈
+        repeat(scattered.light.first_order.par_terrain_energy ./ (60.0 * patch_area); inner=2)
+    Makie.update!(scattered_plot, color=:incident_par_flux)
+    @test scattered_plot[:voxel_terrain_values][] ≈
+        repeat(scattered.light.scattering.par.terrain_incident_energy ./ (60.0 * patch_area); inner=2)
+    Makie.update!(scattered_plot, color=:absorbed_shortwave_flux)
+    @test scattered_plot[:voxel_terrain_values][] ≈ repeat(
+        (scattered.light.scattering.par.terrain_absorbed_energy .+
+         scattered.light.scattering.nir.terrain_absorbed_energy) ./ (60.0 * patch_area); inner=2)
+
+    @test_throws BoundsError lightplot(scene, series; timestep=3)
+    @test_throws ArgumentError lightplot(scene; color=:incident_par_flux)
+    @test_throws ArgumentError lightplot(input.grid; color=:composition)
+    @test input.grid.pad == original_pad
+    @test !isdefined(ArchimedLight, :voxelplot)
+    @test !isdefined(ArchimedLight, :voxelplot!)
+
+    # Sloped terrain uses its surface area, not its horizontal footprint.
+    extension = Base.get_extension(ArchimedLight, :ArchimedLightMakieExt)
+    slope = TriangulatedTerrain([(0., 0., 0.), (1., 0., 0.), (1., 1., 0.5), (0., 1., 0.5)],
+        [(1, 2, 3), (1, 3, 4)], SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0))
+    @test extension._voxelplot_patch_areas(slope) ≈ fill(sqrt(1.25) / 2, 2)
+
+    mktempdir() do directory
+        for (name, figure) in (("composition", figures[5]), ("light_series", figures[end]))
+            path = joinpath(directory, "$name.png")
+            save(path, figure)
+            @test filesize(path) > 0
+        end
+    end
+    foreach(CairoMakie.empty!, figures)
 end
 
 @testitem "Voxel plotting preserves small features at georeferenced coordinates" tags=[:core, :voxel, :terrain, :fast] begin
@@ -186,7 +301,7 @@ end
     quadrature = VoxelScatteringQuadrature([(0.0, 0.0, 1.0), (0.0, 0.0, -1.0)], [0.5, 0.5])
     # Cairo's voxel gap is absolute, unlike the GPU's relative gap; use zero
     # here so this regression tests centimetric geometry on both backends.
-    figure, axis, plot = voxelplot(
+    figure, axis, plot = lightplot(
         grid, terrain; rays=[ray], quadrature, show_normals=true, voxel_gap=0.0,
     )
     @test axis isa Axis3
@@ -243,7 +358,7 @@ end
     moved_vertices = [moved_origin .+ (2, 2, 1) .* (point .- origin) for point in vertices]
     moved_terrain = TriangulatedTerrain(moved_vertices, terrain.triangles, soil)
     moved_ray = (origin=ray.origin .+ (moved_origin .- origin), direction=ray.direction)
-    Makie.update!(plot, (moved_grid, moved_terrain); rays=[moved_ray])
+    Makie.update!(plot, (; source=moved_grid, terrain=moved_terrain, data=nothing); rays=[moved_ray])
     @test Tuple.(GeometryBasics.coordinates(plot[:voxel_terrain_mesh][])) == moved_vertices
     @test plot[:voxel_ray_segments][][1] == GeometryBasics.Point3d(moved_ray.origin)
     @test plot[:voxel_hit_points][][1] ≈ GeometryBasics.Point3d(

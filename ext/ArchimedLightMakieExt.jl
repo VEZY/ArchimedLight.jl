@@ -136,6 +136,14 @@ end
 
 Makie.@recipe(VoxelPlot, payload) do scene
     attr = Attributes(
+        color=nothing,
+        timestep=1,
+        colormap=automatic,
+        colorrange=automatic,
+        colorscale=identity,
+        lowclip=automatic,
+        highclip=automatic,
+        nan_color=:transparent,
         rays=(),
         quadrature=nothing,
         options=LightOptions(toricity=false),
@@ -143,8 +151,6 @@ Makie.@recipe(VoxelPlot, payload) do scene
         cutaway=:none,
         voxel_alpha=0.35,
         voxel_gap=0.08,
-        voxel_colormap=:YlGn,
-        voxel_colorrange=automatic,
         terrain_alpha=0.92,
         terrain_colormap=:copper,
         terrain_colorrange=(0.0, 1.0),
@@ -173,6 +179,14 @@ Makie.@recipe(VoxelPlot, payload) do scene
 end
 
 const _VOXELPLOT_ATTRIBUTES = Makie.@DocumentedAttributes begin
+    color = nothing
+    timestep = 1
+    colormap = automatic
+    colorrange = automatic
+    colorscale = identity
+    lowclip = automatic
+    highclip = automatic
+    nan_color = :transparent
     rays = ()
     quadrature = nothing
     options = LightOptions(toricity=false)
@@ -180,8 +194,6 @@ const _VOXELPLOT_ATTRIBUTES = Makie.@DocumentedAttributes begin
     cutaway = :none
     voxel_alpha = 0.35
     voxel_gap = 0.08
-    voxel_colormap = :YlGn
-    voxel_colorrange = automatic
     terrain_alpha = 0.92
     terrain_colormap = :copper
     terrain_colorrange = (0.0, 1.0)
@@ -247,27 +259,193 @@ function Makie.data_limits(plot::VoxelPlot)
     return limits
 end
 
+_voxelplot_grid(source::VoxelGrid) = source
+_voxelplot_grid(source::VoxelPointInput) = source.grid
+_voxelplot_grid(source::VoxelVegetation) = source.input.grid
+_voxelplot_grid(source::VoxelScene) = source.grid
+
+_voxelplot_input(::VoxelGrid) = nothing
+_voxelplot_input(source::VoxelPointInput) = source
+_voxelplot_input(source::VoxelVegetation) = source.input
+_voxelplot_input(source::VoxelScene) = source.input
+
+_voxelplot_vegetation(::Union{VoxelGrid,VoxelPointInput}) = nothing
+_voxelplot_vegetation(source::VoxelVegetation) = source
+_voxelplot_vegetation(source::VoxelScene) = source.vegetation
+
+# Keep the source used for flux normalization explicit in the reactive payload.
+_voxelplot_parts(payload::NamedTuple{(:source,:terrain,:data)}) =
+    (payload.source, payload.terrain, payload.data)
+
 function _voxelplot_grid_terrain(payload)
-    payload isa Tuple && length(payload) == 2 || throw(ArgumentError(
-        "voxelplot payload must contain a VoxelGrid and an AbstractVoxelTerrain",
-    ))
-    grid, terrain = payload
-    grid isa VoxelGrid || throw(ArgumentError("voxelplot requires a VoxelGrid"))
-    terrain isa AbstractVoxelTerrain || throw(ArgumentError(
-        "voxelplot terrain must be an AbstractVoxelTerrain",
-    ))
-    return grid, terrain
+    source, terrain, _ = _voxelplot_parts(payload)
+    return _voxelplot_grid(source), terrain
 end
 
-function _voxelplot_pad(grid::VoxelGrid, cutaway)
-    cutaway in (:none, :front) || throw(ArgumentError(
-        "voxelplot cutaway must be :none or :front",
-    ))
-    pad = Float32.(grid.pad)
-    if cutaway == :front
-        pad[:, 1:cld(size(pad, 2), 2), :] .= 0.0f0
+const _VOXEL_GEOMETRY_COLORS = (:pad, :composition, :leaf_fraction, :wood_fraction, :unknown_fraction)
+# Voxels quantizes scalar colours through a 255-entry palette. Give every
+# category a flat band rather than interpolating leaf green into bark brown.
+const _VOXEL_COMPOSITION_COLORMAP = vcat(
+    fill(:forestgreen, 85), fill(:sienna, 85), fill(:slategray, 85),
+)
+
+function _voxelplot_selector(source, data, color)
+    color === nothing && return data === nothing ?
+        (_voxelplot_input(source) === nothing ? :pad : :composition) : :incident_par_flux
+    color isa Symbol || throw(ArgumentError("voxel lightplot color must be a metric or composition selector"))
+    return color
+end
+
+function _voxelplot_step(data, timestep)
+    if data isa AbstractVector
+        1 <= timestep <= length(data) || throw(BoundsError(data, timestep))
+        return data[timestep]
     end
-    return pad
+    timestep == 1 || throw(BoundsError(1:1, timestep))
+    return data
+end
+
+function _voxelplot_composition(source)
+    grid = _voxelplot_grid(source)
+    model = _voxelplot_vegetation(source)
+    input = _voxelplot_input(source)
+    input === nothing && throw(ArgumentError("composition requires individual/organ point input"))
+    parts = ntuple(_ -> zeros(Float64, size(grid)), 3)
+    for v in eachindex(grid.pad)
+        if model !== nothing
+            for c in model.offsets[v]:(model.offsets[v + 1] - 1)
+                part = model.components[c]
+                organ = part.organ === :leaf ? 1 : part.organ === :wood ? 2 : 3
+                parts[organ][v] += part.density
+            end
+        elseif input.point_count[v] > 0
+            for c in input.offsets[v]:(input.offsets[v + 1] - 1)
+                part = input.components[c]
+                organ = part.organ === :leaf ? 1 : part.organ === :wood ? 2 : 3
+                parts[organ][v] += grid.pad[v] * part.count / input.point_count[v]
+            end
+        else
+            parts[3][v] = grid.pad[v]
+        end
+    end
+    return parts
+end
+
+function _voxelplot_values(source, data, color, timestep)
+    grid = _voxelplot_grid(source)
+    selector = _voxelplot_selector(source, data, color)
+    selector === :pad && return Float64.(grid.pad)
+    if selector in (:composition, :leaf_fraction, :wood_fraction, :unknown_fraction)
+        parts = _voxelplot_composition(source)
+        if selector === :composition
+            # One colour describes the dominant component of the existing cell;
+            # no artificial leaf/wood subgeometry is introduced.
+            return map((a, b, c) -> Float64(argmax((a, b, c))), parts...)
+        end
+        organ = selector === :leaf_fraction ? 1 : selector === :wood_fraction ? 2 : 3
+        return map((part, pad) -> pad > 0 ? part / pad : NaN, parts[organ], grid.pad)
+    end
+    data === nothing && throw(ArgumentError("lightplot requires a simulation result for `$selector`"))
+    # Point input alone has no optical model; its grid still supplies the
+    # original area for incident-light results computed with that same grid.
+    context = source isa VoxelPointInput ? source.grid : source
+    return ArchimedLight._voxel_metric_values(context, _voxelplot_step(data, timestep), selector)
+end
+
+function _voxelplot_masked_values(grid, values, threshold, cutaway)
+    limit = Float64(threshold)
+    isfinite(limit) && limit >= 0 || throw(ArgumentError("lightplot pad_threshold must be finite and non-negative"))
+    result = Float32.(values)
+    for v in eachindex(result)
+        grid.pad[v] > limit || (result[v] = NaN32)
+    end
+    cutaway === :front && (result[:, 1:cld(size(result, 2), 2), :] .= NaN32)
+    return result
+end
+
+function _voxelplot_patch_areas(terrain::PlanarTerrain)
+    area = (terrain.x_bounds[2] - terrain.x_bounds[1]) *
+           (terrain.y_bounds[2] - terrain.y_bounds[1]) / prod(terrain.cells)
+    return fill(area, terrain_patch_count(terrain))
+end
+_voxelplot_patch_areas(::NoVoxelTerrain) = Float64[]
+_voxelplot_patch_areas(terrain::HeightFieldTerrain) = _voxelplot_patch_areas(terrain.mesh)
+function _voxelplot_patch_areas(terrain::TriangulatedTerrain)
+    return map(terrain.triangles) do triangle
+        a, b, c = terrain.vertices[collect(triangle)]
+        u = ntuple(i -> b[i] - a[i], 3)
+        v = ntuple(i -> c[i] - a[i], 3)
+        sqrt((u[2] * v[3] - u[3] * v[2])^2 +
+             (u[3] * v[1] - u[1] * v[3])^2 +
+             (u[1] * v[2] - u[2] * v[1])^2) / 2
+    end
+end
+
+function _voxelplot_terrain_metric(terrain, step, color)
+    selector = ArchimedLight._normalize_light_selector(color)
+    light = ArchimedLight._voxel_step_light(step)
+    if selector === :absorbed_shortwave_flux
+        return _voxelplot_terrain_metric(terrain, step, :absorbed_par_flux) .+
+               _voxelplot_terrain_metric(terrain, step, :absorbed_nir_flux)
+    end
+    words = split(String(selector), '_')
+    length(words) in (3, 4) || throw(ArgumentError("unsupported terrain metric `$selector`"))
+    quantity, band = Symbol(words[1]), Symbol(words[2])
+    initial = :initial in Symbol.(words)
+    band in (:par, :nir) || throw(ArgumentError("unsupported terrain metric `$selector`"))
+    absorbed = quantity === :absorbed
+    if light.scattering !== nothing && !initial
+        scatter = getproperty(light.scattering, band)
+        energy = absorbed ? scatter.terrain_absorbed_energy : scatter.terrain_incident_energy
+    else
+        energy = copy(getproperty(light.first_order, Symbol(band, :_terrain_energy)))
+        if absorbed
+            for patch in eachindex(energy)
+                material = soil_optics(terrain, terrain_patch_material(terrain, patch))
+                energy[patch] *= 1 - getproperty(material, Symbol(band, :_reflectance))
+            end
+        end
+    end
+    length(energy) == terrain_patch_count(terrain) || throw(DimensionMismatch(
+        "terrain patch count differs from simulation result",
+    ))
+    endswith(String(selector), "_flux") || return energy
+    areas = _voxelplot_patch_areas(terrain)
+    light.duration_seconds == 0 && return zeros(Float64, length(areas))
+    return energy ./ (areas .* light.duration_seconds)
+end
+
+function _voxelplot_terrain_colors(payload, color, timestep, reflectance)
+    source, terrain, data = _voxelplot_parts(payload)
+    selector = _voxelplot_selector(source, data, color)
+    if data !== nothing && !(selector in _VOXEL_GEOMETRY_COLORS)
+        patch_values = _voxelplot_terrain_metric(terrain, _voxelplot_step(data, timestep), selector)
+        return Float32.(terrain isa PlanarTerrain ? repeat(patch_values; inner=2) : patch_values)
+    end
+    return reflectance
+end
+
+function _voxelplot_colorrange(payload, color, colorrange, threshold)
+    colorrange === automatic || return colorrange
+    source, terrain, data = _voxelplot_parts(payload)
+    grid = _voxelplot_grid(source)
+    selector = _voxelplot_selector(source, data, color)
+    selector === :composition && return (0.5, 3.5)
+    selector in (:leaf_fraction, :wood_fraction, :unknown_fraction) && return (0.0, 1.0)
+    extrema = nothing
+    steps = data isa AbstractVector ? data : (data,)
+    for (i, _) in enumerate(steps)
+        values = _voxelplot_values(source, data, selector, i)
+        visible = (values[v] for v in eachindex(values) if grid.pad[v] > threshold)
+        extrema = ArchimedLight._merge_extrema(extrema, ArchimedLight._finite_extrema(visible))
+        if data !== nothing && !(selector in _VOXEL_GEOMETRY_COLORS)
+            terrain_values = _voxelplot_terrain_metric(terrain, _voxelplot_step(data, i), selector)
+            extrema = ArchimedLight._merge_extrema(extrema, ArchimedLight._finite_extrema(terrain_values))
+        end
+    end
+    extrema === nothing && return (0.0, 1.0)
+    lo, hi = extrema
+    return lo == hi ? (min(0.0, lo), max(1.0, hi)) : extrema
 end
 
 function _voxelplot_lattice(grid::VoxelGrid)
@@ -342,30 +520,30 @@ _voxelplot_terrain_mesh(terrain::HeightFieldTerrain) = _triangulated_terrain_mes
 
 function _voxelplot_ray(ray, index::Integer, grid::VoxelGrid)
     hasproperty(ray, :origin) || throw(ArgumentError(
-        "voxelplot ray $index must define an origin field",
+        "lightplot ray $index must define an origin field",
     ))
     hasproperty(ray, :direction) || throw(ArgumentError(
-        "voxelplot ray $index must define a direction field",
+        "lightplot ray $index must define a direction field",
     ))
     raw_origin = getproperty(ray, :origin)
     raw_direction = getproperty(ray, :direction)
     length(raw_origin) == 3 || throw(ArgumentError(
-        "voxelplot ray $index origin must contain three coordinates",
+        "lightplot ray $index origin must contain three coordinates",
     ))
     length(raw_direction) == 3 || throw(ArgumentError(
-        "voxelplot ray $index direction must contain three coordinates",
+        "lightplot ray $index direction must contain three coordinates",
     ))
     origin = ntuple(axis -> Float64(raw_origin[axis]), 3)
     direction = ntuple(axis -> Float64(raw_direction[axis]), 3)
-    all(isfinite, origin) || throw(ArgumentError("voxelplot ray $index origin must be finite"))
-    all(isfinite, direction) || throw(ArgumentError("voxelplot ray $index direction must be finite"))
+    all(isfinite, origin) || throw(ArgumentError("lightplot ray $index origin must be finite"))
+    all(isfinite, direction) || throw(ArgumentError("lightplot ray $index direction must be finite"))
     all(axis -> grid.minimum[axis] <= origin[axis] <= grid.maximum[axis], 1:3) ||
-        throw(ArgumentError("voxelplot ray $index origin must lie inside the voxel grid"))
+        throw(ArgumentError("lightplot ray $index origin must lie inside the voxel grid"))
     magnitude = sqrt(sum(abs2, direction))
-    magnitude > 0 || throw(ArgumentError("voxelplot ray $index direction cannot be zero"))
+    magnitude > 0 || throw(ArgumentError("lightplot ray $index direction cannot be zero"))
     unit_direction = ntuple(axis -> direction[axis] / magnitude, 3)
     unit_direction[3] < 0 || throw(ArgumentError(
-        "voxelplot ray $index direction must point downward",
+        "lightplot ray $index direction must point downward",
     ))
     return origin, unit_direction
 end
@@ -397,7 +575,7 @@ function _voxelplot_ray_geometry(
     reflected_length,
 )
     quadrature === nothing || quadrature isa VoxelScatteringQuadrature ||
-        throw(ArgumentError("voxelplot quadrature must be a VoxelScatteringQuadrature or nothing"))
+        throw(ArgumentError("lightplot quadrature must be a VoxelScatteringQuadrature or nothing"))
     diagonal = sqrt(sum((grid.maximum[axis] - grid.minimum[axis])^2 for axis in 1:3))
     ray_paths = VoxelRayPath[]
     ray_segments = GeometryBasics.Point3d[]
@@ -473,9 +651,29 @@ function Makie.plot!(plot::VoxelPlot)
     # the small origin value. This avoids model mutations in payload callbacks.
     voxel_transform() = Makie.Transformation(plot; translation=map(identity, plot[:voxel_origin]))
 
-    map!(plot.attributes, :payload, [:voxel_pad_full, :voxel_pad_front]) do payload
+    map!(plot.attributes, [:payload, :color, :timestep], :voxel_color_values) do payload, color, timestep
+        source, _, data = _voxelplot_parts(payload)
+        _voxelplot_values(source, data, color, Int(timestep))
+    end
+    map!(plot.attributes, [:payload, :voxel_color_values, :pad_threshold], [:voxel_pad_full, :voxel_pad_front]) do payload, values, threshold
         current_grid, _ = _voxelplot_grid_terrain(payload)
-        (_voxelplot_pad(current_grid, :none), _voxelplot_pad(current_grid, :front))
+        (_voxelplot_masked_values(current_grid, values, threshold, :none),
+         _voxelplot_masked_values(current_grid, values, threshold, :front))
+    end
+    map!(plot.attributes, [:payload, :color, :colormap], :voxel_resolved_colormap) do payload, color, colormap
+        colormap === automatic || return colormap
+        source, _, data = _voxelplot_parts(payload)
+        selector = _voxelplot_selector(source, data, color)
+        selector === :composition ? _VOXEL_COMPOSITION_COLORMAP : :viridis
+    end
+    map!(plot.attributes, [:payload, :color, :colorrange, :pad_threshold], :voxel_resolved_colorrange) do payload, color, colorrange, threshold
+        _voxelplot_colorrange(payload, color, colorrange, threshold)
+    end
+    map!(plot.attributes, [:payload, :color, :voxel_resolved_colormap, :voxel_resolved_colorrange, :terrain_colormap, :terrain_colorrange], [:voxel_terrain_colormap, :voxel_terrain_colorrange]) do payload, color, colormap, colorrange, terrain_colormap, terrain_colorrange
+        source, _, data = _voxelplot_parts(payload)
+        selector = _voxelplot_selector(source, data, color)
+        data !== nothing && !(selector in _VOXEL_GEOMETRY_COLORS) ?
+            (colormap, colorrange) : (terrain_colormap, terrain_colorrange)
     end
     map!(
         plot.attributes,
@@ -483,24 +681,20 @@ function Makie.plot!(plot::VoxelPlot)
         [:voxel_full_visible, :voxel_front_visible],
     ) do show_voxels, cutaway
         cutaway in (:none, :front) || throw(ArgumentError(
-            "voxelplot cutaway must be :none or :front",
+            "lightplot cutaway must be :none or :front",
         ))
         (Bool(show_voxels) && cutaway == :none, Bool(show_voxels) && cutaway == :front)
-    end
-    map!(plot.attributes, :pad_threshold, :voxel_is_air) do threshold
-        limit = Float32(threshold)
-        isfinite(limit) && limit >= 0 || throw(ArgumentError(
-            "voxelplot pad_threshold must be finite and non-negative",
-        ))
-        value -> !isfinite(value) || value <= limit
     end
     map!(plot.attributes, :payload, :voxel_lattice) do payload
         current_grid, _ = _voxelplot_grid_terrain(payload)
         _voxelplot_lattice(current_grid)
     end
-    map!(plot.attributes, :payload, [:voxel_terrain_mesh, :voxel_terrain_values]) do payload
-        _, current_terrain = _voxelplot_grid_terrain(payload)
-        _voxelplot_terrain_mesh(current_terrain)
+    map!(plot.attributes, :payload, [:voxel_terrain_mesh, :voxel_terrain_reflectance]) do payload
+        _, terrain = _voxelplot_grid_terrain(payload)
+        _voxelplot_terrain_mesh(terrain)
+    end
+    map!(plot.attributes, [:payload, :color, :timestep, :voxel_terrain_reflectance], :voxel_terrain_values) do payload, color, timestep, reflectance
+        _voxelplot_terrain_colors(payload, color, Int(timestep), reflectance)
     end
     map!(
         plot.attributes,
@@ -573,9 +767,12 @@ function Makie.plot!(plot::VoxelPlot)
         plot[:voxel_y],
         plot[:voxel_z],
         plot[:voxel_pad_full];
-        is_air=plot[:voxel_is_air],
-        colormap=plot[:voxel_colormap],
-        colorrange=plot[:voxel_colorrange],
+        is_air=isnan,
+        colormap=plot[:voxel_resolved_colormap],
+        colorrange=plot[:voxel_resolved_colorrange],
+        colorscale=plot[:colorscale],
+        lowclip=plot[:lowclip],
+        highclip=plot[:highclip],
         alpha=plot[:voxel_alpha],
         gap=plot[:voxel_gap],
         depthsorting=true,
@@ -590,9 +787,12 @@ function Makie.plot!(plot::VoxelPlot)
         plot[:voxel_y],
         plot[:voxel_z],
         plot[:voxel_pad_front];
-        is_air=plot[:voxel_is_air],
-        colormap=plot[:voxel_colormap],
-        colorrange=plot[:voxel_colorrange],
+        is_air=isnan,
+        colormap=plot[:voxel_resolved_colormap],
+        colorrange=plot[:voxel_resolved_colorrange],
+        colorscale=plot[:colorscale],
+        lowclip=plot[:lowclip],
+        highclip=plot[:highclip],
         alpha=plot[:voxel_alpha],
         gap=plot[:voxel_gap],
         depthsorting=true,
@@ -613,8 +813,12 @@ function Makie.plot!(plot::VoxelPlot)
     mesh!(
         plot,
         plot[:voxel_colored_terrain_mesh_local];
-        colormap=plot[:terrain_colormap],
-        colorrange=plot[:terrain_colorrange],
+        colormap=plot[:voxel_terrain_colormap],
+        colorrange=plot[:voxel_terrain_colorrange],
+        colorscale=plot[:colorscale],
+        lowclip=plot[:lowclip],
+        highclip=plot[:highclip],
+        nan_color=plot[:nan_color],
         alpha=plot[:terrain_alpha],
         transparency=plot[:transparency],
         shading=plot[:shading],
@@ -680,12 +884,14 @@ _voxelplot_kwargs(kwargs) = _voxelplot_kwargs(NamedTuple(kwargs))
 _voxelplot_kwargs(kwargs::NamedTuple) = haskey(kwargs, :cycle) ? kwargs : (; kwargs..., cycle=[])
 
 function _validate_voxelplot_kwargs(grid::VoxelGrid, kwargs::NamedTuple)
-    _voxelplot_pad(grid, get(kwargs, :cutaway, :none))
+    get(kwargs, :cutaway, :none) in (:none, :front) || throw(ArgumentError(
+        "lightplot cutaway must be :none or :front",
+    ))
     options = get(kwargs, :options, LightOptions(toricity=false))
-    options isa LightOptions || throw(ArgumentError("voxelplot options must be LightOptions"))
+    options isa LightOptions || throw(ArgumentError("lightplot options must be LightOptions"))
     quadrature = get(kwargs, :quadrature, nothing)
     quadrature === nothing || quadrature isa VoxelScatteringQuadrature || throw(ArgumentError(
-        "voxelplot quadrature must be a VoxelScatteringQuadrature or nothing",
+        "lightplot quadrature must be a VoxelScatteringQuadrature or nothing",
     ))
     for (index, ray) in enumerate(get(kwargs, :rays, ()))
         _voxelplot_ray(ray, index, grid)
@@ -699,7 +905,7 @@ function _validate_voxelplot_kwargs(grid::VoxelGrid, kwargs::NamedTuple)
         number = Float64(value)
         valid = isfinite(number) && (allow_zero ? number >= 0 : number > 0)
         valid || throw(ArgumentError(
-            "voxelplot $name must be finite and $(allow_zero ? "non-negative" : "positive")",
+            "lightplot $name must be finite and $(allow_zero ? "non-negative" : "positive")",
         ))
     end
     return kwargs
@@ -731,23 +937,51 @@ function ArchimedLight.lightplot!(axis, scene::PlantGeom.SceneGeometry, models::
     lightplot!(axis, payload; _lightplot_kwargs(kwargs)...)
 end
 
-function ArchimedLight.voxelplot(
-    grid::VoxelGrid,
-    terrain::AbstractVoxelTerrain=NoVoxelTerrain();
-    kwargs...,
-)
-    options = _validate_voxelplot_kwargs(grid, _voxelplot_kwargs(kwargs))
-    voxelplot((grid, terrain); options...)
+const _VoxelPlotSource = Union{VoxelGrid,VoxelPointInput,VoxelVegetation,VoxelScene}
+
+_voxelplot_default_terrain(::Union{VoxelGrid,VoxelPointInput,VoxelVegetation}) = NoVoxelTerrain()
+_voxelplot_default_terrain(source::VoxelScene) = source.terrain
+
+function _voxelplot_payload(source, terrain, data, kwargs)
+    terrain isa AbstractVoxelTerrain || throw(ArgumentError("lightplot terrain must be an AbstractVoxelTerrain"))
+    payload = (; source, terrain, data)
+    attributes = _validate_voxelplot_kwargs(_voxelplot_grid(source), _voxelplot_kwargs(kwargs))
+    color, timestep = get(attributes, :color, nothing), Int(get(attributes, :timestep, 1))
+    _voxelplot_values(source, data, color, timestep)
+    selector = _voxelplot_selector(source, data, color)
+    if data !== nothing && !(selector in _VOXEL_GEOMETRY_COLORS)
+        _voxelplot_terrain_metric(terrain, _voxelplot_step(data, timestep), selector)
+    end
+    return payload, attributes
 end
 
-function ArchimedLight.voxelplot!(
-    parent,
-    grid::VoxelGrid,
-    terrain::AbstractVoxelTerrain=NoVoxelTerrain();
+function ArchimedLight.lightplot(
+    source::_VoxelPlotSource,
+    data=nothing;
+    terrain=_voxelplot_default_terrain(source),
     kwargs...,
 )
-    options = _validate_voxelplot_kwargs(grid, _voxelplot_kwargs(kwargs))
-    voxelplot!(parent, (grid, terrain); options...)
+    payload, attributes = _voxelplot_payload(source, terrain, data, kwargs)
+    voxelplot(payload; attributes...)
+end
+
+function ArchimedLight.lightplot(source::_VoxelPlotSource, terrain::AbstractVoxelTerrain; kwargs...)
+    ArchimedLight.lightplot(source; terrain, kwargs...)
+end
+
+function ArchimedLight.lightplot!(
+    parent,
+    source::_VoxelPlotSource,
+    data=nothing;
+    terrain=_voxelplot_default_terrain(source),
+    kwargs...,
+)
+    payload, attributes = _voxelplot_payload(source, terrain, data, kwargs)
+    voxelplot!(parent, payload; attributes...)
+end
+
+function ArchimedLight.lightplot!(parent, source::_VoxelPlotSource, terrain::AbstractVoxelTerrain; kwargs...)
+    ArchimedLight.lightplot!(parent, source; terrain, kwargs...)
 end
 
 end

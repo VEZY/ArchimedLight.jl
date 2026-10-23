@@ -25,7 +25,8 @@ organ allocation, and any example optical parameters are pedagogical. The
 same PAD does not imply the same absorption when organ optics differ.
 
 The files contain no optical parameters. Assign `VoxelMaterial` values to
-leaf, wood, and unknown defaults when constructing `VoxelVegetation`, and
+leaf, wood, and unknown defaults with
+`read_scene(path; mode=:point_proxy, leaf, wood, unknown)`, and
 use `individuals=Dict("1" => (leaf=..., wood=...))` for an individual override.
 Use `VoxelMaterial(leaf; nir_reflectance=0.40)` to copy a default material and
 change one coefficient while preserving all its other properties.
@@ -37,6 +38,12 @@ and terrain elevation used by the documentation. To regenerate the paired
 files, include `generate.jl` in a Julia session with the ArchimedLight project
 active (use Kaimon in this development workspace). Generation uses the public
 `write_voxel_grid` writer and gzip without a timestamp or original filename.
+
+Load `.vox` and `.jsonl.gz` with `read_scene`; both return a `VoxelScene`.
+Use `add_ground!(scene; optics=soil)` for a flat ground, or
+`add_ground!(scene, read_ply_terrain(path, soil))` for the bundled MNT.
+Call `run_light(scene, row_or_table; options, backend)` and inspect the result
+with `light_metric_values` or `lightplot`.
 
 The terrain and optical parameters are separate model inputs. The two voxel
 files do not embed a terrain mesh, and the PLY does not specify soil optics.

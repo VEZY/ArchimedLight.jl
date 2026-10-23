@@ -50,11 +50,11 @@ voxel_terrain_app()
     adds the tree identity and leaf/wood proportions; the
     [file-based tree tutorial](voxel_tree_tutorial.md) assigns separate wood
     and leaf optics to this same scene. Every ray segment, soil hit, local normal, and reflected
-    direction shown above is computed through `voxelplot`, `trace_voxel_ray`,
+    direction shown above is computed through `lightplot`, `trace_voxel_ray`,
     and `terrain_lambertian_weights`; only the displayed ray energies are
     illustrative.
 
-`voxelplot` keeps terrain, ray, and lattice coordinates in double precision.
+`lightplot` keeps terrain, ray, and lattice coordinates in double precision.
 Voxel rendering uses local bounds with a shared placement in the original
 coordinate frame, so small cells remain distinct at large projected GIS
 coordinates. The default `Axis3` preserves this placement through WebGL's
@@ -94,9 +94,48 @@ path = trace_voxel_ray(
 )
 ```
 
-`PlanarTerrain(grid, soil)` divides the plane into the same horizontal patch
-layout as the voxel grid. A more general finite plane can choose its horizontal
-bounds and patch count directly.
+### Flat Ground Without A Terrain File
+
+When no terrain mesh is available, attach a horizontal ground to the voxel
+scene with the same `add_ground!` name used for triangle scenes. Its default extent is the full voxel x/y domain, its elevation
+is `grid.minimum[3]`, and its soil patches follow the horizontal voxel layout.
+The soil optics remain explicit.
+
+```@example voxel_terrain
+scene = VoxelScene(grid)
+add_ground!(scene; optics=soil)
+flat_ground = scene.terrain
+(
+    bounds_m=terrain_bounds(flat_ground),
+    soil_patches=terrain_patch_count(flat_ground),
+)
+```
+
+Subsequent `run_light(scene, meteo; options, backend)` calls use this ground.
+For an imported MNT, use `add_ground!(scene, terrain)` instead.
+
+The lower-level `PlanarTerrain(input, soil)` and `PlanarTerrain(vegetation, soil)` also accept
+a [`VoxelPointInput`](@ref) or [`VoxelVegetation`](@ref), using the same domain.
+These constructors return terrain; they do not modify the vegetation.
+
+For a large scene, choose fewer soil patches with `cells=(nx, ny)`. This controls
+the ground output resolution and reflection source sampling, while preserving
+the continuous flat surface. Use `elevation=` to set a known horizontal ground
+level and `periodic=true` when `LightOptions(toricity=true)` is required:
+
+```julia
+add_ground!(scene; optics=soil, cells=(64, 64))
+add_ground!(scene; optics=soil, elevation=0.0, periodic=true)
+```
+
+!!! note "A flat-ground assumption"
+    The domain bottom is a convenient default, not an estimated terrain surface.
+    It cannot represent slopes or restore a missing MNT. A different elevation
+    must remain inside the voxel domain and below its top; vegetation below
+    that level is underground. Imported terrain must share the voxel coordinates.
+
+A more general finite plane can choose its horizontal bounds and patch count
+directly.
 
 ```julia
 PlanarTerrain(
@@ -263,17 +302,13 @@ requested tolerance, even if no foliage scattering order remains.
 
 ## Run The Voxel Pipeline
 
-Pass terrain independently of foliage optics:
+Attach the terrain to the scene independently of foliage optics:
 
 ```julia
 options = LightOptions(toricity=false, scattering=true)
-result = run_voxel_light_step(
-    grid,
-    meteo_row,
-    options;
-    backend=VoxelCPUBackend(),
-    optics=leaf_optics,
-    terrain=terrain,
+scene = VoxelScene(grid; terrain)
+result = run_light(
+    scene, meteo_row; options, backend=VoxelCPUBackend(), optics=leaf_optics,
 )
 ```
 

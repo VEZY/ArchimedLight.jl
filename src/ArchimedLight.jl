@@ -1,6 +1,7 @@
 module ArchimedLight
 
 import PlantGeom
+import PlantGeom: add_ground!
 import MultiScaleTreeGraph
 import GeometryBasics
 import StaticArrays
@@ -40,11 +41,13 @@ include("voxel/scattering.jl")
 include("voxel/pipeline.jl")
 include("voxel/vegetation.jl")
 include("voxel/display.jl")
+include("voxel/scene.jl")
 include("attach.jl")
 include("outputs.jl")
 include("plantsimengine.jl")
 include("visualization.jl")
 include("query.jl")
+include("voxel/results.jl")
 
 export LightRenderGeometry
 export LightNodeMetadata
@@ -70,6 +73,8 @@ export SceneSummary
 export MeteoSummary
 export LightSimulation
 export VoxelGrid
+export VoxelScene
+export add_ground!
 export VoxelPointInput, VoxelPointComponent
 export VoxelMaterial, VoxelVegetation, VoxelVegetationStepResult, VoxelComponentLight
 export AbstractVoxelTerrain
@@ -174,7 +179,5 @@ export light_face_values
 export light_vertex_values
 export lightplot
 export lightplot!
-export voxelplot
-export voxelplot!
 
 end

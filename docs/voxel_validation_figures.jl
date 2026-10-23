@@ -18,16 +18,16 @@ function terrain_figure()
     Label(fig[0, 1:2], "Voxel vegetation over an independent terrain surface"; fontsize=27)
     ax = Axis3(fig[1, 1]; xlabel="x (m)", ylabel="y (m)", zlabel="z (m)",
         aspect=:data, azimuth=-0.86, elevation=0.40, perspectiveness=0.35)
-    plot = voxelplot!(ax, grid, terrain; rays, quadrature, cutaway=:front,
+    plot = lightplot!(ax, grid, terrain; rays, quadrature, cutaway=:front,
         transparency=false, pad_threshold=0.2, voxel_alpha=1.0, voxel_gap=0.10,
-        voxel_colormap=[RGBAf(0.43, 0.25, 0.10, 1), RGBAf(0.56, 0.36, 0.12, 1),
+        colormap=[RGBAf(0.43, 0.25, 0.10, 1), RGBAf(0.56, 0.36, 0.12, 1),
             RGBAf(0.57, 0.74, 0.27, 0.78), RGBAf(0.27, 0.58, 0.19, 0.78),
-            RGBAf(0.07, 0.35, 0.12, 0.78)], voxel_colorrange=(0.30, 1.70),
+            RGBAf(0.07, 0.35, 0.12, 0.78)], colorrange=(0.30, 1.70),
         terrain_colorrange=(0.08, 0.42), terrain_alpha=1.0,
         lattice_color=(:slategray, 0.12), terrain_wireframe_color=(:black, 0.10),
         incoming_color="#d79700", incoming_linewidth=4, show_normals=true,
         normal_length=0.16, reflected_length=0.40)
-    Colorbar(fig[1, 2]; colormap=plot.voxel_colormap[], limits=(0.30, 1.70),
+    Colorbar(fig[1, 2]; colormap=plot.colormap[], limits=(0.30, 1.70),
         label="Plant area density (m² m⁻³)", height=Relative(0.68))
     elements = [PolyElement(color="#38843f"), PolyElement(color="#a46d36"),
         LineElement(color="#d79700", linewidth=4), MarkerElement(color=:orangered, marker=:circle),
@@ -81,7 +81,7 @@ function physical_checks()
     options = LightOptions(toricity=false, turtle_sectors=1, all_in_turtle=true, scattering=true,
         scattering_max_iter=80, scattering_stop_ratio=1e-10,
         nir_interception=true, nir_scattering=true, radiation_timestep_minutes=5.0)
-    result = run_voxel_light_step(small, row, options; backend=cpu, optics, terrain)
+    result = run_light(VoxelScene(small; terrain), row; options, backend=cpu, optics)
     budgets = map((:par, :nir)) do waveband
         band = getproperty(result.scattering, waveband)
         incoming = getproperty(result.first_order, Symbol(waveband, :_incoming_energy))
