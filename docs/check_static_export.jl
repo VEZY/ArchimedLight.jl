@@ -77,7 +77,9 @@ end
 # Load each viewer only on its own page, before DOMContentLoaded.
 function documentation_assets(page)
     assets = if page == "index.html"
-        ("live-wheat.css", "live-wheat.js")
+        ("applications.css", "applications.js", "live-wheat.css", "live-wheat.js")
+    elseif startswith(page, "applications/")
+        ("applications.css",)
     elseif page == "evaluation.html"
         ("scattering-evaluation.css", "scattering-evaluation.js")
     else

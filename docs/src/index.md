@@ -2,11 +2,11 @@
 CurrentModule = ArchimedLight
 ```
 
-# Fast radiation transfer in 3D scenes
+# Fast radiative transfer in 3D scenes
 
 ArchimedLight.jl computes light interception and scattering in three-dimensional scenes, from individual organs or objects to crop canopies, using a fast radiation transfer model. Read an existing scene
 or build one in Julia, simulate its light environment, and inspect incident and
-absorbed radiation on each organ.
+absorbed radiation for each organ.
 
 ## Try it in your browser
 
@@ -52,6 +52,8 @@ Choose a wheat mesh or a voxel tree above terrain. Change the hour and options;
 ```@raw html
 <details>
   <summary>About the examples and more scenes</summary>
+  <p>Both examples use interpolated Montpellier weather for 15 May 2025
+  and ArchimedLight compiled to WebAssembly.</p>
   <p>The wheat benchmark has an unspecified cultivar. See the
   <a href="https://github.com/VEZY/ArchimedLight.jl/tree/main/docs/live_wheat">source, provenance and validation notes</a>
   for its scope and reproduction.</p>
@@ -59,10 +61,22 @@ Choose a wheat mesh or a voxel tree above terrain. Change the hour and options;
   optical properties and finite boundaries. See the
   <a href="voxel_overview.html">voxel modelling guide</a> for its assumptions.</p>
   <div class="archimed-animations">
-    <img src="assets/archimedlight_day_cycle_1.png" loading="lazy"
-      alt="Wheat scene coloured by incident PAR irradiance.">
-    <img src="assets/archimedlight_day_cycle_2.png" loading="lazy"
-      alt="Agrivoltaic wheat scene with shade from solar panels, coloured by incident PAR irradiance.">
+    <video autoplay loop muted playsinline
+           poster="assets/archimedlight_day_cycle_1.png"
+           preload="metadata"
+           style="max-width: 100%; height: auto;"
+           aria-label="Wheat scene coloured by incident PAR irradiance.">
+      <source src="assets/archimedlight_day_cycle_1.mp4" type="video/mp4">
+      Your browser does not support embedded video.
+    </video>
+    <video autoplay loop muted playsinline
+           poster="assets/archimedlight_day_cycle_2.png"
+           preload="metadata"
+           style="max-width: 100%; height: auto;"
+           aria-label="Agrivoltaic wheat scene with shade from solar panels, coloured by incident PAR irradiance.">
+      <source src="assets/archimedlight_day_cycle_2.mp4" type="video/mp4">
+      Your browser does not support embedded video.
+    </video>
   </div>
   <p>The day-cycle animations run the wheat and agrivoltaic wheat benchmark
   scenes every 30 minutes over a representative clear-sky day. About 2,500
@@ -72,9 +86,52 @@ Choose a wheat mesh or a voxel tree above terrain. Change the hour and options;
 </details>
 ```
 
+## Applications
+
+Explore how ArchimedLight is used to study light in measured plant architectures,
+mixed crops, and environments shaped by solar panels.
+
+```@raw html
+<section id="applications-gallery" class="applications-gallery" aria-label="ArchimedLight applications">
+  <div class="applications-toolbar">
+    <a href="applications/index.html">Browse all applications <span aria-hidden="true">→</span></a>
+    <div class="applications-controls" hidden>
+      <button type="button" class="applications-previous" aria-label="Previous applications" aria-controls="applications-track"><span aria-hidden="true">←</span></button>
+      <button type="button" class="applications-next" aria-label="Next applications" aria-controls="applications-track"><span aria-hidden="true">→</span></button>
+    </div>
+  </div>
+  <ul id="applications-track" class="applications-track" aria-label="Application examples" tabindex="0">
+    <li>
+      <a class="application-card" href="applications/intercropping.html">
+        <img src="assets/applications/intercropping.png" width="3600" height="3000" loading="lazy" alt="Three-dimensional wheat and maize canopies in an intercropping scene.">
+        <span class="application-card-body"><strong>Wheat–maize intercropping</strong><span>Oriane Braud</span></span>
+      </a>
+    </li>
+    <li>
+      <a class="application-card" href="applications/agrivoltaics.html">
+        <img src="assets/applications/agrivoltaics.png" width="1039" height="808" loading="lazy" alt="A crop canopy beneath an agrivoltaic solar-panel structure.">
+        <span class="application-card-body"><strong>Agrivoltaics</strong><span>Corentin Coutellier</span></span>
+      </a>
+    </li>
+    <li>
+      <a class="application-card" href="applications/rice.html">
+        <img src="assets/applications/rice.png" width="1170" height="858" loading="lazy" alt="A three-dimensional reconstruction of measured rice plants.">
+        <span class="application-card-body"><strong>Reconstructed rice</strong><span>Raphaël Pérez</span></span>
+      </a>
+    </li>
+    <li>
+      <a class="application-card" href="applications/oil-palm.html">
+        <img src="assets/applications/oil-palm.png" width="3600" height="1500" loading="lazy" alt="A three-dimensional oil-palm reconstruction built from field measurements.">
+        <span class="application-card-body"><strong>Oil-palm reconstructions</strong><span>JPCE · CIRAD–PT SMART</span></span>
+      </a>
+    </li>
+  </ul>
+</section>
+```
+
 ## Quick Start
 
-This tutorial uses 1 cm pixels instead of the default 1 mm pixels to keep the coffee simulation quick.
+This tutorial simulated a coffee plant in a 3D scene.
 
 ```@example home_quick_start
 using ArchimedLight
@@ -91,7 +148,7 @@ step.budget.absorbed_energy.total.par;
 nothing # hide
 ```
 
-The simulation results are grouped by quantity and waveband in `LightBudget`. When you attach those values back onto the scene, the default attribute names keep the standard ARCHIMED naming convention such as `Ri_PAR_f`, `Ri_PAR_q`, and `Ra_PAR_q`.
+The simulation results are returned as a `LightBudget`, grouped by quantity and waveband. You can then export the results and plot them easily. Look at the getting started page to see how.
 
 ## Learn More
 

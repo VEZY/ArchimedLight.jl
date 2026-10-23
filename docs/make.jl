@@ -31,8 +31,8 @@ end
 # Bonito supplies its static HTML writer and documentation theme.
 home = (
     name="ArchimedLight.jl",
-    text="Light in 3D plant scenes",
-    tagline="Simulate radiation interception and scattering from individual organs to crop canopies.",
+    text="Let there be light.",
+    tagline="Radiation interception, absorption, and scattering in 3D scenes.",
     image="assets/archimedlight-logo.png",
     actions=[
         (text="Run your first simulation", link="getting_started.html", theme="brand"),
@@ -56,6 +56,13 @@ makedocs(;
     pages=[
         "Home" => "index.md",
         "Getting Started" => "getting_started.md",
+        "Applications" => [
+            "Overview" => "applications/index.md",
+            "Wheat–Maize Intercropping" => "applications/intercropping.md",
+            "Agrivoltaics" => "applications/agrivoltaics.md",
+            "Reconstructed Rice" => "applications/rice.md",
+            "Oil-Palm Digital Twins" => "applications/oil-palm.md",
+        ],
         "Tutorials" => [
             "Beginner Workflows" => "tutorial_beginner_workflows.md",
             "File-Based Workflow" => "tutorial_files.md",
