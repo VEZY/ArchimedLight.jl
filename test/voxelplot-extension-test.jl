@@ -264,6 +264,79 @@ end
     foreach(CairoMakie.empty!, figures)
 end
 
+@testitem "Voxel lightplot preserves Observable attributes from initialization" tags=[:core, :voxel, :terrain, :fast] begin
+    using CairoMakie
+
+    grid = VoxelGrid((0, 0, 0), (1, 2, 1), reshape([0.5, 1.5], 1, 2, 1))
+    original_pad = copy(grid.pad)
+    scene = VoxelScene(grid)
+    add_ground!(scene; optics=SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4),
+        cells=(1, 2), periodic=true)
+    options = LightOptions(toricity=false, scattering=false, turtle_sectors=6, all_in_turtle=true)
+    row = (step_duration=60.0, Ri_PAR_f=100.0, Ri_NIR_f=50.0,
+        sun_azimuth=0.0, sun_elevation=90.0, direct_fraction=1.0)
+    dark = merge(row, (Ri_PAR_f=0.0, Ri_NIR_f=0.0))
+    series = run_light(scene, [dark, row]; options, backend=VoxelCPUBackend(rays_per_voxel=1))
+
+    timestep, color = Observable(1), Observable(:incident_par_flux)
+    cutaway, threshold = Observable(:none), Observable(0.0)
+    rays = Observable([(origin=(0.5, 0.5, 1.0), direction=(0.0, 0.0, -1.0))])
+    plot_options = Observable(options)
+    quadrature = Observable(VoxelScatteringQuadrature(
+        [(0.0, 0.0, 1.0), (0.0, 0.0, -1.0)], [0.5, 0.5]))
+    attributes = (; timestep, color, cutaway, pad_threshold=threshold, rays,
+        options=plot_options, quadrature, normal_length=Observable(0.12),
+        reflected_length=Observable(0.30), arrow_markerscale=Observable(0.025))
+    figure, _, plot = lightplot(scene, series; attributes...)
+    inplace_figure = Figure()
+    inplace_plot = lightplot!(Axis3(inplace_figure[1, 1]), scene, series; attributes...)
+    plots = (plot, inplace_plot)
+    for current in plots
+        @test all(iszero, current[:voxel_color_values][])
+        @test length(Makie.voxel_positions(current.plots[1])) == 2
+        @test length(current[:voxel_reflected_directions][]) == 1
+    end
+
+    # A slider's value can select illuminated timesteps without recreating the plot.
+    timestep[] = 2
+    expected = ArchimedLight._voxel_metric_values(scene, series[2], :incident_par_flux)
+    @test any(>(0), expected)
+    for current in plots
+        @test current[:voxel_color_values][] ≈ expected
+        @test any(>(0), current[:voxel_terrain_values][])
+    end
+    color[] = :incident_nir_flux
+    expected_nir = ArchimedLight._voxel_metric_values(scene, series[2], :incident_nir_flux)
+    for current in plots
+        @test current[:voxel_color_values][] ≈ expected_nir
+    end
+    cutaway[] = :front
+    threshold[] = 1.0
+    for current in plots
+        @test !current.plots[1][:visible][]
+        @test current.plots[2][:visible][]
+        @test length(Makie.voxel_positions(current.plots[2])) == 1
+        @test isnan(current[:voxel_pad_full][][1])
+        @test isfinite(current[:voxel_pad_full][][2])
+    end
+    color[] = :pad
+    rays[] = [(origin=(0.5, 1.5, 1.0), direction=(0.0, 0.0, -1.0))]
+    for current in plots
+        @test current[:voxel_color_values][] == original_pad
+        @test Tuple(only(current[:voxel_hit_points][])) == (0.5, 1.5, 0.0)
+    end
+    rays[] = [(origin=(0.9, 1.5, 1.0), direction=(0.5, 0.0, -1.0))]
+    @test all(current -> isempty(current[:voxel_hit_points][]), plots)
+    plot_options[] = LightOptions(options; toricity=true)
+    @test all(current -> length(current[:voxel_hit_points][]) == 1, plots)
+    @test grid.pad == original_pad
+
+    @test_throws BoundsError lightplot(scene, series; timestep=Observable(3))
+    @test_throws ArgumentError lightplot(scene; cutaway=Observable(:side))
+    @test_throws ArgumentError lightplot(scene; pad_threshold=Observable(-1.0))
+    foreach(CairoMakie.empty!, (figure, inplace_figure))
+end
+
 @testitem "Voxel plotting preserves small features at georeferenced coordinates" tags=[:core, :voxel, :terrain, :fast] begin
     using CairoMakie
     using LinearAlgebra: cross, norm

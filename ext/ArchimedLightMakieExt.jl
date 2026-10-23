@@ -945,8 +945,10 @@ _voxelplot_default_terrain(source::VoxelScene) = source.terrain
 function _voxelplot_payload(source, terrain, data, kwargs)
     terrain isa AbstractVoxelTerrain || throw(ArgumentError("lightplot terrain must be an AbstractVoxelTerrain"))
     payload = (; source, terrain, data)
-    attributes = _validate_voxelplot_kwargs(_voxelplot_grid(source), _voxelplot_kwargs(kwargs))
-    color, timestep = get(attributes, :color, nothing), Int(get(attributes, :timestep, 1))
+    attributes = _voxelplot_kwargs(kwargs)
+    # Validate the current values without disconnecting reactive Makie attributes.
+    current = _validate_voxelplot_kwargs(_voxelplot_grid(source), map(Makie.to_value, attributes))
+    color, timestep = get(current, :color, nothing), Int(get(current, :timestep, 1))
     _voxelplot_values(source, data, color, timestep)
     selector = _voxelplot_selector(source, data, color)
     if data !== nothing && !(selector in _VOXEL_GEOMETRY_COLORS)

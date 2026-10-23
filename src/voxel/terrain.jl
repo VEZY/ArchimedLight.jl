@@ -956,19 +956,33 @@ end
 _terrain_patch_emission_point(grid::VoxelGrid, terrain::HeightFieldTerrain, patch_id::Integer) =
     _terrain_patch_emission_point(grid, terrain.mesh, patch_id)
 
+# A metric nudge may round back onto the surface at a large absolute
+# elevation. Preserve the usual offset, but require representable air below
+# the supplied upper bound; callers can try another exposed position if absent.
+function _terrain_air_height(preferred, surface, upper, offset)
+    height = min(max(preferred, surface + offset, nextfloat(surface)), upper)
+    return height > surface ? height : nothing
+end
+
 function _terrain_launch_point(grid::VoxelGrid, terrain, patch_id::Integer)
     point = _terrain_patch_emission_point(grid, terrain, patch_id)
     point === nothing && return nothing
     normal = terrain_patch_normal(terrain, patch_id)
     scale = maximum(ntuple(axis -> grid.maximum[axis] - grid.minimum[axis], 3))
     offset = 1024eps(Float64) * max(scale, 1.0)
-    launch = ntuple(axis -> point[axis] + offset * normal[axis], 3)
-    if any(launch[axis] < grid.minimum[axis] || launch[axis] > grid.maximum[axis] for axis in 1:2)
-        # A clipped sliver can be narrower than the normal offset. A vertical
-        # nudge stays inside its footprint and above this height surface.
-        return (point[1], point[2], min(point[3] + offset, grid.maximum[3]))
-    end
-    return launch
+    normal_launch = ntuple(axis -> point[axis] + offset * normal[axis], 3)
+    outside = any(normal_launch[axis] < grid.minimum[axis] ||
+        normal_launch[axis] > grid.maximum[axis] for axis in 1:2)
+    # A clipped sliver can be narrower than the normal offset. A vertical
+    # nudge stays inside its footprint and above this height surface.
+    launch = outside ? (point[1], point[2], point[3] + offset) : normal_launch
+    vertical_offset = outside ? offset : offset * normal[3]
+    # At large elevations the facet centroid and an elevation query can differ
+    # by one ULP. Resolve the actual launch surface when the nudge is that small.
+    surface = launch[3] <= nextfloat(point[3]) ?
+        terrain_elevation_at(terrain, launch[1], launch[2]) : point[3]
+    height = _terrain_air_height(launch[3], surface, prevfloat(grid.maximum[3]), vertical_offset)
+    return height === nothing ? nothing : (launch[1], launch[2], height)
 end
 
 function _terrain_exposed_source_point(grid, index, terrain::TriangulatedTerrain, tolerance)
@@ -995,7 +1009,11 @@ function _terrain_exposed_source_point(grid, index, terrain::TriangulatedTerrain
             surface = terrain_elevation_at(terrain, point[1], point[2])
             surface < upper[3] - tolerance || continue
             centre_z = grid.minimum[3] + (index[3] - 0.5) * grid.voxel_size[3]
-            return (point[1], point[2], min(max(centre_z, surface + tolerance), upper[3]))
+            voxel_top = grid.minimum[3] + index[3] * grid.voxel_size[3]
+            height = _terrain_air_height(centre_z, surface,
+                min(upper[3], prevfloat(voxel_top)), tolerance)
+            height === nothing && continue
+            return (point[1], point[2], height)
         end
     end
     return nothing
@@ -1013,8 +1031,9 @@ function _terrain_voxel_source_point(grid::VoxelGrid, index::CartesianIndex{3}, 
     tolerance = 1024eps(Float64) * max(scale, 1.0)
     voxel_top = grid.minimum[3] + index[3] * grid.voxel_size[3]
     if voxel_top > surface + 2tolerance
-        source_z = min(max(centre[3], surface + tolerance), voxel_top - tolerance)
-        return (centre[1], centre[2], source_z)
+        source_z = _terrain_air_height(centre[3], surface,
+            min(voxel_top - tolerance, prevfloat(voxel_top)), tolerance)
+        source_z === nothing || return (centre[1], centre[2], source_z)
     end
     # A buried column centre does not imply the whole cut cell is underground.
     return _terrain_exposed_source_point(grid, index, terrain, tolerance)

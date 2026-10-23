@@ -103,3 +103,99 @@ end
     @test ArchimedLight._terrain_voxel_source_point(grid, index, NoVoxelTerrain()) ==
           (0.5, 0.5, 0.5)
 end
+
+@testitem "Terrain-cut scattering is invariant to absolute elevation" tags=[:voxel, :terrain, :scattering, :fast] begin
+    AL = ArchimedLight
+    soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)
+    turtle = AL.TurtleGrid([
+        AL.TurtleSector(1, AL.StaticArrays.SVector(0.0, 0.0, 1.0), 1.0, :sky),
+    ])
+    fluxes = AL.DirectionalFluxes([1], [1.0], [0.5])
+    options = LightOptions(toricity=false, scattering=true, scattering_max_iter=40,
+        scattering_stop_ratio=1e-10, nir_interception=true, nir_scattering=true)
+    for kind in (:planar, :triangulated), traversal in (:dda, :reference)
+        results = []
+        for altitude in (0.0, 4096.0)
+            grid = VoxelGrid((0, 0, altitude), (1, 1, altitude + 1), ones(1, 1, 1))
+            surface = altitude + 0.75
+            terrain = kind == :planar ? PlanarTerrain(grid, soil; elevation=surface) :
+                TriangulatedTerrain(
+                    [(0.0, 0.0, surface), (1.0, 0.0, surface),
+                     (1.0, 1.0, surface), (0.0, 1.0, surface)],
+                    [(1, 2, 3), (1, 3, 4)], soil,
+                )
+            source = AL._terrain_voxel_source_point(grid, CartesianIndex(1, 1, 1), terrain)
+            @test surface < source[3] < grid.maximum[3]
+            for patch in 1:terrain_patch_count(terrain)
+                launch = AL._terrain_launch_point(grid, terrain, patch)
+                @test surface < launch[3] < grid.maximum[3]
+            end
+            backend = VoxelCPUBackend(rays_per_voxel=4, traversal=traversal)
+            optics = VoxelOpticalProperties(grid; scattering_par=0.5, scattering_nir=0.6)
+            first = compute_voxel_first_order(grid, turtle, fluxes, backend;
+                duration_seconds=1.0, options, terrain)
+            scattered = compute_voxel_scattering(grid, turtle, first, optics, options, backend;
+                duration_seconds=1.0, terrain)
+            @test sum(first.par_energy) > 0
+            for (band, incoming) in ((scattered.par, first.par_incoming_energy),
+                                     (scattered.nir, first.nir_incoming_energy))
+                @test band.ground_reflected_energy > 0
+                @test band.escaped_bottom_energy == 0
+                @test band.relative_balance_residual <= 1e-12
+                accounted = sum(band.absorbed_energy) + band.ground_absorbed_energy +
+                    band.escaped_top_energy + band.escaped_side_energy + band.unresolved_energy
+                @test accounted ≈ incoming atol=1e-12
+            end
+            push!(results, (first=first, scattered=scattered))
+        end
+        @test results[1].first.par_energy ≈ results[2].first.par_energy atol=1e-12
+        for band in (:par, :nir)
+            low, high = getproperty(results[1].scattered, band), getproperty(results[2].scattered, band)
+            @test low.total_intercepted_energy ≈ high.total_intercepted_energy atol=1e-10
+            @test low.absorbed_energy ≈ high.absorbed_energy atol=1e-10
+            @test low.ground_absorbed_energy ≈ high.ground_absorbed_energy atol=1e-10
+        end
+    end
+end
+
+@testitem "Elevated sloping terrain retains exposed cut-cell sources" tags=[:voxel, :terrain, :scattering, :fast] begin
+    AL = ArchimedLight
+    soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)
+    quadrature = VoxelScatteringQuadrature(
+        [(0.0, 0.0, 1.0), (0.0, 0.0, -1.0)], [0.5, 0.5],
+    )
+    backend = VoxelCPUBackend(rays_per_voxel=4)
+    options = LightOptions(toricity=false)
+    results = []
+    for altitude in (0.0, 4096.0)
+        pad = reshape([1.0, 0.0], 1, 1, 2)
+        grid = VoxelGrid((0, 0, altitude), (1, 1, altitude + 2), pad)
+        height = HeightFieldTerrain([0.0, 1.0], [0.0, 1.0],
+            altitude .+ [0.8 0.8; 1.8 1.8], soil)
+        # Its column centre is buried, so the source must use the exposed strip.
+        @test terrain_elevation_at(height, 0.5, 0.5) > altitude + 1
+        for terrain in (height, height.mesh)
+            source = AL._terrain_voxel_source_point(grid, CartesianIndex(1, 1, 1), terrain)
+            @test source !== nothing
+            @test altitude < source[3] < altitude + 1
+            @test source[3] > terrain_elevation_at(terrain, source[1], source[2])
+            for patch in 1:terrain_patch_count(terrain)
+                launch = AL._terrain_launch_point(grid, terrain, patch)
+                @test launch[3] > terrain_elevation_at(terrain, launch[1], launch[2])
+                @test launch[3] < grid.maximum[3]
+            end
+            result = apply_voxel_scattering_transport(grid, pad, quadrature, backend;
+                options, terrain, initial_terrain_energy=fill(0.5, terrain_patch_count(terrain)))
+            @test result.ground_reflected_energy > 0
+            @test result.escaped_bottom_energy == 0
+            @test abs(result.balance_residual) <= 1e-12
+            push!(results, result)
+        end
+    end
+    for pair in ((results[1], results[3]), (results[2], results[4]))
+        low, high = pair
+        @test low.intercepted_energy ≈ high.intercepted_energy atol=1e-10
+        @test low.ground_absorbed_energy ≈ high.ground_absorbed_energy atol=1e-10
+        @test low.escaped_top_energy ≈ high.escaped_top_energy atol=1e-10
+    end
+end

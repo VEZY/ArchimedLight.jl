@@ -302,14 +302,28 @@ requested tolerance, even if no foliage scattering order remains.
 
 ## Run The Voxel Pipeline
 
-Attach the terrain to the scene independently of foliage optics:
+Attach the terrain to the scene independently of foliage optics. This small
+run reuses the grid and terrain above with illustrative forcing and leaf optics:
 
-```julia
-options = LightOptions(toricity=false, scattering=true)
+```@example voxel_terrain
+meteo_row = (
+    step_duration=3600.0,
+    Ri_PAR_f=100.0, Ri_NIR_f=50.0,
+    sun_azimuth=180.0, sun_elevation=35.0, direct_fraction=0.5,
+)
+leaf_optics = VoxelOpticalProperties(
+    grid;
+    par_reflectance=0.08, par_transmittance=0.07,
+    nir_reflectance=0.45, nir_transmittance=0.40,
+)
+options = LightOptions(
+    toricity=false, scattering=true, turtle_sectors=6, all_in_turtle=true,
+)
 scene = VoxelScene(grid; terrain)
 result = run_light(
-    scene, meteo_row; options, backend=VoxelCPUBackend(), optics=leaf_optics,
+    scene, meteo_row; options, backend=VoxelCPUBackend(rays_per_voxel=4), optics=leaf_optics,
 )
+nothing # hide
 ```
 
 `ground=VoxelGroundOptics(...)` remains available for compatibility with the
@@ -318,9 +332,18 @@ exclusive. New topographic workflows should use `terrain`.
 
 First-order results contain `par_terrain_energy` and `nir_terrain_energy`, one
 value per terrain patch, plus their scalar `*_terrain_incident_energy` totals.
-Multiple-scattering results expose soil diagnostics through
-`soil_absorbed_energy(result)` and `soil_reflected_energy(result)`. The stored
-`ground_absorbed_energy` and `ground_reflected_energy` field names remain as
+Pass a spectral band's scattering result to the soil diagnostic helpers:
+
+```@example voxel_terrain
+(
+    soil_PAR_absorbed_J=soil_absorbed_energy(result.scattering.par),
+    soil_PAR_reflected_J=soil_reflected_energy(result.scattering.par),
+    soil_NIR_absorbed_J=soil_absorbed_energy(result.scattering.nir),
+    soil_NIR_reflected_J=soil_reflected_energy(result.scattering.nir),
+)
+```
+
+The stored `ground_absorbed_energy` and `ground_reflected_energy` field names remain as
 compatibility aliases in the result containers.
 
 Each spectral band also returns `terrain_incident_energy`,
