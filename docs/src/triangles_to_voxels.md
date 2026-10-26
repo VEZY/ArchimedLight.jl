@@ -50,14 +50,23 @@ individual/organ observations. Attach a flat ground with `add_ground!`:
 ```@example representations
 example_dir = joinpath(pkgdir(ArchimedLight), "examples", "voxel_tree")
 scene = read_scene(joinpath(example_dir, "tree.vox"))
+leaf = VoxelMaterial(g=0.5, par_reflectance=0.08, par_transmittance=0.07,
+    nir_reflectance=0.45, nir_transmittance=0.40)
 soil = SoilOpticalProperties(par_reflectance=0.12, nir_reflectance=0.32)
-add_ground!(scene; optics=soil)
+add_ground!(scene)
+models = models_for(; leaf, ground=soil)
 backend = VoxelCPUBackend(rays_per_voxel=4)
+@assert isempty(check_models(scene, models).errors)
 
-voxel_step = run_light(scene, row; options, backend)
+voxel_step = run_light(scene, row; models, options, backend)
 voxel_flux = light_metric_values(scene, voxel_step, :incident_par_flux)
 length(voxel_flux.value)
 ```
+
+`models_for` supplies material properties, as it does for triangles. `add_ground!`
+creates geometry without choosing soil reflectance. On a plain `.vox` grid,
+`leaf` applies one material to all PAD because no organ identities are available.
+`LightOptions` holds calculation settings, independently of these materials.
 
 `scene.grid` exposes the `VoxelGrid`; `scene.terrain` holds the attached ground.
 The ground defaults to the full horizontal domain, at `scene.grid.minimum[3]`.
@@ -70,7 +79,7 @@ A table of weather rows selects the series workflow automatically:
 
 ```@example representations
 rows = [row, merge(row, (Ri_PAR_f=80.0, sun_azimuth=200.0,))]
-series = run_light(scene, rows; options, backend)
+series = run_light(scene, rows; models, options, backend)
 length(series)
 ```
 
@@ -93,18 +102,21 @@ leaf = VoxelMaterial(
     nir_reflectance=0.45, nir_transmittance=0.40,
 )
 wood = VoxelMaterial(g=0.5, par_reflectance=0.10, nir_reflectance=0.30)
-mixed_scene = read_scene(
-    joinpath(example_dir, "tree.jsonl.gz");
-    mode=:point_proxy, leaf, wood, unknown=VoxelMaterial(g=0.5),
+mixed_scene = read_scene(joinpath(example_dir, "tree.jsonl.gz"))
+add_ground!(mixed_scene)
+mixed_models = models_for(;
+    mode=:point_proxy, leaf, wood, unknown=VoxelMaterial(g=0.5), ground=soil,
+    individuals=Dict("1" => (leaf=(nir_reflectance=0.40,),)),
 )
-add_ground!(mixed_scene; optics=soil)
-mixed_step = run_light(mixed_scene, row; options, backend)
+mixed_step = run_light(mixed_scene, row; models=mixed_models, options, backend)
 component_values(mixed_step; level=:individual)
 ```
 
-Alternatively, read the observations first and use
-`update_models!(scene; mode=:point_proxy, leaf, wood, unknown, individuals=...)`.
-This replaces the scene's vegetation model without rewriting its source file.
+The defaults apply to every individual. The partial override changes only tree
+`"1"`'s leaf NIR reflectance; all other parameters retain their defaults. Supply
+a complete `VoxelMaterial` instead to replace that organ's whole material.
+Use `update_models!(scene, models)` when a scene should retain the configuration
+for subsequent calls without a `models` keyword. Neither form rewrites the input file.
 See [One Tree, Two Input Files](voxel_tree_tutorial.md) for individual overrides
 and [Input Files And Individuals](voxel_inputs.md) for unattributed vegetation.
 
@@ -141,8 +153,8 @@ figure
 | Setting | Triangles | Voxels |
 | --- | --- | --- |
 | Spatial integration | `LightOptions(pixel_size=...)` | `VoxelCPUBackend(rays_per_voxel=...)` |
-| Vegetation materials | Triangle component models | Explicit `VoxelOpticalProperties` or individual/organ `VoxelMaterial`s |
-| Scattering defaults | Triangle model fallbacks can apply | Supply material optics explicitly |
+| Vegetation materials | `models_for` by scene group/type | `models_for` defaults and individual/organ overrides |
+| Scattering defaults | Triangle model fallbacks can apply | Supply global or per-individual materials explicitly |
 | Terrain | Soil geometry in the scene | Continuous terrain attached to `VoxelScene` |
 | Geometry updates | `update_scene!` on a simulation | Import the next PAD scene and run its next period |
 

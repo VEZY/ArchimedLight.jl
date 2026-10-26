@@ -52,7 +52,12 @@ backend = VoxelCPUBackend(
     traversal=:dda,
 )
 scene = VoxelScene(grid)
-step = run_light(scene, row; options, backend)
+leaf = VoxelMaterial(
+    g=0.5, par_reflectance=0.08, par_transmittance=0.07,
+    nir_reflectance=0.45, nir_transmittance=0.40,
+)
+models = models_for(; leaf)
+step = run_light(scene, row; models, options, backend)
 ```
 
 The first-order result contains one 3D array per waveband and output unit. The
@@ -104,9 +109,11 @@ workflow, including ray diagnostics and cached transport:
   the current ray intensity;
 - `toricity=false`: the ray leaves permanently at the first horizontal boundary.
 
-The backend configures ray sampling, numerical traversal, and the scalar-grid
-projection coefficient `g` (default `0.5`). Pass the same `options` to standalone
-ray tracing and `lightplot` to inspect simulation paths.
+The backend configures ray sampling and numerical traversal. The material
+model supplies the projection coefficient `g` (default `0.5`). For lower-level
+grid calls without a model configuration, `VoxelCPUBackend.g` supplies it.
+Pass the same `options` to standalone ray tracing and `lightplot` to inspect
+simulation paths.
 
 First-order illumination enters through the top and, for a finite scene, every
 upwind lateral face. Lateral ray weights include the face area projected onto
@@ -164,12 +171,15 @@ soil = SoilOpticalProperties(
     par_reflectance=0.10,
     nir_reflectance=0.30,
 )
-add_ground!(scene; optics=soil, periodic=options.toricity)
+add_ground!(scene; periodic=options.toricity)
+models = models_for(; leaf, ground=soil)
 terrain = scene.terrain
 ```
 
-The scene retains its terrain for subsequent `run_light` calls. First-order
-energy reaching soil is stored by patch in `par_terrain_energy` and `nir_terrain_energy`; it is not bottom escape.
+The scene retains its terrain geometry for subsequent `run_light` calls.
+`models` supplies both vegetation and soil properties; `LightOptions` remains
+the calculation configuration. First-order energy reaching soil is stored by
+patch in `par_terrain_energy` and `nir_terrain_energy`; it is not bottom escape.
 Height fields, triangle meshes, local-normal reflection, and aligned AMAPVox
 DTM import are documented in [Voxel Terrain And Soil](voxel_terrain.md).
 
@@ -180,14 +190,6 @@ not inherit the triangle-model fallbacks (`0.15` PAR and `0.30` NIR), because
 those values may not describe the voxelized material.
 
 ```@example voxel
-optics = VoxelOpticalProperties(
-    grid;
-    par_reflectance=0.08,
-    par_transmittance=0.07,
-    nir_reflectance=0.45,
-    nir_transmittance=0.40,
-)
-
 scattering_options = LightOptions(
     options;
     scattering=true,
@@ -196,7 +198,7 @@ scattering_options = LightOptions(
 )
 
 scattered_step = run_light(
-    scene, row; options=scattering_options, backend, optics,
+    scene, row; models, options=scattering_options, backend,
 )
 ```
 
@@ -243,7 +245,7 @@ one_order_options = LightOptions(
     scattering_stop_ratio=0.0,
 )
 one_order = run_light(
-    scene, row; options=one_order_options, backend, optics,
+    scene, row; models, options=one_order_options, backend,
 )
 
 (
@@ -279,6 +281,7 @@ with a spherical distribution.
 vox_path = joinpath(mktempdir(), "canopy.vox")
 write_voxel_grid(vox_path, grid, step.first_order)
 restored_scene = read_scene(vox_path)
+add_ground!(restored_scene; periodic=scattering_options.toricity)
 restored = restored_scene.grid
 
 rows = [
@@ -286,15 +289,7 @@ rows = [
     merge(row, (Ri_PAR_f=80.0, Ri_NIR_f=40.0, sun_azimuth=200.0)),
 ]
 series = run_light(
-    restored_scene, rows; options=scattering_options,
-    backend=backend,
-    optics=VoxelOpticalProperties(
-        restored;
-        par_reflectance=0.08,
-        par_transmittance=0.07,
-        nir_reflectance=0.45,
-        nir_transmittance=0.40,
-    ),
+    restored_scene, rows; models, options=scattering_options, backend,
 )
 
 (
@@ -412,11 +407,12 @@ options = LightOptions(
 )
 backend = VoxelCPUBackend(rays_per_voxel=16)
 soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
+models = models_for(; leaf=VoxelMaterial(g=0.5), ground=soil)
 
 period_results = map(periods) do period
     scene = read_scene(period.path)
-    add_ground!(scene; optics=soil)
-    run_light(scene, period.meteo; options, backend)
+    add_ground!(scene)
+    run_light(scene, period.meteo; models, options, backend)
 end
 results = vcat(period_results...)
 
@@ -434,8 +430,9 @@ count when finer sun and shadow directions are needed.
 The second call prepares new responses for the increased PAD. Caches are
 not carried between files, and the first period's results remain independent.
 Keep PAD constant during each call; split a meteorological interval at a
-vegetation change if necessary. If scattering is enabled, also supply the
-optical properties for each imported grid as in the preceding example.
+vegetation change if necessary. The same global model configuration can be
+reused across files; it does not retain a grid or change their PAD. If scattering is enabled, choose the
+appropriate leaf and soil coefficients in those models.
 
 ## Current Limitations
 
@@ -463,10 +460,12 @@ The primary workflow uses a scene and the shared entry points:
 ```julia
 read_scene(path; missing_pad=:error)
 VoxelScene(source; terrain=NoVoxelTerrain())
-add_ground!(scene; optics, elevation, cells, periodic=false)
+add_ground!(scene; elevation, cells, periodic=false)
 add_ground!(scene, terrain)
-update_models!(scene; mode=:point_proxy, leaf, wood, unknown, individuals)
-run_light(scene, meteo_row_or_table; options, backend, optics)
+models_for(; leaf, wood, unknown, ground, individuals, ground_materials, mode)
+update_models!(scene, models)
+check_models(scene, models)
+run_light(scene, meteo_row_or_table; models, options, backend)
 light_metric_values(scene, result_or_series, selector)
 component_values(mixed_result)
 lightplot(scene)

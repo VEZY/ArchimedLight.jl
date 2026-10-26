@@ -179,8 +179,9 @@ distinct from substantial count/ratio disagreements.
 ## Build A Point-Proxy Vegetation Model
 
 The file contains observations; optical parameters remain separate. A JSONL
-scene can be inspected immediately, but `run_light` rejects it until a model
-is configured. Explicitly select `mode=:point_proxy` to acknowledge the
+scene can be inspected immediately. Supply a separate model configuration to
+`run_light` before interpreting its point proportions. Explicitly select
+`mode=:point_proxy` to acknowledge the
 assumption that point fractions can approximate component area fractions:
 
 ```julia
@@ -199,18 +200,15 @@ wood = VoxelMaterial(
 )
 unknown = VoxelMaterial(g=0.5) # explicit black-material simplification
 
-update_models!(
-    scene;
-    mode=:point_proxy,
-    leaf=leaf,
-    wood=wood,
-    unknown=unknown,
-)
+models = models_for(; mode=:point_proxy, leaf, wood, unknown)
 ```
 
-`leaf` is required. The material constructor defaults to zero reflectance and
-transmittance, so omitted wood/unknown optics mean black material. They are
-conveniences, not species-independent physical measurements. `g` is a
+Provide a global `leaf` default, or complete leaf materials for every relevant
+individual as shown below. A plain `.vox` grid always needs a global leaf
+material because it has no individual IDs. The material constructor defaults
+to zero reflectance and transmittance, so omitted wood/unknown optics mean
+black material. These defaults are conveniences, not species-independent
+physical measurements. `g` is a
 constant effective projection coefficient in `(0,1]`. Every band requires
 non-negative reflectance and transmittance whose sum is at most one. Wood
 transmittance must be zero; wood reflectance can be nonzero.
@@ -229,13 +227,8 @@ If independent information supports a lower attributed fraction, provide
 `identified_area_fraction` as a scalar or grid-shaped array in `[0,1]`:
 
 ```julia
-update_models!(
-    scene;
-    mode=:point_proxy,
-    leaf=leaf,
-    wood=wood,
-    unknown=unknown,
-    identified_area_fraction=coverage,
+models = models_for(;
+    mode=:point_proxy, leaf, wood, unknown, identified_area_fraction=coverage,
 )
 ```
 
@@ -248,39 +241,61 @@ and scientific limits.
 
 ### Parameters Per Individual
 
-The model accepts optical/projection replacements by individual ID, independently
+The model accepts optical/projection overrides by individual ID, independently
 of species. IDs read from numeric `tree_id` values are represented by strings
 for parameter lookup:
 
 ```julia
-update_models!(
-    scene;
+models = models_for(;
+    mode=:point_proxy, leaf, wood, unknown,
+    individuals=Dict("132" => (leaf=(par_reflectance=0.10,),)),
+)
+```
+
+A partial named tuple changes only its named coefficients; omitted parameters
+inherit the global organ default. An omitted organ also keeps its default.
+An explicitly supplied `VoxelMaterial` replaces that organ's complete material;
+`VoxelMaterial(leaf; ...)` is an alternative way to construct such a replacement
+while retaining selected defaults. A partial override requires the matching
+global default. Unknown IDs, unsupported parameter names, and invalid optical
+coefficients are rejected. Defaults for unassigned vegetation remain active,
+including cells with no identified individual.
+
+For a configuration supplied entirely by individual, omit the global `leaf`
+and give each relevant individual a complete material:
+
+```julia
+models = models_for(;
     mode=:point_proxy,
-    leaf=leaf,
-    wood=wood,
-    unknown=unknown,
     individuals=Dict(
-        "132" => (leaf=VoxelMaterial(leaf; par_reflectance=0.10),),
+        "132" => (leaf=leaf, wood=wood),
+        "204" => (leaf=VoxelMaterial(leaf; par_reflectance=0.10), wood=wood),
     ),
 )
 ```
 
-An omitted organ keeps its default material. `VoxelMaterial(leaf; ...)`
-copies the default leaf material and changes only the named coefficients.
-An explicitly supplied `VoxelMaterial` replaces that organ's complete
-material: `VoxelMaterial(...)` without a base uses constructor defaults for
-omitted numeric keywords. Unknown IDs and invalid optical coefficients are
-rejected rather than silently ignored.
+This schematic example assumes those are the complete set of individuals
+containing leaf components. Materials must cover every positive component;
+missing coverage is an error. Setting an organ default to `nothing` makes that
+requirement explicit for the organ as well.
+
+Keep models separate from the imported observations. Pass them with
+`run_light(scene, meteo; models, options)`, or store them explicitly with
+`update_models!(scene, models)` for subsequent calls.
 
 ## Run With A Separate Terrain
 
 ```julia
 soil = SoilOpticalProperties(par_reflectance=0.10, nir_reflectance=0.30)
-terrain = read_ply_terrain("terrain_covering_the_voxel_grid.ply", soil)
+terrain = read_ply_terrain("terrain_covering_the_voxel_grid.ply")
 add_ground!(scene, terrain)
+models = models_for(;
+    mode=:point_proxy, leaf, wood, unknown, ground=soil,
+    individuals=Dict("132" => (leaf=(par_reflectance=0.10,),)),
+)
 options = LightOptions(toricity=false, scattering=true)
 
-result = run_light(scene, meteo_row; options)
+result = run_light(scene, meteo_row; models, options)
 ```
 
 `meteo_row` follows the same meteorological contract as the
@@ -307,7 +322,7 @@ energies by individual and organ, including unattributed vegetation.
 For APAR, select absorbed PAR of the `leaf` records. Wood and unknown-organ
 absorption belongs to the scene energy balance but is not leaf APAR.
 
-`run_light(scene, meteo; options)` returns
+`run_light(scene, meteo; models, options)` returns
 one mixed result per step and reuses the underlying voxel response and
 scattering caches across the series.
 

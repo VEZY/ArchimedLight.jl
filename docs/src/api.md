@@ -148,49 +148,82 @@ write_scene(path, scene)
 ## Voxel Inputs And Individual/Organ Mixtures
 
 Use the dedicated [Voxel Modelling](voxel_overview.md) section for workflows
-and model assumptions. The existing merged JSONL.gz format is read directly:
+and model assumptions. Read observations first, then configure materials
+separately from geometry and numerical options:
 
 ```julia
+scene = read_scene(path; missing_pad=:error)
+add_ground!(scene) # optional flat geometry, with the voxel domain extent
 leaf = VoxelMaterial(; g=0.5, par_reflectance=0.08, par_transmittance=0.07,
                      nir_reflectance=0.45, nir_transmittance=0.40)
-scene = read_scene(path; mode=:point_proxy, leaf=leaf,
-                   wood=VoxelMaterial(), unknown=VoxelMaterial(),
-                   individuals=Dict(), missing_pad=:error)
-add_ground!(scene, terrain)
-result = run_light(scene, meteo_row; options, backend=VoxelCPUBackend())
-series = run_light(scene, meteo; options, backend=VoxelCPUBackend())
+models = models_for(;
+    mode=:point_proxy, leaf,
+    wood=VoxelMaterial(), unknown=VoxelMaterial(),
+    ground=SoilOpticalProperties(par_reflectance=0.12, nir_reflectance=0.32),
+    individuals=Dict("12" => (leaf=(nir_reflectance=0.40,),)),
+)
+result = run_light(scene, meteo_row; models, options, backend=VoxelCPUBackend())
+series = run_light(scene, meteo; models, options, backend=VoxelCPUBackend())
 values = light_metric_values(scene, result, :incident_par_flux)
 totals = component_values(result; level=:individual)
 ```
 
-This is a call-shape reference; `path`, forcing, options, and terrain must be
-defined. The mode and default leaf material are explicit. Reading without a
-mode retains the observations for inspection; `run_light` then requires
-`update_models!(scene; mode=:point_proxy, leaf, wood, unknown, individuals=...)`.
-A plain `.vox` scene needs no point-proxy model. `VoxelScene(grid; terrain)`
-and `VoxelScene(vegetation; terrain)` wrap existing in-memory objects. Wood
-transmittance must be zero. `missing_pad=:zero_with_diagnostics` is the opt-in alternative
-for unknown densities. `VoxelVegetationStepResult` keeps the native result in
-`.light`, sparse `VoxelComponentLight` records in `.components`, and the
-original `.missing_pad` mask. Aggregation retains `individual_id=nothing`
-for unattributed vegetation. Energies are joules per step; component
-`plant_area` is proxy area in square metres.
+This is a call-shape reference: `path`, forcing and options must be defined,
+and individual `"12"` must occur in the JSONL input. Global leaf, wood, unknown
+and ground defaults apply unless overridden. A partial named tuple changes
+only its supplied parameters, inheriting the rest from the matching default.
+A complete `VoxelMaterial` instead replaces that individual's whole organ
+material. Global `leaf` may be omitted when every relevant individual has a
+complete leaf material; a partial override requires its global default.
+Unknown IDs, missing material coverage and invalid coefficients are rejected.
 
-See [Input Files And Individuals](voxel_inputs.md) for an executable example,
-the actual file fields, material overrides, and coverage assumptions.
+A plain `.vox` scene uses the global `leaf` material for all PAD, with no
+`mode` or individual overrides. JSONL inputs require explicit
+`mode=:point_proxy` to allocate PAD from point proportions. Wood transmittance
+must be zero. Unassigned vegetation retains its own `unknown` default and its
+`individual_id=nothing` in aggregated outputs.
+
+`update_models!(scene, models)` retains the configuration for later calls
+without a `models` keyword; supplying `models` directly does not mutate the
+scene. Use `check_models(scene, models)` or
+`check_simulation(scene, meteo; models, options, backend)` to validate it.
+`VoxelScene(grid; terrain)` and `VoxelScene(vegetation; terrain)` wrap existing
+in-memory inputs. `missing_pad=:zero_with_diagnostics` is the opt-in alternative
+for unknown densities.
+
+`VoxelVegetationStepResult` keeps the native result in `.light`, sparse
+`VoxelComponentLight` records in `.components`, and the original `.missing_pad`
+mask. Energies are joules per step; component `plant_area` is proxy area in
+square metres.
+
+See [One Tree, Two Input Files](voxel_tree_tutorial.md) for runnable defaults,
+individual-only models and soil-region overrides, and
+[Input Files And Individuals](voxel_inputs.md) for coverage assumptions.
 
 ## Voxel Terrain API
 
-The voxel workflow has an independent continuous terrain interface.
-`add_ground!(scene; optics=soil)` creates a horizontal plane covering the voxel
-domain at its minimum Z. Optional `elevation`, `cells=(nx, ny)` and `periodic`
-control its level, patch count and boundary compatibility. Use
-`NoVoxelTerrain()` for the historical open bottom, or construct a
-`PlanarTerrain`, `HeightFieldTerrain`, or `TriangulatedTerrain` with explicit
-`SoilOpticalProperties`. Attach it with `add_ground!(scene, terrain)` or pass
-`terrain=` to the lower-level grid/vegetation methods.
+`add_ground!(scene)` creates a horizontal plane covering the voxel domain at
+its minimum Z. Optional `elevation`, `cells=(nx, ny)`, `material_ids` and
+`periodic` control geometry, region identities and boundary compatibility.
+Assign soil optics through `models_for(; ground=soil, ...)` at simulation setup.
+`ground_materials=Dict(id => override)` accepts complete
+`SoilOpticalProperties` or partial named tuples inheriting the global ground
+coefficients. Without a global ground default, complete soil models must cover
+every used material ID. Tree IDs and soil material IDs are independent.
 
-AAIGrid and AMAPVox workflows use:
+Use `NoVoxelTerrain()` for an open bottom, or attach imported geometry:
+
+```julia
+terrain = read_ply_terrain(ply_path; transform=dtm_to_voxel)
+add_ground!(scene, terrain)
+```
+
+The transform defaults to identity. No CRS conversion, translation, or domain
+extension is inferred; triangulated PLY terrain is non-periodic.
+
+The lower-level `PlanarTerrain`, `HeightFieldTerrain` and
+`TriangulatedTerrain` constructors can still take explicit soil optics for
+stage calculations. Advanced AAIGrid and AMAPVox import/alignment workflows use:
 
 ```julia
 aai = read_aai_grid(dtm_path; crs="EPSG:2154")
@@ -198,15 +231,6 @@ terrain = height_field_terrain(aai, soil; transform=dtm_to_voxel)
 input = VoxelTerrainSceneInput(voxel_path, dtm_path; dtm_to_voxel=dtm_to_voxel)
 scene = read_voxel_terrain_scene(input, soil)
 ```
-
-An existing triangle PLY is converted directly to the internal terrain mesh:
-
-```julia
-terrain = read_ply_terrain(ply_path, soil; transform=dtm_to_voxel)
-```
-
-The transform defaults to identity. No CRS conversion, translation, or domain
-extension is inferred; triangulated PLY terrain is non-periodic.
 
 See [Voxel Terrain And Soil](voxel_terrain.md) for coordinate, coverage,
 periodicity, `ground_distance`, cache, and energy-balance contracts.

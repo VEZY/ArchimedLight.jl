@@ -25,11 +25,14 @@ organ allocation, and any example optical parameters are pedagogical. The
 same PAD does not imply the same absorption when organ optics differ.
 
 The files contain no optical parameters. Assign `VoxelMaterial` values to
-leaf, wood, and unknown defaults with
-`read_scene(path; mode=:point_proxy, leaf, wood, unknown)`, and
-use `individuals=Dict("1" => (leaf=..., wood=...))` for an individual override.
-Use `VoxelMaterial(leaf; nir_reflectance=0.40)` to copy a default material and
-change one coefficient while preserving all its other properties.
+leaf, wood, unknown, and ground defaults with
+`models_for(; mode=:point_proxy, leaf, wood, unknown, ground=soil)`. Use
+`individuals=Dict("1" => (leaf=(nir_reflectance=0.40,),))` for a partial
+individual override that inherits all remaining default parameters. To omit a
+global leaf default, provide complete leaf materials for every relevant
+individual; partial overrides require the matching default. Supplying
+a complete `VoxelMaterial` replaces the whole organ material. Ground material
+IDs can similarly override `ground` through `ground_materials`.
 Select `mode=:point_proxy` explicitly to interpret point fractions as PAD
 fractions. The input retains one individual even if its materials change.
 
@@ -40,9 +43,10 @@ active (use Kaimon in this development workspace). Generation uses the public
 `write_voxel_grid` writer and gzip without a timestamp or original filename.
 
 Load `.vox` and `.jsonl.gz` with `read_scene`; both return a `VoxelScene`.
-Use `add_ground!(scene; optics=soil)` for a flat ground, or
-`add_ground!(scene, read_ply_terrain(path, soil))` for the bundled MNT.
-Call `run_light(scene, row_or_table; options, backend)` and inspect the result
+Use `add_ground!(scene)` for a flat ground, or
+`add_ground!(scene, read_ply_terrain(path))` for the bundled MNT. Geometry
+creation does not assign soil optics.
+Call `run_light(scene, row_or_table; models, options, backend)` and inspect the result
 with `light_metric_values` or `lightplot`.
 
 The terrain and optical parameters are separate model inputs. The two voxel

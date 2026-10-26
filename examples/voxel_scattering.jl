@@ -33,20 +33,19 @@ base_options = LightOptions(
     radiation_timestep_minutes=5.0,
 )
 
-optics = VoxelOpticalProperties(
-    grid;
+leaf = VoxelMaterial(
+    g=0.5,
     par_reflectance=0.08,
     par_transmittance=0.07,
     nir_reflectance=0.45,
     nir_transmittance=0.40,
 )
 scene = VoxelScene(grid)
-add_ground!(scene;
-    optics=SoilOpticalProperties(par_reflectance=0.10, nir_reflectance=0.30),
-    periodic=base_options.toricity,
-)
+add_ground!(scene; periodic=base_options.toricity)
+models = models_for(; leaf,
+    ground=SoilOpticalProperties(par_reflectance=0.10, nir_reflectance=0.30))
 
-first_only = run_light(scene, row; options=base_options, backend)
+first_only = run_light(scene, row; models, options=base_options, backend)
 one_order = run_light(
     scene, row;
     options=LightOptions(
@@ -56,7 +55,7 @@ one_order = run_light(
         scattering_stop_ratio=0.0,
     ),
     backend=backend,
-    optics=optics,
+    models=models,
 )
 converged = run_light(
     scene, row;
@@ -67,7 +66,7 @@ converged = run_light(
         scattering_stop_ratio=1e-8,
     ),
     backend=backend,
-    optics=optics,
+    models=models,
 )
 
 println("First-order intercepted energy (J)")

@@ -182,7 +182,8 @@ end
     model = VoxelVegetation(input; mode=:point_proxy, leaf=VoxelMaterial(g=0.4),
         wood=VoxelMaterial(g=0.8), identified_area_fraction=assigned)
     scene = VoxelScene(model)
-    add_ground!(scene; optics=SoilOpticalProperties(par_reflectance=0.25, nir_reflectance=0.35), cells=(3, 2))
+    add_ground!(scene, PlanarTerrain(scene.grid,
+        SoilOpticalProperties(par_reflectance=0.25, nir_reflectance=0.35); cells=(3, 2)))
     geometry = makeplot(scene)
     @test geometry[:voxel_color_values][][1] == 3 # residual PAD is retained, not assigned to leaves
     fractions = makeplot(scene; color=:leaf_fraction)
@@ -270,8 +271,9 @@ end
     grid = VoxelGrid((0, 0, 0), (1, 2, 1), reshape([0.5, 1.5], 1, 2, 1))
     original_pad = copy(grid.pad)
     scene = VoxelScene(grid)
-    add_ground!(scene; optics=SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4),
-        cells=(1, 2), periodic=true)
+    add_ground!(scene, PlanarTerrain(scene.grid,
+        SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4);
+        cells=(1, 2), periodic=true))
     options = LightOptions(toricity=false, scattering=false, turtle_sectors=6, all_in_turtle=true)
     row = (step_duration=60.0, Ri_PAR_f=100.0, Ri_NIR_f=50.0,
         sun_azimuth=0.0, sun_elevation=90.0, direct_fraction=1.0)

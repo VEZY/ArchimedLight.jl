@@ -4,6 +4,10 @@
 
 ### Added
 
+- Configure voxel leaf, wood, unknown and ground defaults together with
+  `models_for`, including partial per-individual/organ and soil-material
+  overrides that inherit unspecified default parameters. Pass these models
+  separately from calculation options to `run_light`.
 - Unify voxel and triangle workflows around `read_scene`, `add_ground!`,
   `run_light`, `light_metric_values`, `component_values`, and `lightplot`.
   Add mutable `VoxelScene` containers retaining imported observations and
@@ -34,6 +38,9 @@
 
 ### Changed
 
+- Separate voxel ground geometry from material configuration: `add_ground!`
+  and PLY import can create terrain without soil optics, which are assigned
+  through the voxel model configuration.
 - Replace the unreleased public `voxelplot`/`voxelplot!` helpers with
   `lightplot`/`lightplot!`. Use `colormap` and `colorrange` instead of
   `voxel_colormap` and `voxel_colorrange`; without light results, plots show

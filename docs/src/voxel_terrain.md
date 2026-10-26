@@ -10,7 +10,10 @@ regular Cartesian VoxelGrid
 
 AbstractVoxelTerrain
   continuous soil boundary
-  patch identity, local normal, and PAR/NIR soil optics
+  patch identity, local normal, and soil material ID
+
+VoxelModels
+  vegetation and soil optical properties
 ```
 
 A zero-PAD voxel is never used as a soil marker. A ray stops at the first exact
@@ -76,7 +79,9 @@ soil = SoilOpticalProperties(
     nir_reflectance=0.40,
 )
 
-terrain = PlanarTerrain(grid, soil; elevation=0.6)
+scene = VoxelScene(grid)
+add_ground!(scene; elevation=0.6)
+terrain = scene.terrain
 options = LightOptions(toricity=false)
 path = trace_voxel_ray(
     grid,
@@ -99,11 +104,12 @@ path = trace_voxel_ray(
 When no terrain mesh is available, attach a horizontal ground to the voxel
 scene with the same `add_ground!` name used for triangle scenes. Its default extent is the full voxel x/y domain, its elevation
 is `grid.minimum[3]`, and its soil patches follow the horizontal voxel layout.
-The soil optics remain explicit.
+Ground creation assigns geometry and material IDs; optical parameters remain
+in the separate model configuration.
 
 ```@example voxel_terrain
 scene = VoxelScene(grid)
-add_ground!(scene; optics=soil)
+add_ground!(scene)
 flat_ground = scene.terrain
 (
     bounds_m=terrain_bounds(flat_ground),
@@ -111,7 +117,8 @@ flat_ground = scene.terrain
 )
 ```
 
-Subsequent `run_light(scene, meteo; options, backend)` calls use this ground.
+Subsequent `run_light(scene, meteo; models, options, backend)` calls use this
+ground, with `models_for(; leaf, ground=soil)` supplying its optical properties.
 For an imported MNT, use `add_ground!(scene, terrain)` instead.
 
 The lower-level `PlanarTerrain(input, soil)` and `PlanarTerrain(vegetation, soil)` also accept
@@ -124,8 +131,8 @@ the continuous flat surface. Use `elevation=` to set a known horizontal ground
 level and `periodic=true` when `LightOptions(toricity=true)` is required:
 
 ```julia
-add_ground!(scene; optics=soil, cells=(64, 64))
-add_ground!(scene; optics=soil, elevation=0.0, periodic=true)
+add_ground!(scene; cells=(64, 64))
+add_ground!(scene; elevation=0.0, periodic=true)
 ```
 
 !!! note "A flat-ground assumption"
@@ -134,8 +141,18 @@ add_ground!(scene; optics=soil, elevation=0.0, periodic=true)
     must remain inside the voxel domain and below its top; vegetation below
     that level is underground. Imported terrain must share the voxel coordinates.
 
-A more general finite plane can choose its horizontal bounds and patch count
-directly.
+Per-patch `material_ids` identify soil regions. Set their material parameters
+with `models_for(; leaf, ground=soil, ground_materials=...)`. A partial override
+inherits omitted coefficients from `ground`; complete soil models can instead
+cover every used ID without a global ground default. The
+[tree tutorial](voxel_tree_tutorial.md#Different-Soil-Regions) gives runnable
+examples of both forms.
+
+### Low-Level Terrain Objects
+
+For explicit stage calculations and ray diagnostics, the lower-level
+constructors can also bind soil optics directly. A finite plane can choose
+its horizontal bounds and patch count:
 
 ```julia
 PlanarTerrain(
@@ -201,7 +218,7 @@ Load an existing triangulated digital terrain model directly into the same
 internal `TriangulatedTerrain` representation:
 
 ```julia
-terrain = read_ply_terrain("bare_earth.ply", soil)
+terrain = read_ply_terrain("bare_earth.ply")
 ```
 
 The reader supports PLY 1.0 ASCII and native-endian binary files. Vertex
@@ -210,17 +227,16 @@ exactly three distinct valid vertex indices in `vertex_indices` or
 `vertex_index`; polygons require deliberate triangulation before import.
 The reader converts zero-based PLY face indices to Julia indices. It preserves
 the declared coordinate precision and ignores colour and stored normals for
-physics: soil reflectance comes from `soil`, and surface normals are computed
-from the triangles. Invalid/non-finite coordinates, degenerate or vertical
-facets, and unsupported binary byte order fail explicitly.
+physics: soil reflectance comes from the model configuration, and surface
+normals are computed from the triangles. Invalid/non-finite coordinates,
+degenerate or vertical facets, and unsupported binary byte order fail explicitly.
 
 An explicit `TerrainCoordinateTransform` can map the mesh into the voxel
 reference frame:
 
 ```julia
 terrain = read_ply_terrain(
-    "bare_earth.ply",
-    soil;
+    "bare_earth.ply";
     transform=dtm_to_voxel,
 )
 ```
@@ -311,8 +327,8 @@ meteo_row = (
     Ri_PAR_f=100.0, Ri_NIR_f=50.0,
     sun_azimuth=180.0, sun_elevation=35.0, direct_fraction=0.5,
 )
-leaf_optics = VoxelOpticalProperties(
-    grid;
+leaf = VoxelMaterial(
+    g=0.5,
     par_reflectance=0.08, par_transmittance=0.07,
     nir_reflectance=0.45, nir_transmittance=0.40,
 )
@@ -320,8 +336,9 @@ options = LightOptions(
     toricity=false, scattering=true, turtle_sectors=6, all_in_turtle=true,
 )
 scene = VoxelScene(grid; terrain)
+models = models_for(; leaf, ground=soil)
 result = run_light(
-    scene, meteo_row; options, backend=VoxelCPUBackend(rays_per_voxel=4), optics=leaf_optics,
+    scene, meteo_row; models, options, backend=VoxelCPUBackend(rays_per_voxel=4),
 )
 nothing # hide
 ```
@@ -393,6 +410,9 @@ headers. Centre headers are converted to corners by subtracting half a cell.
 AAIGrid data rows are north-to-south; the reader reverses them so Julia indices
 increase with y. `NODATA` and non-finite elevations are rejected anywhere in
 the domain.
+
+The following lower-level AAIGrid helpers construct terrain with bound soil
+materials for explicit import/alignment workflows.
 
 AAIGrid elevations are cell-centre samples. `height_field_terrain(aai, soil)`
 keeps every sample as an exact terrain vertex and adds the raster boundary with

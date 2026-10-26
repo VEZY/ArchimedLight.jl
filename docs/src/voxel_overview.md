@@ -31,7 +31,7 @@ respective light-interception workflows:
 | Gaps | Explicit empty space between surfaces | Statistical gaps within the cell / empty voxels |
 | Individuals and organs | Scene component identity | Components inferred from point proportions |
 | Terrain | Scene soil geometry | Independent planar, height-field, or triangle surface |
-| Workflow | `run_light(sim, meteo)` | `run_light(scene, meteo; options, backend)` |
+| Workflow | `run_light(sim, meteo)` | `run_light(scene, meteo; models, options, backend)` |
 | Shared inputs | Meteorology, sky sectors, spectral forcing, `LightOptions` | Same |
 
 ## Follow The Workflow
@@ -57,7 +57,10 @@ meteo + sky ------+------ independent terrain + soil optics
 ```
 
 The input file describes observations. Optical coefficients and the
-`point_proxy` attribution assumption belong to the model configuration.
+`point_proxy` attribution assumption belong to the model configuration. Use
+`models_for` for global leaf, wood, unknown and ground defaults, with optional
+partial overrides by individual/organ or soil material ID. Ground creation and
+terrain import provide geometry; `LightOptions` provides calculation settings.
 
 ## Find A Topic
 

@@ -7,8 +7,7 @@ the tree and separates leaf and wood point fractions. We use those fractions
 to assign optical properties and report leaf absorption separately from wood
 absorption.
 
-The files are bundled in `examples/voxel_tree`: no Belinga download is needed.
-The terrain PLY uses the same surface as the
+The files are bundled in `examples/voxel_tree`. The terrain PLY uses the same surface as the
 [interactive tree view](voxel_terrain.md).
 
 Download the [PAD-only `.vox`](assets/voxel-tree/tree.vox),
@@ -48,12 +47,11 @@ display(plain_scene)
 display(mixed_scene)
 ```
 
-The plain file already contains a **voxelized density field**, not a raw point
-cloud. It supports generic-material interception without retaining the tree
-or organ identities used to estimate PAD. It cannot reconstruct those
-identities afterward. The JSONL reader retains the same density field plus
-the exported individual and organ proportions. Reading it permits inspection;
-`run_light` requires an explicit point-proxy model, configured below.
+The plain file already contains a **voxelized density field** that would be the result of a voxelization process.
+ It supports generic-material interception without any knowledge of which voxel contains the tree
+or even the partitionning between wood and leaf.
+
+The JSONL reader retains the same density field plus the exported individual and organ proportions.
 
 At the REPL, entering either returned object displays a compact scene summary.
 Use `display(mixed_scene)` inside a script to request that summary explicitly;
@@ -63,16 +61,16 @@ Read the independent terrain in the same coordinate frame:
 
 ```@example voxel_tree
 soil = SoilOpticalProperties(par_reflectance=0.12, nir_reflectance=0.32)
-terrain = read_ply_terrain(joinpath(example_dir, "terrain.ply"), soil)
+terrain = read_ply_terrain(joinpath(example_dir, "terrain.ply"))
 add_ground!(plain_scene, terrain)
 add_ground!(mixed_scene, terrain)
 (triangles=terrain_patch_count(terrain), bounds_m=terrain_bounds(terrain))
 ```
 
-The PLY triangles are converted to the native terrain representation. Soil
-reflection remains separate from vegetation optics in both workflows.
+The PLY reader imports geometry and patch identities. Soil reflectance is
+assigned later in the same model configuration as the vegetation materials.
 
-Without a terrain file, use `add_ground!(plain_scene; optics=soil)` instead.
+Without a terrain file, use `add_ground!(plain_scene)` instead.
 This creates flat ground at the voxel domain bottom, covering its full x/y
 extent. See [flat ground without a terrain file](voxel_terrain.md#Flat-Ground-Without-A-Terrain-File)
 for patch resolution and elevation options; the default is a geometric
@@ -87,13 +85,10 @@ must then intercept the same amount of radiation in every voxel.
 ```@example voxel_tree
 black = VoxelMaterial(g=0.5)
 baseline_scene = VoxelScene(input; terrain)
-update_models!(
-    baseline_scene;
-    mode=:point_proxy,
-    leaf=black,
-    wood=black,
-    unknown=black,
+baseline_models = models_for(;
+    mode=:point_proxy, leaf=black, wood=black, unknown=black, ground=soil,
 )
+plain_baseline_models = models_for(; leaf=black, ground=soil)
 row = (
     step_duration=3600.0,
     Ri_PAR_f=100.0,
@@ -107,8 +102,10 @@ first_options = LightOptions(
 )
 backend = VoxelCPUBackend(g=0.5, rays_per_voxel=4)
 
-plain_first = run_light(plain_scene, row; options=first_options, backend)
-mixed_first = run_light(baseline_scene, row; options=first_options, backend)
+plain_first = run_light(plain_scene, row; models=plain_baseline_models,
+    options=first_options, backend)
+mixed_first = run_light(baseline_scene, row; models=baseline_models,
+    options=first_options, backend)
 @assert isapprox(
     plain_first.first_order.par_energy,
     mixed_first.light.first_order.par_energy;
@@ -127,9 +124,9 @@ from the declared material assumptions and energy allocation.
 
 ## Assign Leaf, Wood, And Individual Properties
 
-Define default materials once. `leaf`, `wood`, and `unknown` apply to all
-individuals unless an individual override supplies that organ's material.
-Wood must have zero transmittance, but can reflect some intercepted light.
+Define default materials once. `leaf`, `wood`, and `unknown` apply to every
+individual, and `ground` applies to every soil patch unless an override is
+supplied. Wood must have zero transmittance, but can reflect intercepted light.
 
 ```@example voxel_tree
 leaf = VoxelMaterial(
@@ -144,39 +141,78 @@ wood = VoxelMaterial(
 )
 unknown = VoxelMaterial(g=0.5)
 
-update_models!(
-    mixed_scene;
-    mode=:point_proxy,
-    leaf=leaf,
-    wood=wood,
-    unknown=unknown,
-)
-display(mixed_scene)
+models = models_for(; mode=:point_proxy, leaf, wood, unknown, ground=soil)
+@assert isempty(check_models(mixed_scene, models).errors)
+models
 ```
 
 The example has one individual: numeric `tree_id=1` in the file becomes
 string ID `"1"` for model lookup. To modify only this tree's leaf NIR
-reflectance, copy the default material and replace the desired coefficient:
+reflectance, supply a partial override:
 
 ```@example voxel_tree
-tree_leaf = VoxelMaterial(leaf; nir_reflectance=0.40)
-individual_scene = VoxelScene(input; terrain)
-update_models!(
-    individual_scene;
-    mode=:point_proxy,
-    leaf=leaf,
-    wood=wood,
-    unknown=unknown,
-    individuals=Dict("1" => (leaf=tree_leaf,)),
+individual_models = models_for(;
+    mode=:point_proxy, leaf, wood, unknown, ground=soil,
+    individuals=Dict("1" => (leaf=(nir_reflectance=0.40,),)),
 )
 ```
 
-`VoxelMaterial(leaf; ...)` preserves the other default leaf coefficients.
-Supplying `VoxelMaterial(...)` without a base creates a complete new material
-using the constructor defaults for omitted keywords. Individual overrides
-replace whole organ materials; omitted organs keep their defaults. Use the
-same pattern for several IDs in a multi-tree file. An ID absent from the
-input is rejected to catch parameter lookup mistakes.
+A partial named tuple inherits every omitted parameter from the global organ
+material. Here tree `"1"` keeps the default leaf PAR coefficients, NIR
+transmittance and `g`; its wood and unknown material also stay unchanged. A
+complete `VoxelMaterial` instead replaces that organ's whole material. Use the
+same pattern for several IDs in a multi-tree file. IDs absent from the input
+are rejected, and a plain `.vox` file cannot use individual overrides because
+it contains no individual identities.
+
+You can also provide materials entirely by individual, without a global leaf
+default. Each positive leaf component then needs a complete material for its
+individual:
+
+```@example voxel_tree
+individual_only_models = models_for(;
+    mode=:point_proxy, ground=soil,
+    individuals=Dict("1" => (leaf=leaf, wood=wood)),
+)
+isempty(check_models(mixed_scene, individual_only_models).errors)
+```
+
+A partial named tuple needs the corresponding global organ default to inherit
+from; it cannot fill missing coefficients on its own. Wood and unknown defaults
+remain black unless supplied or explicitly set to `nothing`. Missing materials
+for positive components produce a validation error.
+
+### Different Soil Regions
+
+Ground material IDs belong to geometry. Assign their optical parameters in
+`models_for`, using the global `ground` as the fallback:
+
+```@example voxel_tree
+regional_scene = VoxelScene(grid)
+add_ground!(regional_scene; cells=(2, 1), material_ids=reshape([1, 2], 2, 1))
+regional_models = models_for(;
+    leaf, ground=soil,
+    ground_materials=Dict(2 => (par_reflectance=0.20,)),
+)
+isempty(check_models(regional_scene, regional_models).errors)
+```
+
+Region 1 uses `soil`; region 2 changes only PAR reflectance and inherits the
+global soil NIR reflectance. A complete `SoilOpticalProperties` can replace a
+region's whole material. These are soil material IDs, independently of tree IDs.
+To omit a global ground default, provide a complete soil model for every
+material ID used by the terrain:
+
+```@example voxel_tree
+regional_only_models = models_for(;
+    leaf,
+    ground_materials=Dict(
+        1 => soil,
+        2 => SoilOpticalProperties(par_reflectance=0.20, nir_reflectance=0.32),
+    ),
+)
+isempty(check_models(regional_scene, regional_only_models).errors)
+```
 
 The example changes only band optics. To change extinction, set a component's
 `VoxelMaterial.g`; this changes the projection hypothesis as well as the
@@ -196,17 +232,9 @@ options = LightOptions(
     scattering_max_iter=30,
     scattering_stop_ratio=1e-8,
 )
-generic_optics = VoxelOpticalProperties(
-    grid;
-    par_reflectance=leaf.par_reflectance,
-    par_transmittance=leaf.par_transmittance,
-    nir_reflectance=leaf.nir_reflectance,
-    nir_transmittance=leaf.nir_transmittance,
-)
-plain_result = run_light(
-    plain_scene, row; options, backend, optics=generic_optics,
-)
-mixed_result = run_light(individual_scene, row; options, backend)
+plain_models = models_for(; leaf, ground=soil)
+plain_result = run_light(plain_scene, row; models=plain_models, options, backend)
+mixed_result = run_light(mixed_scene, row; models=individual_models, options, backend)
 components = component_values(mixed_result; level=:individual)
 components
 ```
@@ -215,7 +243,7 @@ The individual override above changes only leaf NIR reflectance. We can check
 its effect against the default materials without changing the source file:
 
 ```@example voxel_tree
-default_result = run_light(mixed_scene, row; options, backend)
+default_result = run_light(mixed_scene, row; models, options, backend)
 (
     default_NIR_absorbed_J=sum(default_result.light.scattering.nir.absorbed_energy),
     modified_NIR_absorbed_J=sum(mixed_result.light.scattering.nir.absorbed_energy),

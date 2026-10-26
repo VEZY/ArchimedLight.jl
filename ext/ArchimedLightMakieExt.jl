@@ -273,9 +273,37 @@ _voxelplot_vegetation(::Union{VoxelGrid,VoxelPointInput}) = nothing
 _voxelplot_vegetation(source::VoxelVegetation) = source
 _voxelplot_vegetation(source::VoxelScene) = source.vegetation
 
-# Keep the source used for flux normalization explicit in the reactive payload.
-_voxelplot_parts(payload::NamedTuple{(:source,:terrain,:data)}) =
-    (payload.source, payload.terrain, payload.data)
+# Keep the original PAD source explicit; the prepared mixture is only a
+# material/composition context, never the equivalent transport-density field.
+_voxelplot_parts(payload::NamedTuple) = (payload.source, payload.terrain, payload.data)
+_voxelplot_prepared_model(payload) = hasproperty(payload, :vegetation) ? payload.vegetation : nothing
+
+_voxelplot_prepare_vegetation(source) = _voxelplot_vegetation(source)
+function _voxelplot_prepare_vegetation(source::VoxelScene)
+    source.models === nothing && return source.vegetation
+    source.input === nothing && return nothing
+    models = source.models
+    models.mode === :point_proxy || throw(ArgumentError(
+        "JSONL composition models require mode=:point_proxy explicitly"))
+    return VoxelVegetation(source.input; mode=models.mode, leaf=models.leaf,
+        wood=models.wood, unknown=models.unknown, individuals=models.individuals,
+        identified_area_fraction=models.identified_area_fraction)
+end
+
+function _voxelplot_effective_terrain(terrain, data, timestep)
+    data === nothing && return terrain
+    retained = ArchimedLight._voxel_step_light(_voxelplot_step(data, timestep)).terrain
+    # Older positional result constructors have no retained terrain. Keep their
+    # explicitly supplied geometry/material context available for compatibility.
+    return retained isa NoVoxelTerrain ? terrain : retained
+end
+
+function _voxelplot_prepare_terrain(source, terrain, data)
+    data === nothing && source isa VoxelScene && source.models !== nothing || return terrain
+    models = source.models
+    models.ground === nothing && isempty(models.ground_materials) && return terrain
+    return ArchimedLight._resolve_voxel_ground(terrain, models)
+end
 
 function _voxelplot_grid_terrain(payload)
     source, terrain, _ = _voxelplot_parts(payload)
@@ -305,10 +333,9 @@ function _voxelplot_step(data, timestep)
     return data
 end
 
-function _voxelplot_composition(source)
+function _voxelplot_composition(source, model=_voxelplot_prepare_vegetation(source))
     grid = _voxelplot_grid(source)
-    model = _voxelplot_vegetation(source)
-    input = _voxelplot_input(source)
+    input = model === nothing ? _voxelplot_input(source) : model.input
     input === nothing && throw(ArgumentError("composition requires individual/organ point input"))
     parts = ntuple(_ -> zeros(Float64, size(grid)), 3)
     for v in eachindex(grid.pad)
@@ -331,12 +358,21 @@ function _voxelplot_composition(source)
     return parts
 end
 
-function _voxelplot_values(source, data, color, timestep)
+function _voxelplot_values(source, data, color, timestep, prepared=nothing)
     grid = _voxelplot_grid(source)
     selector = _voxelplot_selector(source, data, color)
     selector === :pad && return Float64.(grid.pad)
     if selector in (:composition, :leaf_fraction, :wood_fraction, :unknown_fraction)
-        parts = _voxelplot_composition(source)
+        model = prepared
+        step = data === nothing ? nothing : _voxelplot_step(data, timestep)
+        if step isa VoxelVegetationStepResult
+            context = source isa VoxelPointInput ? source.grid : source
+            ArchimedLight._check_voxel_result_source(context, step)
+            model = step.vegetation
+        elseif model === nothing
+            model = _voxelplot_prepare_vegetation(source)
+        end
+        parts = _voxelplot_composition(source, model)
         if selector === :composition
             # One colour describes the dominant component of the existing cell;
             # no artificial leaf/wood subgeometry is introduced.
@@ -384,6 +420,7 @@ end
 function _voxelplot_terrain_metric(terrain, step, color)
     selector = ArchimedLight._normalize_light_selector(color)
     light = ArchimedLight._voxel_step_light(step)
+    terrain = light.terrain isa NoVoxelTerrain ? terrain : light.terrain
     if selector === :absorbed_shortwave_flux
         return _voxelplot_terrain_metric(terrain, step, :absorbed_par_flux) .+
                _voxelplot_terrain_metric(terrain, step, :absorbed_nir_flux)
@@ -422,7 +459,8 @@ function _voxelplot_terrain_colors(payload, color, timestep, reflectance)
         patch_values = _voxelplot_terrain_metric(terrain, _voxelplot_step(data, timestep), selector)
         return Float32.(terrain isa PlanarTerrain ? repeat(patch_values; inner=2) : patch_values)
     end
-    return reflectance
+    data === nothing && return reflectance
+    return _voxelplot_reflectance_values(_voxelplot_effective_terrain(terrain, data, timestep))
 end
 
 function _voxelplot_colorrange(payload, color, colorrange, threshold)
@@ -435,7 +473,7 @@ function _voxelplot_colorrange(payload, color, colorrange, threshold)
     extrema = nothing
     steps = data isa AbstractVector ? data : (data,)
     for (i, _) in enumerate(steps)
-        values = _voxelplot_values(source, data, selector, i)
+        values = _voxelplot_values(source, data, selector, i, _voxelplot_prepared_model(payload))
         visible = (values[v] for v in eachindex(values) if grid.pad[v] > threshold)
         extrema = ArchimedLight._merge_extrema(extrema, ArchimedLight._finite_extrema(visible))
         if data !== nothing && !(selector in _VOXEL_GEOMETRY_COLORS)
@@ -474,6 +512,20 @@ _empty_voxel_terrain_mesh() = GeometryBasics.Mesh(
     GeometryBasics.TriangleFace{Int}[],
 )
 
+# A palette coordinate for unconfigured geometry is a rendering choice only:
+# it does not create soil optics or enter any light-transport calculation.
+function _voxelplot_visual_reflectance(terrain, patch)
+    isempty(ArchimedLight._terrain_materials(terrain)) && return 0.5f0
+    return Float32(soil_optics(terrain, terrain_patch_material(terrain, patch)).par_reflectance)
+end
+
+_voxelplot_reflectance_values(::NoVoxelTerrain) = Float32[]
+function _voxelplot_reflectance_values(terrain::AbstractVoxelTerrain)
+    values = Float32[_voxelplot_visual_reflectance(terrain, patch)
+        for patch in 1:terrain_patch_count(terrain)]
+    return terrain isa PlanarTerrain ? repeat(values; inner=2) : values
+end
+
 function _planar_terrain_mesh(terrain::PlanarTerrain)
     nx, ny = terrain.cells
     dx = (terrain.x_bounds[2] - terrain.x_bounds[1]) / nx
@@ -494,7 +546,7 @@ function _planar_terrain_mesh(terrain::PlanarTerrain)
         push!(faces, GeometryBasics.TriangleFace{Int}(base + 1, base + 2, base + 3))
         push!(faces, GeometryBasics.TriangleFace{Int}(base + 1, base + 3, base + 4))
         patch_id = (j - 1) * nx + i
-        value = soil_optics(terrain, terrain_patch_material(terrain, patch_id)).par_reflectance
+        value = _voxelplot_visual_reflectance(terrain, patch_id)
         push!(reflectance, Float32(value), Float32(value))
     end
     return GeometryBasics.Mesh(points, faces), reflectance
@@ -507,9 +559,7 @@ function _triangulated_terrain_mesh(terrain::TriangulatedTerrain)
     faces = GeometryBasics.TriangleFace{Int}[
         GeometryBasics.TriangleFace{Int}(face[1], face[2], face[3]) for face in terrain.triangles
     ]
-    reflectance = Float32[
-        soil_optics(terrain, material_id).par_reflectance for material_id in terrain.material_ids
-    ]
+    reflectance = _voxelplot_reflectance_values(terrain)
     return GeometryBasics.Mesh(points, faces), reflectance
 end
 
@@ -653,7 +703,7 @@ function Makie.plot!(plot::VoxelPlot)
 
     map!(plot.attributes, [:payload, :color, :timestep], :voxel_color_values) do payload, color, timestep
         source, _, data = _voxelplot_parts(payload)
-        _voxelplot_values(source, data, color, Int(timestep))
+        _voxelplot_values(source, data, color, Int(timestep), _voxelplot_prepared_model(payload))
     end
     map!(plot.attributes, [:payload, :voxel_color_values, :pad_threshold], [:voxel_pad_full, :voxel_pad_front]) do payload, values, threshold
         current_grid, _ = _voxelplot_grid_terrain(payload)
@@ -944,12 +994,15 @@ _voxelplot_default_terrain(source::VoxelScene) = source.terrain
 
 function _voxelplot_payload(source, terrain, data, kwargs)
     terrain isa AbstractVoxelTerrain || throw(ArgumentError("lightplot terrain must be an AbstractVoxelTerrain"))
-    payload = (; source, terrain, data)
+    vegetation = data === nothing ? _voxelplot_prepare_vegetation(source) : nothing
+    terrain = _voxelplot_prepare_terrain(source, terrain, data)
+    payload = vegetation === nothing ? (; source, terrain, data) :
+        (; source, terrain, data, vegetation)
     attributes = _voxelplot_kwargs(kwargs)
     # Validate the current values without disconnecting reactive Makie attributes.
     current = _validate_voxelplot_kwargs(_voxelplot_grid(source), map(Makie.to_value, attributes))
     color, timestep = get(current, :color, nothing), Int(get(current, :timestep, 1))
-    _voxelplot_values(source, data, color, timestep)
+    _voxelplot_values(source, data, color, timestep, vegetation)
     selector = _voxelplot_selector(source, data, color)
     if data !== nothing && !(selector in _VOXEL_GEOMETRY_COLORS)
         _voxelplot_terrain_metric(terrain, _voxelplot_step(data, timestep), selector)
