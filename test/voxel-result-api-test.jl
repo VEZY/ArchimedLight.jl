@@ -109,7 +109,7 @@ end
     @test light_metric_values(result, :Ra_PAR_q) === result.scattering.par.absorbed_energy
     @test light_metric_values(result, :Ra_PAR_f) === result.scattering.par.absorbed_flux
     @test_throws ArgumentError light_metric_values(result, :Ri_PAR_f)
-    @test_throws ArgumentError light_metric_values(result, :Ra_PAR_0_q)
+    @test light_metric_values(result, :Ra_PAR_0_q) ≈ 0.8 .* result.first_order.par_energy
     area = grid.pad .* ArchimedLight.voxel_volume(grid)
     @test ArchimedLight._voxel_metric_values(grid, result, :Ri_PAR_f) ≈
         result.scattering.par.total_intercepted_energy ./ (60 .* area)
@@ -124,7 +124,7 @@ end
     mixed = run_voxel_light_step(vegetation, row, options; backend)
     @test light_metric_values(mixed, :Ri_PAR_f) ≈
         mixed.light.scattering.par.total_intercepted_energy ./ (60 .* area)
-    @test_throws ArgumentError light_metric_values(mixed, :Ra_PAR_0_q)
+    @test light_metric_values(mixed, :Ra_PAR_0_q) ≈ 0.8 .* mixed.light.first_order.par_energy
     initial_absorbed = ArchimedLight._voxel_metric_values(vegetation, mixed, :Ra_PAR_0_q)
     @test initial_absorbed ≈ 0.8 .* mixed.light.first_order.par_energy
     @test ArchimedLight._voxel_metric_values(VoxelScene(vegetation), mixed, :Ri_PAR_f) ≈

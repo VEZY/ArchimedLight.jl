@@ -35,8 +35,10 @@ end
     directory = joinpath(pkgdir(ArchimedLight), "examples", "voxel_tree")
     grid = read_voxel_grid(joinpath(directory, "tree.vox"))
     input = read_voxel_point_input(joinpath(directory, "tree.jsonl.gz"))
-    terrain = read_ply_terrain(joinpath(directory, "terrain.ply"),
-        SoilOpticalProperties(par_reflectance=0.12, nir_reflectance=0.32))
+    soil = SoilOpticalProperties(par_reflectance=0.12, nir_reflectance=0.32)
+    terrain = read_ply_terrain(joinpath(directory, "terrain.ply"), soil)
+    scene = VoxelScene(input)
+    add_ground!(scene, read_ply_terrain(joinpath(directory, "terrain.ply")))
     row = (step_duration=3600.0, Ri_PAR_f=100.0, Ri_NIR_f=50.0,
            sun_azimuth=180.0, sun_elevation=35.0, direct_fraction=0.5)
     backend = VoxelCPUBackend(rays_per_voxel=4)
@@ -45,8 +47,8 @@ end
     leaf = VoxelMaterial(par_reflectance=0.08, par_transmittance=0.07,
                          nir_reflectance=0.45, nir_transmittance=0.4)
     wood = VoxelMaterial(par_reflectance=0.1, nir_reflectance=0.3)
-    model = VoxelVegetation(input; mode=:point_proxy, leaf, wood)
-    mixed = run_voxel_light_step(model, row, options; backend, terrain)
+    models = models_for(; mode=:point_proxy, leaf, wood, ground=soil)
+    mixed = run_light(scene, row; models, options, backend)
     generic = run_voxel_light_step(grid, row, options; backend, terrain,
         optics=VoxelOpticalProperties(grid; par_reflectance=leaf.par_reflectance,
             par_transmittance=leaf.par_transmittance, nir_reflectance=leaf.nir_reflectance,
@@ -66,12 +68,15 @@ end
     end
     # Changing only tree 1's leaf NIR reflectance retains its PAR coefficients,
     # leaves the source observations untouched, and changes NIR absorption.
-    changed = VoxelVegetation(input; mode=:point_proxy, leaf, wood,
-        individuals=Dict("1" => (leaf=VoxelMaterial(leaf; nir_reflectance=0.4),)))
-    updated = run_voxel_light_step(changed, row, options; backend, terrain)
+    changed = models_for(; mode=:point_proxy, leaf, wood, ground=soil,
+        individuals=Dict("1" => (leaf=(nir_reflectance=0.4,),)))
+    updated = run_light(scene, row; models=changed, options, backend)
     @test updated.light.first_order.par_energy == mixed.light.first_order.par_energy
     @test updated.light.scattering.par.absorbed_energy == mixed.light.scattering.par.absorbed_energy
     @test !isapprox(sum(updated.light.scattering.nir.absorbed_energy),
                    sum(mixed.light.scattering.nir.absorbed_energy); rtol=1e-6)
     @test input.grid.pad == grid.pad
+    @test scene.models === nothing
+    @test scene.vegetation === nothing
+    @test isempty(ArchimedLight._terrain_materials(scene.terrain))
 end

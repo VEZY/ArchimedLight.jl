@@ -40,6 +40,7 @@ include("voxel/interception.jl")
 include("voxel/scattering.jl")
 include("voxel/pipeline.jl")
 include("voxel/vegetation.jl")
+include("voxel/models.jl")
 include("voxel/display.jl")
 include("voxel/scene.jl")
 include("attach.jl")
@@ -76,6 +77,7 @@ export VoxelGrid
 export VoxelScene
 export add_ground!
 export VoxelPointInput, VoxelPointComponent
+export VoxelModels
 export VoxelMaterial, VoxelVegetation, VoxelVegetationStepResult, VoxelComponentLight
 export AbstractVoxelTerrain
 export NoVoxelTerrain

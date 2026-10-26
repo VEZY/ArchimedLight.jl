@@ -79,27 +79,57 @@ function _check_voxel_wood(material::VoxelMaterial)
     return material
 end
 
+_check_voxel_wood(::Nothing) = nothing
+
+function _voxel_material_override(base, value)
+    value isa VoxelMaterial && return value
+    value === nothing && base === nothing && return nothing
+    value isa NamedTuple || throw(ArgumentError(
+        "individual organ overrides must be VoxelMaterial or named tuples of parameters"))
+    all(key -> key in fieldnames(VoxelMaterial), keys(value)) || throw(ArgumentError(
+        "unknown voxel material parameter in individual override"))
+    base === nothing && throw(ArgumentError(
+        "partial organ overrides require a global default; otherwise supply a full VoxelMaterial"))
+    all(x -> x isa Real, values(value)) ||
+        throw(ArgumentError("voxel optical parameters must be numbers"))
+    VoxelMaterial(base; value...)
+end
+
+function _resolve_voxel_individual_materials(defaults, individuals, available=nothing)
+    resolved = Dict{String,NamedTuple}()
+    for (id, materials) in pairs(individuals)
+        id isa AbstractString || throw(ArgumentError("individual IDs must be strings"))
+        available === nothing || String(id) in available || throw(ArgumentError(
+            "material override must reference an existing string individual ID: $id"))
+        materials isa NamedTuple || throw(ArgumentError("individual materials must be a named tuple"))
+        all(key -> key in (:leaf, :wood, :unknown), keys(materials)) ||
+            throw(ArgumentError("individual materials may only override leaf, wood, unknown"))
+        parts = map((:leaf, :wood, :unknown)) do organ
+            _voxel_material_override(defaults[organ], get(materials, organ, defaults[organ]))
+        end
+        model = NamedTuple{(:leaf, :wood, :unknown)}(parts)
+        _check_voxel_wood(model.wood)
+        resolved[String(id)] = model
+    end
+    resolved
+end
+
+function _required_voxel_material(value, id, organ)
+    value isa VoxelMaterial && return value
+    throw(ArgumentError(
+        "no $organ material for individual $(repr(id)); supply an organ default or a full individual material"))
+end
+
 function VoxelVegetation(input::VoxelPointInput; mode::Symbol,
-                         leaf::VoxelMaterial, wood::VoxelMaterial=VoxelMaterial(),
-                         unknown::VoxelMaterial=VoxelMaterial(), individuals=Dict(),
+                         leaf::Union{Nothing,VoxelMaterial}=nothing,
+                         wood::Union{Nothing,VoxelMaterial}=VoxelMaterial(),
+                         unknown::Union{Nothing,VoxelMaterial}=VoxelMaterial(), individuals=Dict(),
                          identified_area_fraction=nothing)
     mode == :point_proxy || throw(ArgumentError("only mode=:point_proxy is supported"))
     _check_voxel_wood(wood)
     defaults = (leaf=leaf, wood=wood, unknown=unknown)
     available = Set(component.individual_id for component in input.components)
-    overrides = Dict{String,NamedTuple}()
-    for (id, materials) in pairs(individuals)
-        id isa AbstractString && String(id) in available ||
-            throw(ArgumentError("material override must reference an existing string individual ID: $id"))
-        materials isa NamedTuple || throw(ArgumentError("individual materials must be a named tuple"))
-        all(key -> key in (:leaf, :wood, :unknown), keys(materials)) ||
-            throw(ArgumentError("individual materials may only override leaf, wood, unknown"))
-        all(value -> value isa VoxelMaterial, values(materials)) ||
-            throw(ArgumentError("individual material overrides must be VoxelMaterial values"))
-        resolved = merge(defaults, materials)
-        _check_voxel_wood(resolved.wood)
-        overrides[String(id)] = resolved
-    end
+    overrides = _resolve_voxel_individual_materials(defaults, individuals, available)
     fraction = identified_area_fraction
     fraction === nothing || fraction isa Real ||
         (fraction isa AbstractArray && size(fraction) == size(input.grid)) ||
@@ -125,14 +155,17 @@ function VoxelVegetation(input::VoxelPointInput; mode::Symbol,
                 point = input.components[c]
                 part = density * gamma * (point.count / n)
                 part == 0 && continue
-                material = get(overrides, point.individual_id, defaults)[point.organ]
+                material = _required_voxel_material(
+                    get(overrides, point.individual_id, defaults)[point.organ],
+                    point.individual_id, point.organ)
                 push!(components, VoxelVegetationComponent(
                     point.individual_id, point.organ, part, material,
                 ))
             end
             remainder = density * (1 - gamma)
             if remainder > 0
-                push!(components, VoxelVegetationComponent(nothing, :unknown, remainder, unknown))
+                push!(components, VoxelVegetationComponent(nothing, :unknown, remainder,
+                    _required_voxel_material(unknown, nothing, :unknown)))
             end
         end
         push!(offsets, length(components) + 1)
@@ -200,6 +233,7 @@ struct VoxelVegetationStepResult
     light::VoxelLightStepResult{Float64}
     components::Vector{VoxelComponentLight}
     missing_pad::BitArray{3}
+    vegetation::VoxelVegetation
 end
 
 function _voxel_vegetation_result(model::VoxelVegetation, light::VoxelLightStepResult)
@@ -248,7 +282,7 @@ function _voxel_vegetation_result(model::VoxelVegetation, light::VoxelLightStepR
                 share * total_par, share * total_nir, absorbed_par, absorbed_nir))
         end
     end
-    return VoxelVegetationStepResult(light, components, copy(model.input.missing_pad))
+    return VoxelVegetationStepResult(light, components, copy(model.input.missing_pad), model)
 end
 
 """

@@ -547,7 +547,12 @@ julia> (collect(keys(models)), models["coffee"].types["Leaf"].interception.model
 (["coffee", "soil"], "Translucent")
 ```
 """
-function models_for(group_specs::Pair...)
+function models_for(group_specs::Pair...; kwargs...)
+    if !isempty(kwargs)
+        isempty(group_specs) || throw(ArgumentError(
+            "use group/type pairs for triangle models or keyword defaults for voxel models, not both"))
+        return VoxelModels(; kwargs...)
+    end
     groups = OrderedDict{String,GroupModel}()
     for pair in group_specs
         group = String(pair.first)

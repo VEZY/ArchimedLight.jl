@@ -174,6 +174,8 @@ function _run_voxel_light_step_resolved(
         first_order,
         scattering,
         Float64(resolved.duration_seconds),
+        terrain,
+        optics,
     )
 end
 

@@ -32,7 +32,8 @@ function _check_voxel_result_source(source::_VoxelMetricSource, step::_VoxelLigh
             "The source PAD differs from the result's retained component areas. " *
             "Use the voxel source that produced this result.",
         ))
-        vegetation = _voxel_result_vegetation(source)
+        vegetation = source isa VoxelScene && source.input === step.vegetation.input ?
+            step.vegetation : _voxel_result_vegetation(source)
         if vegetation !== nothing
             length(vegetation.components) == length(step.components) || throw(ArgumentError(
                 "The vegetation components differ from those retained in the result.",
@@ -82,11 +83,7 @@ function _voxel_initial_absorbed_energy(source, step::VoxelVegetationStepResult,
     if light.scattering === nothing
         return _voxel_component_energy(step, Symbol(:absorbed_, band, :_energy))
     end
-    vegetation = source === nothing ? nothing : _voxel_result_vegetation(source)
-    vegetation === nothing && throw(ArgumentError(
-        "Initial absorbed energy requires the VoxelVegetation materials when scattering " *
-        "is enabled. Pass the original vegetation or VoxelScene as the first argument.",
-    ))
+    vegetation = step.vegetation
     energy = zeros(Float64, size(light.first_order.par_energy))
     for (component, retained) in zip(vegetation.components, step.components)
         material = component.material
@@ -112,18 +109,19 @@ function _voxel_energy_metric(source, step::_VoxelLightResult, metric::Symbol)
     elseif metric in (:absorbed_par_initial_energy, :absorbed_nir_initial_energy)
         step isa VoxelVegetationStepResult &&
             return _voxel_initial_absorbed_energy(source, step, band)
-        throw(ArgumentError(
-            "Initial absorbed energy is not retained in raw voxel results. " *
-            "Use a VoxelVegetation result with its original source materials.",
-        ))
+        light.optics === nothing && throw(ArgumentError(
+            "Initial absorbed energy requires retained material optics; supply models or optics to the run"))
+        return voxel_absorptance(light.optics, band) .*
+            getproperty(light.first_order, Symbol(band, :_energy))
     elseif metric in (:absorbed_par_energy, :absorbed_nir_energy)
         step isa VoxelVegetationStepResult &&
             return _voxel_component_energy(step, Symbol(:absorbed_, band, :_energy))
-        light.scattering === nothing && throw(ArgumentError(
-            "Absorbed energy is unavailable for a raw voxel result without scattering: " *
-            "the result does not retain its material absorptance. Use VoxelVegetation " *
-            "for material-resolved absorption.",
-        ))
+        if light.scattering === nothing
+            light.optics === nothing && throw(ArgumentError(
+                "Absorbed energy requires retained material optics; supply models or optics to the run"))
+            return voxel_absorptance(light.optics, band) .*
+                getproperty(light.first_order, Symbol(band, :_energy))
+        end
         return getproperty(light.scattering, band).absorbed_energy
     end
     throw(ArgumentError("The voxel result does not provide metric `$metric`."))
@@ -163,6 +161,12 @@ function _voxel_metric_array(source, step::_VoxelLightResult, selector::Symbol)
     elseif metric in (:absorbed_par_flux, :absorbed_nir_flux) && light.scattering !== nothing
         return getproperty(light.scattering,
             metric == :absorbed_par_flux ? :par : :nir).absorbed_flux
+    elseif step isa VoxelLightStepResult && light.optics !== nothing &&
+        (metric in (:absorbed_par_initial_flux, :absorbed_nir_initial_flux) ||
+         (light.scattering === nothing && metric in (:absorbed_par_flux, :absorbed_nir_flux)))
+        band = metric in (:absorbed_par_initial_flux, :absorbed_par_flux) ? :par : :nir
+        return voxel_absorptance(light.optics, band) .*
+            getproperty(light.first_order, Symbol(band, :_flux))
     end
     if endswith(string(metric), "_flux")
         energy_metric = Symbol(chop(string(metric); tail=5), "_energy")
@@ -180,8 +184,9 @@ Read a grid-aligned light metric, accepting the same selector names and
 ARCHIMED aliases as triangle results. Energy is J per voxel per step; flux
 is W m⁻² of equivalent plant area. For raw results, total incident flux with
 scattering requires the original source via the three-argument query. Raw
-results without scattering do not retain absorption. A mixed-vegetation
-result retains component areas and material-resolved total absorption.
+results retain absorption when models or explicit optics were supplied.
+A mixed-vegetation result also retains component areas and its resolved
+materials, so subsequent model changes do not alter earlier diagnostics.
 """
 light_metric_values(step::_VoxelLightResult, selector::Symbol) =
     _voxel_metric_array(nothing, step, selector)
