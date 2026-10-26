@@ -18,12 +18,12 @@ and budgets remain in joules. Repeated scattering interactions count again in
 interception; the energy balance uses absorbed, escaped and unresolved energy.
 
 The paired `tree.jsonl.gz` supplies leaf/wood point proportions. Native
-`VoxelVegetation(...; mode=:point_proxy)` converts these into effective voxel
+`models_for(; mode=:point_proxy, ...)` resolves these into effective voxel
 optics, with illustrative leaf PAR reflectance 0.08 and transmittance 0.07.
 Wood and unassigned vegetation are black. All components retain `g=0.5`, so
 the disabled-scattering first-order interception matches the earlier PAD-only
 demo within floating-point tolerance. These are teaching parameters, not
-calibrated species properties or LiDAR-derived surface fractions.
+calibrated species properties or lidar-derived surface fractions.
 
 Native Julia reads the example files, validates the geometry and builds the
 terrain's BVH. The browser receives those geometric arrays and facet normals,
@@ -115,12 +115,29 @@ voxel optics. The tree and terrain are synthetic teaching geometry.
 Use Kaimon-controlled Julia processes throughout. The compiler and WGL export
 reuse the pinned environment in `docs/live_wheat` (Julia 1.13.1, WasmTarget
 0.5.3); no second compiler project is maintained here. Instantiate that project
-through Kaimon if needed. Native verification also needs BenchmarkTools from
-the repository's benchmark environment.
+through Kaimon if needed. If an existing ignored manifest predates changes to
+the repository dependencies, resolve it in that Kaimon session before loading
+ArchimedLight. Native verification also needs BenchmarkTools from the
+repository's benchmark environment.
+
+With the example materials described above and a supplied weather row, the
+native oracle separates geometry and materials:
+
+```julia
+example_directory = joinpath(pkgdir(ArchimedLight), "examples", "voxel_tree")
+scene = read_scene(joinpath(example_directory, "tree.jsonl.gz"))
+add_ground!(scene, read_ply_terrain(joinpath(example_directory, "terrain.ply")))
+models = models_for(; mode=:point_proxy, leaf, wood, unknown=wood, ground=soil)
+step = run_light(scene, weather_row; models, options, backend)
+```
+
+The example materials above remain fixed in this prototype; the controls change
+weather, sampling and scattering rather than model parameters.
 
 The build sequence is:
 
-1. Generate independent references through public `run_voxel_light_step`.
+1. Generate independent references through public `read_scene`, geometry-only
+   `read_ply_terrain`/`add_ground!`, `models_for` and `run_light(; models)`.
 2. Compile the shared numerical entry points to `build/scattering/voxel.wasm`.
 3. Execute the emitted module and compare every output to the fresh references.
 4. Export the Bonito/WGLMakie viewer only after that comparison passes.

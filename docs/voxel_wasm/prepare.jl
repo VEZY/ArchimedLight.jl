@@ -64,16 +64,21 @@ end
 
 function load_fixture()
     grid = read_voxel_grid(joinpath(EXAMPLE, "tree.vox"))
-    input = read_voxel_point_input(joinpath(EXAMPLE, "tree.jsonl.gz"))
+    scene = read_scene(joinpath(EXAMPLE, "tree.jsonl.gz"))
+    input = scene.input
     @assert grid.minimum == input.grid.minimum && grid.maximum == input.grid.maximum
     @assert grid.pad == input.grid.pad && !any(input.missing_pad)
     leaf = VoxelMaterial(g=0.5, par_reflectance=0.08, par_transmittance=0.07)
     wood = VoxelMaterial(g=0.5)
-    vegetation = VoxelVegetation(input; mode=:point_proxy, leaf, wood, unknown=wood)
-    grid, optics = ArchimedLight._voxel_vegetation_transport(vegetation, VoxelCPUBackend(g=0.5))
-    @assert isapprox(grid.pad, input.grid.pad; atol=0, rtol=1e-12)
     soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
-    terrain = read_ply_terrain(joinpath(EXAMPLE, "terrain.ply"), soil)
+    models = models_for(; mode=:point_proxy, leaf, wood, unknown=wood, ground=soil)
+    add_ground!(scene, read_ply_terrain(joinpath(EXAMPLE, "terrain.ply")))
+    # Resolve once for packing the existing transport ABI. The public oracle
+    # below independently routes the same scene/models through run_light.
+    resolved = ArchimedLight._resolve_voxel_scene_models(scene, models, VoxelCPUBackend(g=0.5))
+    vegetation, terrain = resolved.source, resolved.terrain
+    grid, optics = ArchimedLight._voxel_vegetation_transport(vegetation, resolved.backend)
+    @assert isapprox(grid.pad, input.grid.pad; atol=0, rtol=1e-12)
     bvh = terrain.bvh
     bvh_leaves = Int32[]
     for leaf in bvh.leaves
@@ -94,7 +99,7 @@ function load_fixture()
             for value in (bvh.left[node], bvh.right[node])],
         bvh_leaves=bvh_leaves,
     )
-    return (; grid, input, vegetation, optics, terrain, buffers)
+    return (; scene, models, grid, input, vegetation, optics, terrain, buffers)
 end
 
 # Match the typed ABI decoder. Terrain normals/BVH are prepared natively;
@@ -182,6 +187,7 @@ function provenance()
         relpath(WEATHER_INPUT, ROOT), relpath(WEATHER_PROVENANCE, ROOT)])
     environment_files = String[]
     for directory in (ROOT, joinpath(ROOT, "test"), joinpath(ROOT, "benchmark"),
+                      joinpath(ROOT, "benchmark", "plantsimengine"),
                       joinpath(ROOT, "docs", "live_wheat"))
         for file in readdir(directory)
             (file == "Project.toml" || startswith(file, "Manifest") && endswith(file, ".toml")) || continue
@@ -225,8 +231,8 @@ function prepare(; path::AbstractString=REFERENCE, samples::Integer=31,
         weather = make_native_weather(meteorology, sectors)
         # The oracle reads the bundled files through the public readers. It
         # therefore also checks the flat-buffer scene reconstruction below.
-        public_solve = () -> run_voxel_light_step(fixture.vegetation, configuration.row,
-            configuration.options; backend=data.backend, terrain=fixture.terrain).light
+        public_solve = () -> run_light(fixture.scene, configuration.row;
+            models=fixture.models, options=configuration.options, backend=data.backend).light
         step = public_solve()
         par = par_result(step, fixture.grid, fixture.optics, fixture.terrain)
         directions = Float64[-Float64(s.direction[a]) for s in step.turtle.sectors for a in 1:3]
