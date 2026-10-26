@@ -1,9 +1,7 @@
 # From Triangles To Voxels
 
-Use the same sequence for both representations: read a scene, describe its
-materials, call `run_light`, then inspect or plot the result. The transport
-models differ: triangles resolve surfaces, while voxels represent plant area
-and gaps statistically inside each cell.
+The voxel workflow is similar to the triangle workflow: read a scene, describe its
+materials, call `run_light`, then inspect or plot the result.
 
 ## Keep The Same Forcing And Options
 
@@ -125,8 +123,7 @@ whose quantity was not calculated raises an error rather than inventing values.
 Load a Makie backend to use `lightplot`. Without a result, a plain grid shows
 PAD and a JSONL/vegetation scene shows the dominant organ in each voxel.
 For numerical proportions, select `color=:leaf_fraction`, `:wood_fraction` or
-`:unknown_fraction`; `color=:pad` always selects density. These are voxel
-mixtures, not reconstructed organ surfaces. With a result, choose the same
+`:unknown_fraction`; `color=:pad` always selects density. With a result, choose the same
 light selector used for triangles. Voxel colours remain constant inside each
 cell; the triangle `interpolate` option does not apply. Keep the original scene
 with its results: querying or plotting old results against changed PAD,
