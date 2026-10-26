@@ -263,7 +263,7 @@ function _triangulated_raster_terrain(
 end
 
 """
-    height_field_terrain(aai, optics; transform=TerrainCoordinateTransform(), ...)
+    height_field_terrain(aai, optics=nothing; transform=TerrainCoordinateTransform(), ...)
 
 Convert AAIGrid cell-centre elevations to a continuous triangulated surface.
 Every centre remains an exact vertex; raster edges use constant nearest-cell
@@ -277,12 +277,12 @@ transforms retain a `HeightFieldTerrain`; rotations/shears produce an explicit
 """
 function height_field_terrain(
     aai::AAIGrid,
-    optics::SoilOpticalProperties;
+    optics::Union{Nothing,SoilOpticalProperties}=nothing;
     transform::TerrainCoordinateTransform=TerrainCoordinateTransform(),
     periodic::Bool=false,
     material_id::Integer=1,
     material_ids=nothing,
-    materials=Dict(Int(material_id) => optics),
+    materials=nothing,
 )
     x, y, elevation = _cell_centres_to_vertex_grid(
         aai.elevation,
@@ -371,7 +371,7 @@ end
 function terrain_from_ground_distance(
     grid::VoxelGrid,
     ground_distance::AbstractArray{<:Real,3},
-    optics::SoilOpticalProperties;
+    optics::Union{Nothing,SoilOpticalProperties}=nothing;
     dtm_used_by_amapvox::Bool,
     periodic::Bool=false,
     atol::Real=1e-6,
@@ -453,7 +453,7 @@ end
 
 function read_voxel_terrain_scene(
     input::VoxelTerrainSceneInput,
-    optics::SoilOpticalProperties;
+    optics::Union{Nothing,SoilOpticalProperties}=nothing;
     periodic::Bool=false,
     validate_alignment::Bool=true,
     alignment_atol::Real=1e-6,
