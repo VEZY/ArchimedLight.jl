@@ -418,6 +418,27 @@ _terrain_materials(terrain::PlanarTerrain) = terrain.materials
 _terrain_materials(terrain::TriangulatedTerrain) = terrain.materials
 _terrain_materials(terrain::HeightFieldTerrain) = terrain.mesh.materials
 
+# Real surface areas (m²), shared by output queries and plotting. Soil fluxes
+# use these areas rather than the horizontal footprint of a sloped facet.
+_terrain_patch_areas(::NoVoxelTerrain) = Float64[]
+function _terrain_patch_areas(terrain::PlanarTerrain)
+    width = Float64(terrain.x_bounds[2]) - Float64(terrain.x_bounds[1])
+    height = Float64(terrain.y_bounds[2]) - Float64(terrain.y_bounds[1])
+    fill(width * height / prod(terrain.cells), terrain_patch_count(terrain))
+end
+
+_terrain_patch_areas(terrain::HeightFieldTerrain) = _terrain_patch_areas(terrain.mesh)
+function _terrain_patch_areas(terrain::TriangulatedTerrain)
+    map(terrain.triangles) do triangle
+        a, b, c = (terrain.vertices[index] for index in triangle)
+        u = ntuple(axis -> Float64(b[axis]) - Float64(a[axis]), 3)
+        v = ntuple(axis -> Float64(c[axis]) - Float64(a[axis]), 3)
+        sqrt((u[2] * v[3] - u[3] * v[2])^2 +
+             (u[3] * v[1] - u[1] * v[3])^2 +
+             (u[1] * v[2] - u[2] * v[1])^2) / 2
+    end
+end
+
 function _with_terrain_materials(terrain::PlanarTerrain, materials::_SoilMaterialTable)
     table = _soil_material_table(materials)
     _validate_material_ids(terrain.material_ids, table, terrain_patch_count(terrain))

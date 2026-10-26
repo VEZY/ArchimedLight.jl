@@ -319,8 +319,13 @@ absorbed energy for PAR and NIR. The missing-PAD mask remains available as
 `result.missing_pad`. Use `component_values(result; level=:individual)` to aggregate
 energies by individual and organ, including unattributed vegetation.
 
-For APAR, select absorbed PAR of the `leaf` records. Wood and unknown-organ
-absorption belongs to the scene energy balance but is not leaf APAR.
+For leaf APAR, query `light_metric_values(scene, result, :Ra_PAR_q;
+individual_id="132", organ=:leaf, reduce=sum)`. Omit the individual filter for
+all leaves, or use `individual_id=(nothing,)` for unattributed vegetation.
+Wood and unknown-organ absorption belongs to the scene energy balance but is
+not leaf APAR. `domain=:ground` queries the soil separately. The
+[tree tutorial](voxel_tree_tutorial.md#Query-Vegetation-And-Ground) demonstrates
+both domains with bundled inputs.
 
 `run_light(scene, meteo; models, options)` returns
 one mixed result per step and reuses the underlying voxel response and

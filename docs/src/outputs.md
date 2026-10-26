@@ -163,6 +163,34 @@ Summing per-component energy (`*_energy` or historical `*_q`) gives an energy
 total. Flux values are normalized independently by each component's area, so
 their direct sum generally is not a meaningful scene-scale flux.
 
+### Voxel Individuals, Organs And Ground
+
+Voxel results use the same selectors, `reduce`, `by` and `sink` conventions.
+The default `domain=:vegetation` returns one row per voxel. Filtering by
+`individual_id` or `organ`, or grouping by either, selects the retained
+individual/organ contributions instead:
+
+```julia
+leaf_apar = light_metric_values(voxel_scene, voxel_result, :Ra_PAR_q;
+    individual_id="12", organ=:leaf, reduce=sum)
+individual_budget = light_metric_values(voxel_scene, voxel_series, :Ra_PAR_q;
+    reduce=sum, by=(:individual_id, :organ))
+soil_budget = light_metric_values(voxel_scene, voxel_series, :Ra_PAR_q;
+    domain=:ground, reduce=sum, by=:material_id)
+```
+
+These call shapes require an attributed JSONL result for individual/organ
+queries. IDs retain their input strings; `individual_id=(nothing,)` selects
+unattributed vegetation. Spatial voxel filters can further restrict these rows.
+Ground rows instead expose `patch_id`, `material_id` and `surface_area`.
+
+Triangle queries include every geometric component, including ground. A voxel
+query includes only its selected domain: add vegetation and ground **energy**
+totals explicitly when a whole-scene absorption total is needed. Ground fluxes
+use soil surface area, while vegetation fluxes use plant area. The
+[tree tutorial](voxel_tree_tutorial.md#Query-Vegetation-And-Ground) gives a
+complete runnable example.
+
 ### Dynamic scenes
 
 Each result retains a lightweight node metadata snapshot by default. All steps

@@ -4,6 +4,9 @@
 
 ### Added
 
+- Query attributed voxel light by individual and organ, and ground light by
+  patch or soil material, using shared selectors, reducers, grouping and table
+  sinks. Include initial absorbed PAR/NIR energy and flux in component tables.
 - Configure voxel leaf, wood, unknown and ground defaults together with
   `models_for`, including partial per-individual/organ and soil-material
   overrides that inherit unspecified default parameters. Pass these models

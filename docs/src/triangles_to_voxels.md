@@ -126,7 +126,13 @@ Both representations accept selectors such as `:incident_par_flux`,
 `:incident_par_energy` and, when available, `:absorbed_par_flux`. Energy is in
 joules per step; flux is in watts per square metre of participating plant area.
 A source-aware series query returns a table containing all timesteps in
-`step_number`; plotting selects one with `timestep=`.
+`step_number`; plotting selects one with `timestep=`. Both representations use
+`reduce=sum`, `by=...` and `sink=...` to reduce, group and materialize queries.
+For attributed voxels, select `individual_id="1"` and `organ=:leaf` in place
+of triangle object and organ metadata. These retain the input identity and
+component allocation. Ground is ordinary geometry in the triangle query;
+voxel queries select it with `domain=:ground`. The default voxel domain is
+vegetation, so sum both absorbed-energy totals for a whole-scene budget.
 
 For triangles that area comes from the component surfaces; for voxels it is
 `PAD × voxel volume`, including the declared component allocation. A selector
@@ -137,9 +143,10 @@ PAD and a JSONL/vegetation scene shows the dominant organ in each voxel.
 For numerical proportions, select `color=:leaf_fraction`, `:wood_fraction` or
 `:unknown_fraction`; `color=:pad` always selects density. With a result, choose the same
 light selector used for triangles. Voxel colours remain constant inside each
-cell; the triangle `interpolate` option does not apply. Keep the original scene
-with its results: querying or plotting old results against changed PAD,
-materials or terrain is not supported.
+cell; the triangle `interpolate` option does not apply. Keep the original PAD
+grid and terrain geometry with the results: edits to those arrays are not
+snapshotted. Resolved vegetation and soil materials are retained, so a later
+run with different models does not reinterpret previous results.
 
 ```@example representations
 using CairoMakie

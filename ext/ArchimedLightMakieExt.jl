@@ -396,64 +396,11 @@ function _voxelplot_masked_values(grid, values, threshold, cutaway)
     return result
 end
 
-function _voxelplot_patch_areas(terrain::PlanarTerrain)
-    area = (terrain.x_bounds[2] - terrain.x_bounds[1]) *
-           (terrain.y_bounds[2] - terrain.y_bounds[1]) / prod(terrain.cells)
-    return fill(area, terrain_patch_count(terrain))
-end
-_voxelplot_patch_areas(::NoVoxelTerrain) = Float64[]
-_voxelplot_patch_areas(terrain::HeightFieldTerrain) = _voxelplot_patch_areas(terrain.mesh)
-function _voxelplot_patch_areas(terrain::TriangulatedTerrain)
-    return map(terrain.triangles) do triangle
-        a, b, c = terrain.vertices[collect(triangle)]
-        u = ntuple(i -> b[i] - a[i], 3)
-        v = ntuple(i -> c[i] - a[i], 3)
-        sqrt((u[2] * v[3] - u[3] * v[2])^2 +
-             (u[3] * v[1] - u[1] * v[3])^2 +
-             (u[1] * v[2] - u[2] * v[1])^2) / 2
-    end
-end
-
-function _voxelplot_terrain_metric(terrain, step, color)
-    selector = ArchimedLight._normalize_light_selector(color)
-    light = ArchimedLight._voxel_step_light(step)
-    terrain = light.terrain isa NoVoxelTerrain ? terrain : light.terrain
-    if selector === :absorbed_shortwave_flux
-        return _voxelplot_terrain_metric(terrain, step, :absorbed_par_flux) .+
-               _voxelplot_terrain_metric(terrain, step, :absorbed_nir_flux)
-    end
-    words = split(String(selector), '_')
-    length(words) in (3, 4) || throw(ArgumentError("unsupported terrain metric `$selector`"))
-    quantity, band = Symbol(words[1]), Symbol(words[2])
-    initial = :initial in Symbol.(words)
-    band in (:par, :nir) || throw(ArgumentError("unsupported terrain metric `$selector`"))
-    absorbed = quantity === :absorbed
-    if light.scattering !== nothing && !initial
-        scatter = getproperty(light.scattering, band)
-        energy = absorbed ? scatter.terrain_absorbed_energy : scatter.terrain_incident_energy
-    else
-        energy = copy(getproperty(light.first_order, Symbol(band, :_terrain_energy)))
-        if absorbed
-            for patch in eachindex(energy)
-                material = soil_optics(terrain, terrain_patch_material(terrain, patch))
-                energy[patch] *= 1 - getproperty(material, Symbol(band, :_reflectance))
-            end
-        end
-    end
-    length(energy) == terrain_patch_count(terrain) || throw(DimensionMismatch(
-        "terrain patch count differs from simulation result",
-    ))
-    endswith(String(selector), "_flux") || return energy
-    areas = _voxelplot_patch_areas(terrain)
-    light.duration_seconds == 0 && return zeros(Float64, length(areas))
-    return energy ./ (areas .* light.duration_seconds)
-end
-
 function _voxelplot_terrain_colors(payload, color, timestep, reflectance)
     source, terrain, data = _voxelplot_parts(payload)
     selector = _voxelplot_selector(source, data, color)
     if data !== nothing && !(selector in _VOXEL_GEOMETRY_COLORS)
-        patch_values = _voxelplot_terrain_metric(terrain, _voxelplot_step(data, timestep), selector)
+        patch_values = ArchimedLight._voxel_ground_metric(_voxelplot_step(data, timestep), selector)
         return Float32.(terrain isa PlanarTerrain ? repeat(patch_values; inner=2) : patch_values)
     end
     data === nothing && return reflectance
@@ -474,7 +421,7 @@ function _voxelplot_colorrange(payload, color, colorrange, threshold)
         visible = (values[v] for v in eachindex(values) if grid.pad[v] > threshold)
         extrema = ArchimedLight._merge_extrema(extrema, ArchimedLight._finite_extrema(visible))
         if data !== nothing && !(selector in _VOXEL_GEOMETRY_COLORS)
-            terrain_values = _voxelplot_terrain_metric(terrain, _voxelplot_step(data, i), selector)
+            terrain_values = ArchimedLight._voxel_ground_metric(_voxelplot_step(data, i), selector)
             extrema = ArchimedLight._merge_extrema(extrema, ArchimedLight._finite_extrema(terrain_values))
         end
     end
@@ -1002,7 +949,7 @@ function _voxelplot_payload(source, terrain, data, kwargs)
     _voxelplot_values(source, data, color, timestep, vegetation)
     selector = _voxelplot_selector(source, data, color)
     if data !== nothing && !(selector in _VOXEL_GEOMETRY_COLORS)
-        _voxelplot_terrain_metric(terrain, _voxelplot_step(data, timestep), selector)
+        ArchimedLight._voxel_ground_metric(_voxelplot_step(data, timestep), selector)
     end
     return payload, attributes
 end

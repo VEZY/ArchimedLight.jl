@@ -526,6 +526,40 @@ queried with their original live scene. A custom `where` predicate also needs a
 live MTG, so dynamic-series queries should capture its scalar inputs through
 `node_metadata_attributes` and use `attributes=(...)` instead.
 
+### Voxel Metric Queries
+
+```julia
+light_metric_values(
+    scene_or_grid, result_or_series, selector;
+    domain=:vegetation,
+    individual_id=nothing, organ=nothing,
+    voxel_i=nothing, voxel_j=nothing, voxel_k=nothing,
+    patch_id=nothing, material_id=nothing,
+    where=nothing, reduce=nothing, by=nothing, sink=nothing,
+)
+```
+
+The default vegetation table contains `step_number`, `voxel_i`, `voxel_j`,
+`voxel_k` and `value`. Individual/organ filters, or `by` containing
+`:individual_id`, `:organ` or `:plant_area`, select attributed component rows
+with those extra identity and proxy-area columns. This requires a mixed JSONL
+result. Individual IDs are strings; `individual_id=(nothing,)` selects
+unattributed vegetation. Organ values are `:leaf`, `:wood` and `:unknown`.
+
+`domain=:ground` returns `step_number`, `patch_id`, `material_id`,
+`surface_area` and `value`. Ground queries accept patch/material filters;
+vegetation queries accept voxel/individual/organ filters. Combining filters
+from these two domains is an error. `where` receives a row of the selected
+table: use an individual/organ filter or grouping before accessing those
+component columns in a predicate. The reducer, grouping and sink rules above
+also apply to these tables.
+
+Ground flux is normalized by stored patch surface area (the full facet area,
+not its horizontal projection or its clipped overlap with the voxel domain)
+and step duration. Vegetation flux uses plant area. The default voxel query
+therefore excludes ground: obtain both energy totals explicitly for a
+whole-scene budget.
+
 ## Visualization Helpers
 
 These helpers expose direct mesh coloring and the Makie package extension. This
@@ -570,9 +604,10 @@ composition for a point-input/vegetation scene. Supplying a voxel light result
 uses the same selector vocabulary as triangle plots, with fixed series colour
 ranges. Absorption selectors require an output that retains absorption;
 first-order scalar-grid results alone cannot reconstruct material absorption.
-Use the original source and terrain for voxel queries and plots; voxel results
-do not snapshot subsequent edits to the mutable scene. Voxel values remain
-constant within each cell, so the triangle `interpolate` option does not apply.
+Use the original PAD grid and terrain geometry for voxel queries and plots;
+results retain their resolved materials, but do not snapshot edits to geometry
+arrays. Voxel values remain constant within each cell, so the triangle
+`interpolate` option does not apply.
 
 For geometric diagnostics, `lightplot(grid, terrain; ...)` renders the terrain mesh
 and optional ray paths computed by [`trace_voxel_ray`](@ref). Supplying a

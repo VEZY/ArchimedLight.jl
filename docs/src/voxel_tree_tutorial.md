@@ -259,17 +259,50 @@ absorption belongs to the energy balance but is not photosynthetic absorption.
 The generic result reports absorbed energy for its homogeneous participating
 material, without distinguishing those organs.
 
+### Query Vegetation And Ground
+
+Use the shared metric query to select a tree and organ, or group all
+individual/organ contributions. These queries preserve the allocation inside
+shared voxels rather than attributing the whole voxel to every tree:
+
 ```@example voxel_tree
-leaf_apar = sum(components.Ra_PAR_q[components.organ .== :leaf])
-wood_absorbed = sum(components.Ra_PAR_q[components.organ .== :wood])
+leaf_apar = light_metric_values(mixed_scene, mixed_result, :Ra_PAR_q;
+    individual_id="1", organ=:leaf, reduce=sum)
+wood_absorbed = light_metric_values(mixed_scene, mixed_result, :Ra_PAR_q;
+    individual_id="1", organ=:wood, reduce=sum)
+individual_budget = light_metric_values(mixed_scene, mixed_result, :Ra_PAR_q;
+    reduce=sum, by=(:individual_id, :organ))
+individual_budget
+```
+
+The default domain is vegetation. Query ground patches explicitly to obtain
+their incident or absorbed light with the same selectors:
+
+```@example voxel_tree
+soil_budget = light_metric_values(mixed_scene, mixed_result, :Ra_PAR_q;
+    domain=:ground, reduce=sum, by=:material_id)
+vegetation_absorbed = light_metric_values(mixed_scene, mixed_result, :Ra_PAR_q;
+    reduce=sum)
 (
-    generic_material_PAR_absorbed_J=sum(plain_result.scattering.par.absorbed_energy),
     tree_leaf_APAR_J=leaf_apar,
     tree_wood_PAR_absorbed_J=wood_absorbed,
-    plain_scattering_converged=plain_result.scattering.par.converged,
-    mixed_scattering_converged=mixed_result.light.scattering.par.converged,
+    initial_vegetation_PAR_absorbed_J=sum(components.Ra_PAR_0_q),
+    whole_scene_PAR_absorbed_J=vegetation_absorbed + sum(soil_budget.value),
 )
 ```
+
+Ground rows contain `patch_id`, `material_id` and `surface_area`; use
+`patch_id=` or `material_id=` to restrict them. Ground fluxes are normalized by
+the stored patch surface area and step duration. Vegetation fluxes use proxy
+plant area. Sum energies for a scene budget; use
+`component_values(mixed_result; level=:individual)` for area-weighted
+individual/organ fluxes. The wide component table includes initial and total
+PAR/NIR incident and absorbed energy/flux, plus `Ra_SW_f` and `aPPFD`.
+
+IDs are strings from the input. `individual_id=(nothing,)` selects unattributed
+vegetation; this synthetic example has none. Organs are `:leaf`, `:wood` or
+`:unknown`. Voxel coordinate filters and a `where` row predicate can further
+restrict a vegetation selection.
 
 ### View The Tree And Its Absorption Budget
 

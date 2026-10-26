@@ -74,7 +74,7 @@ end
     @test_throws ArgumentError component_values(result; par_energy_to_photon=NaN)
     @test_throws ArgumentError component_values(result; level=:source_owner)
     @test any(isnothing, table.individual_id)
-    @test !hasproperty(table, :Ra_PAR_0_q)
+    @test table.Ra_PAR_0_q ≈ table.Ra_PAR_q
 
     grouped = component_values(result; level=:individual)
     legacy = voxel_component_values(result)

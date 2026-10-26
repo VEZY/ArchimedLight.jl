@@ -253,7 +253,7 @@ end
     extension = Base.get_extension(ArchimedLight, :ArchimedLightMakieExt)
     slope = TriangulatedTerrain([(0., 0., 0.), (1., 0., 0.), (1., 1., 0.5), (0., 1., 0.5)],
         [(1, 2, 3), (1, 3, 4)])
-    @test extension._voxelplot_patch_areas(slope) ≈ fill(sqrt(1.25) / 2, 2)
+    @test ArchimedLight._terrain_patch_areas(slope) ≈ fill(sqrt(1.25) / 2, 2)
 
     mktempdir() do directory
         for (name, figure) in (("composition", figures[5]), ("light_series", figures[end]))

@@ -233,6 +233,16 @@ escapes, ground absorption, and `unresolved_energy` for the terminal budget.
 The arrays called `absorbed_flux` use plant area as the reference and have units
 `W m⁻² plant`.
 
+### Query A Result
+
+`light_metric_values(scene, scattered_step, :Ra_PAR_q; reduce=sum)` gives
+vegetation absorption. Add `domain=:ground` to query the soil instead; ground
+rows expose patch and material IDs. Both domains support the same selectors,
+grouping and table sinks as triangle queries. Individual/organ filters apply
+to attributed JSONL results. See the
+[tree tutorial](voxel_tree_tutorial.md#Query-Vegetation-And-Ground) for runnable
+selection and whole-scene energy examples.
+
 ### One Order Versus Convergence
 
 One iteration is useful as a diagnostic, but it is not automatically a
