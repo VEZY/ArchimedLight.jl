@@ -8,8 +8,12 @@ into this representation. The scene owns no persistent transport cache:
 [`run_light`](@ref) shares directional responses within each series call.
 
 `scene.grid` is the original PAD field; `scene.input` retains point attribution
-when available, and `scene.vegetation` holds explicitly configured materials.
-Use [`add_ground!`](@ref) for a flat ground or to attach an imported terrain.
+when available. `scene.models` optionally retains a [`VoxelModels`](@ref)
+configuration set with [`update_models!`](@ref); a `models` keyword supplied
+to [`run_light`](@ref) overrides it for that call without mutating the scene.
+The lower-level `scene.vegetation` can hold an explicitly resolved mixture.
+Use [`add_ground!`](@ref) for ground geometry; supply its soil optics through
+the model configuration.
 """
 mutable struct VoxelScene
     grid::VoxelGrid{Float64}

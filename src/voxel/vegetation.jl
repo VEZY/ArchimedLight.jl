@@ -48,7 +48,7 @@ struct VoxelVegetationComponent
 end
 
 """
-    VoxelVegetation(input; mode, leaf, wood=VoxelMaterial(), unknown=VoxelMaterial(),
+    VoxelVegetation(input; mode, leaf=nothing, wood=VoxelMaterial(), unknown=VoxelMaterial(),
                     individuals=Dict(), identified_area_fraction=nothing)
 
 Resolve a [`VoxelPointInput`](@ref) into sparse individual/organ components.
@@ -58,9 +58,13 @@ By default all PAD is assigned to identified individuals where points exist;
 otherwise it remains `(nothing, :unknown)`. An explicit scalar or grid-aligned
 `identified_area_fraction` retains the remaining PAD as unattributed vegetation.
 
-`leaf` is required. `individuals` maps string IDs to named tuples containing
-optional `leaf`, `wood`, and `unknown` material overrides. Wood must have zero
-transmittance. Unattributed vegetation uses the default `unknown` material.
+`individuals` maps string IDs to named tuples containing optional `leaf`,
+`wood`, and `unknown` overrides. Complete VoxelMaterial values replace that
+organ's material; parameter named tuples inherit the organ default. A missing
+default is allowed when every participating individual/organ supplies a full
+material. Wood must have zero transmittance. Unattributed vegetation uses the
+default `unknown` material. For scene workflows, declare these defaults with
+[`models_for`](@ref) and pass the returned configuration to [`run_light`](@ref).
 """
 struct VoxelVegetation
     input::VoxelPointInput
@@ -228,6 +232,8 @@ end
 
 """Mixed vegetation result with native voxel results, sparse component diagnostics,
 and the original missing-PAD mask (including explicitly imputed cells).
+The resolved vegetation model is retained so later model changes do not alter
+material-dependent diagnostics of this result.
 """
 struct VoxelVegetationStepResult
     light::VoxelLightStepResult{Float64}

@@ -521,9 +521,23 @@ end
 
 """
     models_for(group_specs...)::LightModels
+    models_for(; leaf=nothing, wood=VoxelMaterial(), unknown=VoxelMaterial(),
+                 ground=nothing, individuals=Dict(), ground_materials=Dict(),
+                 mode=nothing, identified_area_fraction=nothing)::VoxelModels
 
-Create [`LightModels`](@ref) from compact `(group => (type => model, ...))`
-pairs. Group and type names are matched against geometric scene nodes.
+For triangle scenes, create [`LightModels`](@ref) from compact
+`(group => (type => model, ...))` pairs matched against geometric scene nodes.
+
+For voxel scenes, keyword defaults create [`VoxelModels`](@ref). Individual
+organ and soil-material overrides may be complete material objects or partial
+parameter named tuples inheriting from the corresponding default. Without a
+default, supply complete materials for every participating individual/organ
+or soil material ID. JSONL inputs require `mode=:point_proxy` explicitly.
+Pass the configuration to `run_light(scene, meteo; models, options, backend)`;
+ground geometry is added separately with `add_ground!`.
+
+An empty call retains the triangle meaning `LightModels()`. Positional
+group/type pairs and voxel keywords cannot be combined.
 
 Arguments:
 
