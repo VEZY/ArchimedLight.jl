@@ -26,8 +26,8 @@
             0.60 0.90 0.50
             0.20 0.40 0.70
         ],
-        soil,
     )
+    terrain = ArchimedLight._resolve_voxel_ground(terrain, models_for(; ground=soil))
     upward = [
         (0.0, 0.0, 1.0),
         (0.8, 0.0, 0.6),
@@ -179,11 +179,11 @@ end
     @test isnan(points_wood[:voxel_pad_full][][3])
 
     assigned = Float64.(input.point_count .> 0) .* 0.5
-    model = VoxelVegetation(input; mode=:point_proxy, leaf=VoxelMaterial(g=0.4),
-        wood=VoxelMaterial(g=0.8), identified_area_fraction=assigned)
-    scene = VoxelScene(model)
-    add_ground!(scene, PlanarTerrain(scene.grid,
-        SoilOpticalProperties(par_reflectance=0.25, nir_reflectance=0.35); cells=(3, 2)))
+    scene = VoxelScene(input)
+    update_models!(scene, models_for(; mode=:point_proxy, leaf=VoxelMaterial(g=0.4),
+        wood=VoxelMaterial(g=0.8), identified_area_fraction=assigned,
+        ground=SoilOpticalProperties(par_reflectance=0.25, nir_reflectance=0.35)))
+    add_ground!(scene; cells=(3, 2))
     geometry = makeplot(scene)
     @test geometry[:voxel_color_values][][1] == 3 # residual PAD is retained, not assigned to leaves
     fractions = makeplot(scene; color=:leaf_fraction)
@@ -252,7 +252,7 @@ end
     # Sloped terrain uses its surface area, not its horizontal footprint.
     extension = Base.get_extension(ArchimedLight, :ArchimedLightMakieExt)
     slope = TriangulatedTerrain([(0., 0., 0.), (1., 0., 0.), (1., 1., 0.5), (0., 1., 0.5)],
-        [(1, 2, 3), (1, 3, 4)], SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0))
+        [(1, 2, 3), (1, 3, 4)])
     @test extension._voxelplot_patch_areas(slope) ≈ fill(sqrt(1.25) / 2, 2)
 
     mktempdir() do directory
@@ -271,9 +271,9 @@ end
     grid = VoxelGrid((0, 0, 0), (1, 2, 1), reshape([0.5, 1.5], 1, 2, 1))
     original_pad = copy(grid.pad)
     scene = VoxelScene(grid)
-    add_ground!(scene, PlanarTerrain(scene.grid,
-        SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4);
-        cells=(1, 2), periodic=true))
+    add_ground!(scene; cells=(1, 2), periodic=true)
+    update_models!(scene, models_for(; leaf=VoxelMaterial(),
+        ground=SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)))
     options = LightOptions(toricity=false, scattering=false, turtle_sectors=6, all_in_turtle=true)
     row = (step_duration=60.0, Ri_PAR_f=100.0, Ri_NIR_f=50.0,
         sun_azimuth=0.0, sun_elevation=90.0, direct_fraction=1.0)
@@ -353,7 +353,7 @@ end
     vertices = [(x, y, elevation) for (x, y) in
                 ((origin[1], origin[2]), (maximum[1], origin[2]),
                  (maximum[1], maximum[2]), (origin[1], maximum[2]))]
-    terrain = TriangulatedTerrain(vertices, [(1, 2, 3), (1, 3, 4)], soil)
+    terrain = ArchimedLight._resolve_voxel_ground(TriangulatedTerrain(vertices, [(1, 2, 3), (1, 3, 4)]), models_for(; ground=soil))
     expected_area = (maximum[1] - origin[1]) * (maximum[2] - origin[2]) / 2
     function triangle_area(mesh)
         points = GeometryBasics.coordinates(mesh)
@@ -361,10 +361,10 @@ end
         return norm(cross(b - a, c - a)) / 2
     end
     plane = PlanarTerrain(elevation, (origin[1], maximum[1]),
-                          (origin[2], maximum[2]), soil; cells=(1, 1))
+                          (origin[2], maximum[2]); cells=(1, 1))
     for surface in (terrain, plane,
                     HeightFieldTerrain([origin[1], maximum[1]],
-                                       [origin[2], maximum[2]], fill(elevation, 2, 2), soil))
+                                       [origin[2], maximum[2]], fill(elevation, 2, 2)))
         mesh, _ = extension._voxelplot_terrain_mesh(surface)
         @test eltype(GeometryBasics.coordinates(mesh)) == GeometryBasics.Point3d
         @test triangle_area(mesh) > 0
@@ -431,7 +431,7 @@ end
     moved_widths = (2, 2, 1) .* (grid.maximum .- grid.minimum)
     moved_grid = VoxelGrid(moved_origin, moved_origin .+ moved_widths, grid.pad)
     moved_vertices = [moved_origin .+ (2, 2, 1) .* (point .- origin) for point in vertices]
-    moved_terrain = TriangulatedTerrain(moved_vertices, terrain.triangles, soil)
+    moved_terrain = ArchimedLight._resolve_voxel_ground(TriangulatedTerrain(moved_vertices, terrain.triangles), models_for(; ground=soil))
     moved_ray = (origin=ray.origin .+ (moved_origin .- origin), direction=ray.direction)
     Makie.update!(plot, (; source=moved_grid, terrain=moved_terrain, data=nothing); rays=[moved_ray])
     @test Tuple.(GeometryBasics.coordinates(plot[:voxel_terrain_mesh][])) == moved_vertices

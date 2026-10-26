@@ -271,7 +271,7 @@ _voxelplot_input(source::VoxelScene) = source.input
 
 _voxelplot_vegetation(::Union{VoxelGrid,VoxelPointInput}) = nothing
 _voxelplot_vegetation(source::VoxelVegetation) = source
-_voxelplot_vegetation(source::VoxelScene) = source.vegetation
+_voxelplot_vegetation(::VoxelScene) = nothing
 
 # Keep the original PAD source explicit; the prepared mixture is only a
 # material/composition context, never the equivalent transport-density field.
@@ -280,7 +280,7 @@ _voxelplot_prepared_model(payload) = hasproperty(payload, :vegetation) ? payload
 
 _voxelplot_prepare_vegetation(source) = _voxelplot_vegetation(source)
 function _voxelplot_prepare_vegetation(source::VoxelScene)
-    source.models === nothing && return source.vegetation
+    source.models === nothing && return nothing
     source.input === nothing && return nothing
     models = source.models
     models.mode === :point_proxy || throw(ArgumentError(
@@ -292,10 +292,7 @@ end
 
 function _voxelplot_effective_terrain(terrain, data, timestep)
     data === nothing && return terrain
-    retained = ArchimedLight._voxel_step_light(_voxelplot_step(data, timestep)).terrain
-    # Older positional result constructors have no retained terrain. Keep their
-    # explicitly supplied geometry/material context available for compatibility.
-    return retained isa NoVoxelTerrain ? terrain : retained
+    return ArchimedLight._voxel_step_light(_voxelplot_step(data, timestep)).terrain
 end
 
 function _voxelplot_prepare_terrain(source, terrain, data)

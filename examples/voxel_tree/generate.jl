@@ -54,11 +54,8 @@ function write_voxel_tree_example(directory=@__DIR__)
     x = collect(range(0.0, 8.0; length=17))
     y = collect(range(0.0, 8.0; length=17))
     elevation = [_voxel_docs_elevation(xi, yi) for xi in x, yi in y]
-    # Reuse the terrain constructor's diagonal and vertex ordering; the PLY
-    # stores geometry only, not these temporary optical properties.
-    terrain = HeightFieldTerrain(x, y, elevation, SoilOpticalProperties(
-        par_reflectance=0.0, nir_reflectance=0.0,
-    ))
+    # Reuse the terrain constructor's diagonal and vertex ordering.
+    terrain = HeightFieldTerrain(x, y, elevation)
     ply_path = joinpath(directory, "terrain.ply")
     open(ply_path, "w") do file
         println(file, "ply")

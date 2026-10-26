@@ -44,14 +44,17 @@
             end
         end
     end
-    @test isempty(PlanarTerrain(grid, nothing).materials)
+    @test isempty(PlanarTerrain(grid).materials)
     @test isempty(PlanarTerrain(0., (0., 2.), (0., 1.)).materials)
     @test_throws ArgumentError PlanarTerrain(grid; material_id=0)
     @test_throws ArgumentError PlanarTerrain(grid; material_ids=reshape([1, -1], 2, 1))
     @test_throws ArgumentError TriangulatedTerrain(vertices, triangles; material_id=0)
     @test_throws ArgumentError HeightFieldTerrain([0., 1.], [0., 1.], zeros(2, 2); material_id=0)
-    @test_throws ArgumentError PlanarTerrain(grid; materials=Dict())
-    @test_throws ArgumentError PlanarTerrain(grid, soil; materials=Dict())
+    @test_throws MethodError PlanarTerrain(grid, soil)
+    @test_throws MethodError PlanarTerrain(grid; optics=soil)
+    @test_throws MethodError PlanarTerrain(grid; materials=materials)
+    @test_throws MethodError TriangulatedTerrain(vertices, triangles, soil)
+    @test_throws MethodError HeightFieldTerrain([0., 1.], [0., 1.], zeros(2, 2), soil)
     @test_throws DimensionMismatch PlanarTerrain(grid; material_ids=[1, 2])
 end
 
@@ -60,15 +63,17 @@ end
     grid = VoxelGrid((0, 0, 0), (2, 2, 3), fill(0.4, 2, 2, 3))
     geometry = PlanarTerrain(grid; cells=(2, 2))
     resolved = ArchimedLight._with_terrain_materials(geometry, Dict(1 => soil))
-    direct = PlanarTerrain(grid, soil; cells=(2, 2))
     row = (step_duration=60., Ri_PAR_f=100., Ri_NIR_f=50., direct_fraction=0.6,
            sun_azimuth=130., sun_elevation=40.)
     options = LightOptions(toricity=false, scattering=true, turtle_sectors=6,
         all_in_turtle=true, scattering_stop_ratio=1e-8)
     backend = VoxelCPUBackend(rays_per_voxel=4)
     optics = voxel_generic_green_leaf_optics(grid)
-    actual = run_voxel_light_step(grid, row, options; backend, optics, terrain=resolved)
-    expected = run_voxel_light_step(grid, row, options; backend, optics, terrain=direct)
+    leaf = VoxelMaterial(par_reflectance=0.085, par_transmittance=0.085,
+        nir_reflectance=0.425, nir_transmittance=0.425)
+    actual = run_light(VoxelScene(grid; terrain=geometry), row;
+        models=models_for(; leaf, ground=soil), options, backend)
+    expected = run_voxel_light_step(grid, row, options; backend, optics, terrain=resolved)
     @test actual.first_order.par_energy == expected.first_order.par_energy
     @test actual.first_order.nir_energy == expected.first_order.nir_energy
     for band in (:par, :nir), field in fieldnames(typeof(actual.scattering.par))
@@ -78,17 +83,22 @@ end
     path = joinpath(pkgdir(ArchimedLight), "examples", "voxel_tree", "terrain.ply")
     imported = read_ply_terrain(path)
     @test isempty(imported.materials)
-    @test imported.vertices == read_ply_terrain(path, soil).vertices
-    @test imported.triangles == read_ply_terrain(path, soil).triangles
     rebound = ArchimedLight._with_terrain_materials(imported, Dict(1 => soil))
     @test rebound.bvh === imported.bvh
+    @test rebound.vertices === imported.vertices
+    @test rebound.triangles === imported.triangles
+    @test_throws MethodError read_ply_terrain(path, soil)
+    @test_throws MethodError read_ply_terrain(path; materials=Dict(1 => soil))
     aai = AAIGrid(2, 2, 0., 0., 1., zeros(2, 2), nothing, nothing)
     raster = height_field_terrain(aai)
     @test isempty(ArchimedLight._terrain_materials(raster))
-    @test terrain_bounds(raster) == terrain_bounds(height_field_terrain(aai, soil))
+    @test terrain_bounds(raster) == ((0., 0., 0.), (2., 2., 0.))
+    @test_throws MethodError height_field_terrain(aai, soil)
     ground_distance = reshape([0.5, 1.5], 1, 1, 2)
     fallback_grid = VoxelGrid((0, 0, 0), (1, 1, 2), zeros(1, 1, 2))
     fallback = terrain_from_ground_distance(fallback_grid, ground_distance; dtm_used_by_amapvox=true)
     @test isempty(ArchimedLight._terrain_materials(fallback))
     @test terrain_elevation_at(fallback, 0.5, 0.5) == 0.0
+    @test_throws MethodError terrain_from_ground_distance(fallback_grid, ground_distance, soil;
+        dtm_used_by_amapvox=true)
 end

@@ -112,19 +112,18 @@ const VOXEL_TERRAIN_Z = [
     0.75 + 0.25sinpi(2x / 16) * cospi(2y / 16)
     for x in VOXEL_TERRAIN_X, y in VOXEL_TERRAIN_Y
 ]
-const VOXEL_TERRAIN_PLANAR = ArchimedLight.PlanarTerrain(
-    VOXEL_TERRAIN_GRID,
-    VOXEL_TERRAIN_SOIL;
+const VOXEL_TERRAIN_MODELS = ArchimedLight.models_for(; ground=VOXEL_TERRAIN_SOIL)
+const VOXEL_TERRAIN_PLANAR = ArchimedLight._resolve_voxel_ground(ArchimedLight.PlanarTerrain(
+    VOXEL_TERRAIN_GRID;
     elevation=0.75,
     periodic=true,
-)
-const VOXEL_TERRAIN_HEIGHT = ArchimedLight.HeightFieldTerrain(
+), VOXEL_TERRAIN_MODELS)
+const VOXEL_TERRAIN_HEIGHT = ArchimedLight._resolve_voxel_ground(ArchimedLight.HeightFieldTerrain(
     VOXEL_TERRAIN_X,
     VOXEL_TERRAIN_Y,
-    VOXEL_TERRAIN_Z,
-    VOXEL_TERRAIN_SOIL;
+    VOXEL_TERRAIN_Z;
     periodic=true,
-)
+), VOXEL_TERRAIN_MODELS)
 const VOXEL_TERRAIN_MESH = VOXEL_TERRAIN_HEIGHT.mesh
 const VOXEL_TERRAIN_OPEN_OPTIONS = ArchimedLight.LightOptions(
     VOXEL_OPTIONS;

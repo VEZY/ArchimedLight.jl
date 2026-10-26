@@ -92,7 +92,7 @@ end
         # Different air heights and voxel shapes must illuminate the same square metre.
         for height in (0.25, 1.0, 3.0)
             grid = VoxelGrid((0, 0, 0), (1, 1, height), zeros(1, 1, Int(max(1, height))))
-            terrain = PlanarTerrain(grid, soil; elevation=0.0)
+            terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.0), Dict(1 => soil))
             diagonal = direction[1] != 0 && direction[2] != 0
             voxel = AL.compute_voxel_direction_response(
                 grid, direction, VoxelCPUBackend(rays_per_voxel=diagonal ? 16384 : 256),
@@ -110,9 +110,9 @@ end
         (p1=(0.0, 0.0, 0.0), p2=(1.0, 0.0, slope),
          p3=(1.0, 1.0, slope), p4=(0.0, 1.0, 0.0)),
     ])
-    terrain = HeightFieldTerrain(
-        [0.0, 1.0], [0.0, 1.0], [0.0 0.0; slope slope], soil,
-    )
+    terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain(
+        [0.0, 1.0], [0.0, 1.0], [0.0 0.0; slope slope]
+    ), Dict(1 => soil))
     grid = VoxelGrid((0, 0, -0.25), (1, 1, 1.25), zeros(1, 1, 1))
     for direction in ((1.0, 0.0, -1.0), (-1.0, 0.0, -1.0), (0.37, -0.21, -1.0))
         source = -AL.StaticArrays.normalize(AL.StaticArrays.SVector{3,Float64}(direction))
@@ -132,7 +132,7 @@ end
 
     # Side quadrature converges for a tall single voxel with unequal face dimensions.
     tall = VoxelGrid((0, 0, 0), (1, 1, 3), zeros(1, 1, 1))
-    flat = PlanarTerrain(tall, soil; elevation=0.0)
+    flat = ArchimedLight._with_terrain_materials(PlanarTerrain(tall; elevation=0.0), Dict(1 => soil))
     coarse = AL.compute_voxel_direction_response(
         tall, (1, 0, -1), VoxelCPUBackend(rays_per_voxel=400), flat; options,
     ).terrain_incident_weight

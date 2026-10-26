@@ -67,7 +67,7 @@ end
     options = LightOptions(toricity=false)
     backend = VoxelCPUBackend(rays_per_voxel=1)
     soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.6)
-    plane = PlanarTerrain(grid, soil; elevation=0.25)
+    plane = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.25), Dict(1 => soil))
     emitted = zeros(size(grid))
     emitted[collect(source_ids)] .= (1.0, 0.4, 0.7)
     for terrain in (NoVoxelTerrain(), plane)
@@ -110,8 +110,8 @@ end
     grid = VoxelGrid((0, 0, 0), (2, 3, 3),
         reshape([isodd(i) ? 0.1 + 0.03i : 0.0 for i in 1:18], 2, 3, 3))
     soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)
-    terrain = HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.5, 3.0],
-        [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2], soil; periodic=true)
+    terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.5, 3.0],
+        [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2]; periodic=true), Dict(1 => soil))
     quadrature = VoxelScatteringQuadrature(
         [(0.0, 0.0, 1.0), (0.0, 0.0, -1.0), (0.6, 0.0, 0.8), (-0.6, 0.0, -0.8)],
         fill(0.25, 4))

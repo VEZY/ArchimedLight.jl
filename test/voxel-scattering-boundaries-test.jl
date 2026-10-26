@@ -3,7 +3,7 @@
     soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.3)
     # The horizontal cell centre is buried above the occupied voxel, although
     # the left part of that voxel is exposed and intercepts incoming light.
-    terrain = HeightFieldTerrain([0, 1], [0, 1], [0.0 0.0; 2.4 2.4], soil)
+    terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0, 1], [0, 1], [0.0 0.0; 2.4 2.4]), Dict(1 => soil))
     turtle = ArchimedLight.TurtleGrid([
         ArchimedLight.TurtleSector(
             1, ArchimedLight.StaticArrays.SVector(0.0, 0.0, 1.0), 1.0, :sky,
@@ -57,14 +57,13 @@ end
     black_soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
     # A deep periodic valley retains a significant tail after 128 soil bounces.
     # Empty vegetation must not make that incomplete transport look converged.
-    valley(soil) = HeightFieldTerrain(
-        [0.0, 0.5, 1.0], [0.0, 1.0], [10.0 10.0; 0.0 0.0; 10.0 10.0],
-        soil; periodic=true,
-    )
+    valley(soil) = ArchimedLight._with_terrain_materials(HeightFieldTerrain(
+        [0.0, 0.5, 1.0], [0.0, 1.0], [10.0 10.0; 0.0 0.0; 10.0 10.0]; periodic=true
+    ), Dict(1 => soil))
     cases = (
         (terrain=valley(reflective_soil), converged=false),
         (terrain=valley(black_soil), converged=true),
-        (terrain=PlanarTerrain(grid, reflective_soil; elevation=0.0, periodic=true), converged=true),
+        (terrain=ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.0, periodic=true), Dict(1 => reflective_soil)), converged=true),
     )
     for sectors in (16, 46), case in cases
         options = LightOptions(
@@ -102,11 +101,11 @@ end
     options = LightOptions(toricity=false)
     # This patch covers the grid, but its untrimmed centre is outside it.
     for terrain in (
-        PlanarTerrain(0, (-3, 1), (0, 1), soil),
-        TriangulatedTerrain(
+        ArchimedLight._with_terrain_materials(PlanarTerrain(0, (-3, 1), (0, 1)), Dict(1 => soil)),
+        ArchimedLight._with_terrain_materials(TriangulatedTerrain(
             [(-10.0, -10.0, 0.0), (40.0, -10.0, 0.0), (-10.0, 40.0, 0.0)],
-            [(1, 2, 3)], soil,
-        ),
+            [(1, 2, 3)]
+        ), Dict(1 => soil)),
     )
         cache = prepare_voxel_scattering_transport(grid, quadrature, backend, terrain; options)
         result = apply_voxel_scattering_transport(
@@ -119,7 +118,7 @@ end
         @test abs(result.balance_residual) <= 1e-12
     end
 
-    larger = PlanarTerrain(0, (-1, 2), (0, 1), soil; cells=(3, 1))
+    larger = ArchimedLight._with_terrain_materials(PlanarTerrain(0, (-1, 2), (0, 1); cells=(3, 1)), Dict(1 => soil))
     cache = prepare_voxel_scattering_transport(grid, quadrature, backend, larger; options)
     @test Set(keys(cache.terrain_direction_weights)) == Set([2])
     result = apply_voxel_scattering_transport(
@@ -136,7 +135,7 @@ end
 @testitem "Validated scattering kernels preserve public cache invalidation" tags=[:voxel, :terrain, :scattering, :fast] begin
     grid = VoxelGrid((0, 0, 0), (1, 1, 2), fill(0.7, 1, 1, 2))
     soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.3)
-    terrain = PlanarTerrain(grid, soil; elevation=0.0)
+    terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.0), Dict(1 => soil))
     turtle = ArchimedLight.TurtleGrid([
         ArchimedLight.TurtleSector(
             1, ArchimedLight.StaticArrays.SVector(0.0, 0.0, 1.0), 1.0, :sky,

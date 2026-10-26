@@ -9,7 +9,6 @@
     @test summarize_scene(scene).occupied_voxels == 65
     @test ArchimedLight.add_ground! === PlantGeom.add_ground!
     original = copy(scene.grid.pad)
-    soil = SoilOpticalProperties(par_reflectance=0.12, nir_reflectance=0.32)
     @test add_ground!(scene; cells=(2,3)) === scene
     @test scene.terrain.cells == (2,3)
     @test terrain_bounds(scene.terrain) == ((0.,0.,0.),(8.,8.,0.))
@@ -18,11 +17,11 @@
     previous = scene.terrain
     @test_throws ArgumentError add_ground!(scene;cells=(0,1))
     @test scene.terrain === previous
-    terrain = read_ply_terrain(joinpath(dir,"terrain.ply"),soil)
+    terrain = read_ply_terrain(joinpath(dir,"terrain.ply"))
     @test add_ground!(scene,terrain) === scene
     @test scene.terrain === terrain
-    @test_throws ArgumentError read_scene(joinpath(dir,"tree.vox"); mode=:point_proxy,leaf=VoxelMaterial())
-    @test_throws ArgumentError read_scene(joinpath(dir,"tree.jsonl.gz"); leaf=VoxelMaterial())
+    @test_throws MethodError read_scene(joinpath(dir,"tree.vox"); mode=:point_proxy,leaf=VoxelMaterial())
+    @test_throws MethodError read_scene(joinpath(dir,"tree.jsonl.gz"); leaf=VoxelMaterial())
 
     fixture = joinpath(@__DIR__,"fixtures","voxel","amapvox_2_4_2.vox")
     @test_throws ArgumentError read_scene(fixture)
@@ -51,11 +50,11 @@ end
     generic_models = models_for(; leaf, ground=soil)
     update_models!(model_scene, models)
     reference_vegetation = VoxelVegetation(model_scene.input; mode=:point_proxy, leaf, wood)
-    reference_terrain = PlanarTerrain(scene.grid, soil)
+    reference_terrain = ArchimedLight._resolve_voxel_ground(PlanarTerrain(scene.grid), generic_models)
     @test_throws ArgumentError run_light(inspection,row;options=LightOptions(scattering=false),backend)
     @test update_models!(inspection, models) === inspection
     @test inspection.models === models
-    @test inspection.vegetation === nothing
+    @test !hasproperty(inspection, :vegetation)
     @test isempty(check_scene(inspection).errors)
     old_input = inspection.input
     inspection.input = read_voxel_point_input(joinpath(dir,"tree.jsonl.gz"))

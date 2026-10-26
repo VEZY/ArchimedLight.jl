@@ -25,43 +25,40 @@ function _soil_material_table(materials)
     return result
 end
 
-function _terrain_constructor_materials(optics, materials, material_id::Integer)
-    materials === nothing || return _soil_material_table(materials)
-    optics === nothing && return _SoilMaterialTable()
-    return _soil_material_table(Dict(Int(material_id) => optics))
-end
-
-function _validate_material_ids(material_ids, materials, expected::Integer;
-    require_materials::Bool=true)
+function _validate_material_ids(material_ids, expected::Integer)
     length(material_ids) == expected || throw(DimensionMismatch(
         "terrain has $(length(material_ids)) material assignments; expected $expected",
     ))
     ids = Int.(vec(material_ids))
     for id in ids
         id > 0 || throw(ArgumentError("soil material identifiers must be positive"))
-        !require_materials || haskey(materials, id) ||
-            throw(ArgumentError("terrain references undefined soil material $id"))
+    end
+    return ids
+end
+
+function _validate_material_ids(material_ids, materials, expected::Integer)
+    ids = _validate_material_ids(material_ids, expected)
+    for id in ids
+        haskey(materials, id) || throw(ArgumentError("terrain references undefined soil material $id"))
     end
     return ids
 end
 
 """
     PlanarTerrain(grid; elevation=grid.minimum[3], cells=size(grid)[1:2], kwargs...)
-    PlanarTerrain(grid, optics; kwargs...)
-    PlanarTerrain(elevation, x_bounds, y_bounds, optics=nothing; cells=(1, 1), kwargs...)
+    PlanarTerrain(elevation, x_bounds, y_bounds; cells=(1, 1), kwargs...)
 
 Flat ground split into rectangular soil patches, without a triangle mesh.
 The voxel-source constructors use the full horizontal scene extent and its
 bottom elevation by default, with one patch per horizontal voxel. Override
 `elevation` or `cells` to choose a different flat surface or output resolution.
-Omit optics to construct geometry for later model assignment. Explicit
-[`SoilOpticalProperties`](@ref) remain available for low-level transport calls.
+Optical properties are supplied through [`models_for`](@ref) at simulation setup.
 The plane is an assumed ground surface, not an estimate of the terrain beneath
 the vegetation. Material identifiers remain part of the geometry in either case.
 
-The source is unchanged. Pass the returned terrain as `terrain=ground` to
-[`run_voxel_light_step`](@ref) or [`run_voxel_light_series`](@ref). Set
-`periodic=true` when using `LightOptions(toricity=true)`.
+The source is unchanged. Attach the returned terrain with
+`add_ground!(scene, ground)` and supply its soil model through [`models_for`](@ref)
+to [`run_light`](@ref). Set `periodic=true` when using `LightOptions(toricity=true)`.
 """
 struct PlanarTerrain{T<:AbstractFloat} <: AbstractVoxelTerrain
     elevation::T
@@ -76,12 +73,10 @@ end
 function PlanarTerrain(
     elevation::Real,
     x_bounds,
-    y_bounds,
-    optics::Union{Nothing,SoilOpticalProperties}=nothing;
+    y_bounds;
     cells=(1, 1),
     material_id::Integer=1,
     material_ids=nothing,
-    materials=nothing,
     periodic::Bool=false,
 )
     z = Float64(elevation)
@@ -97,59 +92,30 @@ function PlanarTerrain(
     length(cells) == 2 || throw(ArgumentError("cells must contain two dimensions"))
     cell_count = (Int(cells[1]), Int(cells[2]))
     all(>(0), cell_count) || throw(ArgumentError("planar terrain cells must be positive"))
-    table = _terrain_constructor_materials(optics, materials, material_id)
     assignments = material_ids === nothing ? fill(Int(material_id), cell_count) : Int.(material_ids)
     size(assignments) == cell_count || throw(DimensionMismatch(
         "planar material_ids has size $(size(assignments)); expected $cell_count",
     ))
-    _validate_material_ids(assignments, table, prod(cell_count);
-        require_materials=!isempty(table))
-    return PlanarTerrain(z, xb, yb, cell_count, Matrix(assignments), table, periodic)
-end
-
-function PlanarTerrain(
-    grid::VoxelGrid,
-    optics::Union{Nothing,SoilOpticalProperties};
-    elevation::Real=grid.minimum[3],
-    cells=size(grid)[1:2],
-    material_id::Integer=1,
-    material_ids=nothing,
-    materials=nothing,
-    periodic::Bool=false,
-)
-    return PlanarTerrain(
-        elevation,
-        (grid.minimum[1], grid.maximum[1]),
-        (grid.minimum[2], grid.maximum[2]),
-        optics;
-        cells=cells,
-        material_id=material_id,
-        material_ids=material_ids,
-        materials=materials,
-        periodic=periodic,
-    )
+    _validate_material_ids(assignments, prod(cell_count))
+    return PlanarTerrain(z, xb, yb, cell_count, Matrix(assignments), _SoilMaterialTable(), periodic)
 end
 
 # Separate method avoids clever tuple slicing in the public grid constructor.
 function PlanarTerrain(
     grid::VoxelGrid;
-    optics::Union{Nothing,SoilOpticalProperties}=nothing,
     elevation::Real=grid.minimum[3],
     cells=size(grid)[1:2],
     material_id::Integer=1,
     material_ids=nothing,
-    materials=nothing,
     periodic::Bool=false,
 )
     return PlanarTerrain(
         elevation,
         (grid.minimum[1], grid.maximum[1]),
-        (grid.minimum[2], grid.maximum[2]),
-        optics;
+        (grid.minimum[2], grid.maximum[2]);
         cells=cells,
         material_id=material_id,
         material_ids=material_ids,
-        materials=materials,
         periodic=periodic,
     )
 end
@@ -164,7 +130,7 @@ struct TerrainBVH{T<:AbstractFloat}
 end
 
 """General non-periodic triangle terrain; geometry and its cached BVH are read-only.
-Omit optics during construction to assign soil models at simulation setup.
+Assign soil models at simulation setup.
 """
 struct TriangulatedTerrain{T<:AbstractFloat} <: AbstractVoxelTerrain
     vertices::Vector{NTuple{3,T}}
@@ -239,11 +205,9 @@ end
 
 function TriangulatedTerrain(
     vertices,
-    triangles,
-    optics::Union{Nothing,SoilOpticalProperties}=nothing;
+    triangles;
     material_id::Integer=1,
     material_ids=nothing,
-    materials=nothing,
     periodic::Bool=false,
     leaf_size::Integer=8,
 )
@@ -286,29 +250,27 @@ function TriangulatedTerrain(
         points = points[used]
         faces = [ntuple(axis -> remap[face[axis]], 3) for face in faces]
     end
-    table = _terrain_constructor_materials(optics, materials, material_id)
     assignments = material_ids === nothing ? fill(Int(material_id), length(faces)) : material_ids
-    ids = _validate_material_ids(assignments, table, length(faces);
-        require_materials=!isempty(table))
+    ids = _validate_material_ids(assignments, length(faces))
     bvh = _build_terrain_bvh(points, faces; leaf_size=Int(leaf_size))
     return TriangulatedTerrain(
         points,
         faces,
         ids,
-        table,
+        _SoilMaterialTable(),
         normals,
         bvh,
     )
 end
 
 """
-    HeightFieldTerrain(x, y, elevation, optics=nothing; diagonal=:southwest_northeast)
+    HeightFieldTerrain(x, y, elevation; diagonal=:southwest_northeast)
 
 Triangulated height samples at increasing vertex coordinates `x` and `y`.
 Every cell uses the fixed southwest-to-northeast diagonal. A BVH is built once
 and reused. `periodic=true` tiles the height field horizontally and requires
 matching elevations on opposite edges.
-Optics can be omitted until simulation model assignment.
+Soil models are assigned at simulation setup.
 """
 struct HeightFieldTerrain{T<:AbstractFloat} <: AbstractVoxelTerrain
     x::Vector{T}
@@ -322,13 +284,11 @@ end
 function HeightFieldTerrain(
     x,
     y,
-    elevation::AbstractMatrix,
-    optics::Union{Nothing,SoilOpticalProperties}=nothing;
+    elevation::AbstractMatrix;
     diagonal::Symbol=:southwest_northeast,
     periodic::Bool=false,
     material_id::Integer=1,
     material_ids=nothing,
-    materials=nothing,
 )
     diagonal == :southwest_northeast || throw(ArgumentError(
         "only diagonal=:southwest_northeast is supported",
@@ -381,11 +341,9 @@ function HeightFieldTerrain(
     end
     mesh = TriangulatedTerrain(
         vertices,
-        triangles,
-        optics;
+        triangles;
         material_id=material_id,
         material_ids=assignments,
-        materials=materials,
         periodic=false,
     )
     return HeightFieldTerrain(xv, yv, z, diagonal, periodic, mesh)

@@ -690,11 +690,3 @@ struct VoxelLightStepResult{T<:AbstractFloat}
     terrain::AbstractVoxelTerrain
     optics::Union{Nothing,VoxelOpticalProperties}
 end
-
-VoxelLightStepResult(sky, turtle, fluxes, first_order::VoxelFirstOrderResult{T},
-    scattering, duration_seconds) where {T} =
-    VoxelLightStepResult(sky, turtle, fluxes, first_order, scattering,
-        Float64(duration_seconds), NoVoxelTerrain(), nothing)
-
-VoxelLightStepResult(sky, turtle, fluxes, first_order::VoxelFirstOrderResult{T}, duration_seconds) where {T} =
-    VoxelLightStepResult(sky, turtle, fluxes, first_order, nothing, Float64(duration_seconds))

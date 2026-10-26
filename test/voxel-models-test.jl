@@ -16,8 +16,7 @@
     reference = VoxelVegetation(input; mode=:point_proxy, leaf, wood, unknown,
         individuals=Dict("17" => (leaf=VoxelMaterial(leaf; nir_reflectance=0.3),
             wood=VoxelMaterial(wood; par_reflectance=0.25))))
-    reference_terrain = PlanarTerrain(input.grid, soil; material_ids=ids,
-        materials=Dict(1 => soil, 2 => SoilOpticalProperties(par_reflectance=0.12, nir_reflectance=0.5)))
+    reference_terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(input.grid; material_ids=ids), Dict(1 => soil, 2 => SoilOpticalProperties(par_reflectance=0.12, nir_reflectance=0.5)))
     row = (step_duration=60., Ri_PAR_f=100., Ri_NIR_f=50., direct_fraction=0.6,
         sun_azimuth=130., sun_elevation=40.)
     rows = [row, merge(row, (Ri_PAR_f=80., sun_azimuth=180., sun_elevation=55.))]
@@ -55,7 +54,7 @@
     @test geometry.material_ids == ids
     @test isempty(ArchimedLight._terrain_materials(geometry))
     @test scene.models === nothing
-    @test scene.vegetation === nothing
+    @test !hasproperty(scene, :vegetation)
 end
 
 @testitem "Voxel per-individual models can replace defaults or inherit selected parameters" tags=[:voxel, :terrain, :models, :fast] begin
@@ -98,7 +97,7 @@ end
         identified_area_fraction=altered_fraction)
     @test update_models!(scene, later_models) === scene
     @test scene.models === later_models
-    @test scene.vegetation === nothing
+    @test !hasproperty(scene, :vegetation)
     later = run_light(scene, row; options, backend)
     @test later.components != changed.components
     @test light_metric_values(changed, :Ra_PAR_0_q) == initial
@@ -146,11 +145,11 @@ end
     end
     valid = models_for(; mode=:point_proxy, leaf, ground=soil)
     optics = voxel_generic_green_leaf_optics(scene.grid)
-    @test_throws ArgumentError run_light(scene, row; models=valid, options, backend, optics)
-    @test_throws ArgumentError run_light(scene, row; models=valid, options, backend,
+    @test_throws MethodError run_light(scene, row; models=valid, options, backend, optics)
+    @test_throws MethodError run_light(scene, row; models=valid, options, backend,
         ground=VoxelGroundOptics(scene.grid; par_reflectance=0.1, nir_reflectance=0.3))
-    @test_throws ArgumentError add_ground!(scene; optics=soil)
-    @test_throws ArgumentError add_ground!(scene; materials=Dict(1 => soil))
+    @test_throws MethodError add_ground!(scene; optics=soil)
+    @test_throws MethodError add_ground!(scene; materials=Dict(1 => soil))
 end
 
 @testitem "Homogeneous voxel models honor projection and retain first-order absorption" tags=[:voxel, :terrain, :models, :fast] begin
@@ -171,7 +170,7 @@ end
         reference = run_voxel_light_step(grid, row, options; backend=physical_backend,
             optics=VoxelOpticalProperties(grid; par_reflectance=leaf.par_reflectance,
                 par_transmittance=leaf.par_transmittance, nir_reflectance=leaf.nir_reflectance,
-                nir_transmittance=leaf.nir_transmittance), terrain=PlanarTerrain(grid, soil))
+                nir_transmittance=leaf.nir_transmittance), terrain=ArchimedLight._with_terrain_materials(PlanarTerrain(grid), Dict(1 => soil)))
         @test actual.first_order.par_energy == reference.first_order.par_energy
         @test actual.first_order.nir_energy == reference.first_order.nir_energy
         if scattering
@@ -199,7 +198,7 @@ end
     @test later.first_order.par_energy == retained.first_order.par_energy
     @test light_metric_values(later, :Ra_PAR_q) ≈ 0.4 .* later.first_order.par_energy
     @test light_metric_values(retained, :Ra_PAR_q) == retained_absorption
-    @test scene.vegetation === nothing
+    @test !hasproperty(scene, :vegetation)
     @test isempty(ArchimedLight._terrain_materials(scene.terrain))
     @test_throws ArgumentError run_light(scene, row; models=models_for(; ground=soil), backend)
     @test_throws ArgumentError run_light(scene, row; models=models_for(; leaf, ground=soil,

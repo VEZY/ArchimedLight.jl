@@ -73,8 +73,6 @@ struct VoxelVegetation
     mode::Symbol
 end
 
-PlanarTerrain(vegetation::VoxelVegetation, optics::SoilOpticalProperties; kwargs...) =
-    PlanarTerrain(vegetation.input, optics; kwargs...)
 PlanarTerrain(vegetation::VoxelVegetation; kwargs...) = PlanarTerrain(vegetation.input; kwargs...)
 
 function _check_voxel_wood(material::VoxelMaterial)

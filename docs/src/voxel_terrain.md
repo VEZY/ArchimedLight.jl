@@ -121,9 +121,9 @@ Subsequent `run_light(scene, meteo; models, options, backend)` calls use this
 ground, with `models_for(; leaf, ground=soil)` supplying its optical properties.
 For an imported MNT, use `add_ground!(scene, terrain)` instead.
 
-The lower-level `PlanarTerrain(input, soil)` and `PlanarTerrain(vegetation, soil)` also accept
-a [`VoxelPointInput`](@ref) or [`VoxelVegetation`](@ref), using the same domain.
-These constructors return terrain; they do not modify the vegetation.
+Use `PlanarTerrain(grid)` to construct the same geometry without modifying
+a scene. All terrain constructors and readers keep optical properties separate;
+assign them through `models_for` when running a simulation.
 
 For a large scene, choose fewer soil patches with `cells=(nx, ny)`. This controls
 the ground output resolution and reflection source sampling, while preserving
@@ -150,16 +150,14 @@ examples of both forms.
 
 ### Low-Level Terrain Objects
 
-For explicit stage calculations and ray diagnostics, the lower-level
-constructors can also bind soil optics directly. A finite plane can choose
-its horizontal bounds and patch count:
+For explicit geometry construction and ray diagnostics, a finite plane can
+choose its horizontal bounds and patch count:
 
 ```julia
 PlanarTerrain(
     elevation,
     (xmin, xmax),
-    (ymin, ymax),
-    soil;
+    (ymin, ymax);
     cells=(nx, ny),
     periodic=false,
 )
@@ -178,7 +176,6 @@ terrain = HeightFieldTerrain(
     [0.0 0.0 0.0;
      0.2 0.3 0.4;
      0.4 0.6 0.8],
-    soil,
 )
 ```
 
@@ -198,7 +195,7 @@ vertices = [
     (0.0, 1.0, 0.0),
 ]
 triangles = [(1, 2, 3), (1, 3, 4)]
-terrain = TriangulatedTerrain(vertices, triangles, soil)
+terrain = TriangulatedTerrain(vertices, triangles)
 ```
 
 The constructor validates finite, non-degenerate geometry with a positive
@@ -343,10 +340,6 @@ result = run_light(
 nothing # hide
 ```
 
-`ground=VoxelGroundOptics(...)` remains available for compatibility with the
-old horizontal lower-boundary model. `ground` and `terrain` are mutually
-exclusive. New topographic workflows should use `terrain`.
-
 First-order results contain `par_terrain_energy` and `nir_terrain_energy`, one
 value per terrain patch, plus their scalar `*_terrain_incident_energy` totals.
 Pass a spectral band's scattering result to the soil diagnostic helpers:
@@ -360,15 +353,11 @@ Pass a spectral band's scattering result to the soil diagnostic helpers:
 )
 ```
 
-The stored `ground_absorbed_energy` and `ground_reflected_energy` field names remain as
-compatibility aliases in the result containers.
-
 Each spectral band also returns `terrain_incident_energy`,
 `terrain_absorbed_energy` and `terrain_reflected_energy`, in J per terrain patch.
 These vectors include the first-order terrain input and cumulative processed
 interactions over foliage orders and soil bounces. Pending energy at the bounce
-limit remains in `unresolved_energy`. Legacy flat ground has empty terrain
-vectors. For a concrete terrain, the per-patch absorbed and reflected sums match
+limit remains in `unresolved_energy`. The per-patch absorbed and reflected sums match
 the corresponding aggregate soil diagnostics.
 
 For each spectral band, the checked terminal invariant is:
@@ -411,10 +400,10 @@ AAIGrid data rows are north-to-south; the reader reverses them so Julia indices
 increase with y. `NODATA` and non-finite elevations are rejected anywhere in
 the domain.
 
-The following lower-level AAIGrid helpers construct terrain with bound soil
-materials for explicit import/alignment workflows.
+The AAIGrid helpers import geometry and material IDs; configure soil optics
+separately through `models_for`.
 
-AAIGrid elevations are cell-centre samples. `height_field_terrain(aai, soil)`
+AAIGrid elevations are cell-centre samples. `height_field_terrain(aai)`
 keeps every sample as an exact terrain vertex and adds the raster boundary with
 constant nearest-cell extension over the outer half-cell. It then applies the
 fixed triangulation convention between those vertices. This preserves every
@@ -464,9 +453,8 @@ input = VoxelTerrainSceneInput(
     dtm_used_by_amapvox=true,
 )
 
-scene = read_voxel_terrain_scene(input, soil; periodic=false)
-grid = scene.grid
-terrain = scene.terrain
+imported = read_voxel_terrain_scene(input; periodic=false)
+scene = VoxelScene(imported.grid; terrain=imported.terrain)
 ```
 
 The importer rejects horizontal offsets, incomplete coverage, invalid vertical
@@ -477,7 +465,7 @@ it also checks every voxel centre using:
 z_{ground}(i,j) = z_{voxel\ centre}(i,j,k) - ground\_distance(i,j,k).
 ```
 
-`scene.alignment` reports sample count, maximum absolute error, and mean
+`imported.alignment` reports sample count, maximum absolute error, and mean
 absolute error. Use `alignment_atol` and `alignment_rtol` only to represent the
 known precision of exported data, not to hide a coordinate offset.
 

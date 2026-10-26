@@ -8,7 +8,7 @@ _voxel_result_grid(vegetation::VoxelVegetation) = vegetation.input.grid
 _voxel_result_grid(scene::VoxelScene) = scene.grid
 _voxel_result_vegetation(::VoxelGrid) = nothing
 _voxel_result_vegetation(vegetation::VoxelVegetation) = vegetation
-_voxel_result_vegetation(scene::VoxelScene) = scene.vegetation
+_voxel_result_vegetation(::VoxelScene) = nothing
 
 function _voxel_component_areas(step::VoxelVegetationStepResult)
     area = zeros(Float64, size(step.light.first_order.par_energy))

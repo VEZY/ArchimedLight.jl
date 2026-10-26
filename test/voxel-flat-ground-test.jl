@@ -1,7 +1,7 @@
 @testitem "Flat voxel ground uses the scene domain and configurable soil patches" tags=[:voxel, :terrain, :fast] begin
     grid = VoxelGrid((-12, 37, 8), (-6, 41, 14), zeros(3, 2, 3))
     soil = SoilOpticalProperties(par_reflectance=0.12, nir_reflectance=0.32)
-    ground = PlanarTerrain(grid, soil)
+    ground = ArchimedLight._with_terrain_materials(PlanarTerrain(grid), Dict(1 => soil))
     @test terrain_bounds(ground) == ((-12.0, 37.0, 8.0), (-6.0, 41.0, 8.0))
     @test ground.cells == (3, 2)
     @test terrain_patch_count(ground) == 6
@@ -16,33 +16,28 @@
     bright = SoilOpticalProperties(par_reflectance=0.4, nir_reflectance=0.6)
     ids = reshape([4, 7], 1, 2)
     materials = Dict(4 => soil, 7 => bright)
-    for customized in (
-        PlanarTerrain(grid, soil; elevation=8.5, cells=(1, 2), material_id=4,
-            material_ids=ids, materials=materials, periodic=true),
-        PlanarTerrain(grid; optics=soil, elevation=8.5, cells=(1, 2), material_id=4,
-            material_ids=ids, materials=materials, periodic=true),
-    )
-        @test terrain_bounds(customized) == ((-12.0, 37.0, 8.5), (-6.0, 41.0, 8.5))
-        @test customized.cells == (1, 2)
-        @test customized.periodic
-        @test customized.material_ids == ids
-        @test terrain_patch_material(customized, 2) == 7
-        @test soil_optics(customized, 7).par_reflectance == 0.4
-        @test soil_optics(customized, 7).nir_reflectance == 0.6
-    end
-    @test PlanarTerrain(grid; optics=soil).cells == (3, 2)
+    customized = ArchimedLight._with_terrain_materials(
+        PlanarTerrain(grid; elevation=8.5, cells=(1, 2), material_id=4,
+            material_ids=ids, periodic=true), materials)
+    @test terrain_bounds(customized) == ((-12.0, 37.0, 8.5), (-6.0, 41.0, 8.5))
+    @test customized.cells == (1, 2)
+    @test customized.periodic
+    @test customized.material_ids == ids
+    @test terrain_patch_material(customized, 2) == 7
+    @test soil_optics(customized, 7).par_reflectance == 0.4
+    @test soil_optics(customized, 7).nir_reflectance == 0.6
+    @test PlanarTerrain(grid).cells == (3, 2)
     for cells in ((0, 1), (1, -2), (1,), (1, 1, 1))
-        @test_throws ArgumentError PlanarTerrain(grid, soil; cells)
-        @test_throws ArgumentError PlanarTerrain(grid; optics=soil, cells)
+        @test_throws ArgumentError PlanarTerrain(grid; cells)
     end
-    @test_throws DimensionMismatch PlanarTerrain(grid, soil;
-        cells=(1, 2), material_ids=ones(Int, 2, 1))
+    @test_throws DimensionMismatch ArchimedLight._with_terrain_materials(PlanarTerrain(grid;
+        cells=(1, 2), material_ids=ones(Int, 2, 1)), Dict(1 => soil))
 end
 
 @testitem "Dense finite voxel sampling keeps accurate directional energy totals" tags=[:voxel, :terrain, :fast] begin
     grid = VoxelGrid((0, 0, 0), (3, 2, 2), zeros(3, 2, 2))
     soil = SoilOpticalProperties(par_reflectance=0, nir_reflectance=0)
-    ground = PlanarTerrain(grid, soil; cells=(24, 16))
+    ground = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; cells=(24, 16)), Dict(1 => soil))
     direction = (-0.8506141304969788, -0.27638107538223267, -0.44729083776474)
     backend = VoxelCPUBackend(rays_per_voxel=65536)
     response = ArchimedLight.compute_voxel_direction_response(grid, direction, backend,
@@ -67,21 +62,19 @@ end
     vegetation = VoxelVegetation(input; mode=:point_proxy, leaf)
     grid = input.grid
     soil = SoilOpticalProperties(par_reflectance=0.12, nir_reflectance=0.32)
-    explicit = PlanarTerrain(grid.minimum[3],
+    explicit = ArchimedLight._with_terrain_materials(PlanarTerrain(grid.minimum[3],
         (grid.minimum[1], grid.maximum[1]),
-        (grid.minimum[2], grid.maximum[2]), soil; cells=(2, 2))
+        (grid.minimum[2], grid.maximum[2]); cells=(2, 2)), Dict(1 => soil))
 
     for source in (input, vegetation)
-        @test PlanarTerrain(source, soil).cells == size(grid)[1:2]
-        @test terrain_bounds(PlanarTerrain(source; optics=soil)) == terrain_bounds(explicit)
-        for ground in (PlanarTerrain(source, soil; cells=(2, 2)),
-                       PlanarTerrain(source; optics=soil, cells=(2, 2)))
-            @test ArchimedLight._terrain_geometry_fingerprint(ground) ==
-                ArchimedLight._terrain_geometry_fingerprint(explicit)
-            @test ground.materials == explicit.materials
-        end
-        @test_throws ArgumentError PlanarTerrain(source, soil; cells=(0, 2))
-        @test_throws ArgumentError PlanarTerrain(source; optics=soil, cells=(2, 0))
+        @test PlanarTerrain(source).cells == size(grid)[1:2]
+        @test terrain_bounds(PlanarTerrain(source)) == terrain_bounds(explicit)
+        ground = ArchimedLight._with_terrain_materials(PlanarTerrain(source; cells=(2, 2)), Dict(1 => soil))
+        @test ArchimedLight._terrain_geometry_fingerprint(ground) ==
+            ArchimedLight._terrain_geometry_fingerprint(explicit)
+        @test ground.materials == explicit.materials
+        @test_throws ArgumentError PlanarTerrain(source; cells=(0, 2))
+        @test_throws ArgumentError PlanarTerrain(source; cells=(2, 0))
     end
 
     row = (step_duration=60.0, Ri_PAR_f=100.0, Ri_NIR_f=50.0,
@@ -90,7 +83,7 @@ end
     options = LightOptions(toricity=false, scattering=false,
         turtle_sectors=6, all_in_turtle=true)
     actual = run_voxel_light_step(grid, row, options; backend,
-        terrain=PlanarTerrain(input, soil; cells=(2, 2)))
+        terrain=ArchimedLight._with_terrain_materials(PlanarTerrain(input; cells=(2, 2)), Dict(1 => soil)))
     expected = run_voxel_light_step(grid, row, options; backend, terrain=explicit)
     @test sum(actual.first_order.par_terrain_energy) > 0
     @test sum(actual.first_order.par_energy) > 0
@@ -101,7 +94,7 @@ end
     scattering_options = LightOptions(options; scattering=true,
         scattering_max_iter=20, scattering_stop_ratio=1e-8)
     scattered = run_voxel_light_step(vegetation, row, scattering_options; backend,
-        terrain=PlanarTerrain(vegetation; optics=soil, cells=(2, 2)))
+        terrain=ArchimedLight._with_terrain_materials(PlanarTerrain(vegetation; cells=(2, 2)), Dict(1 => soil)))
     reference = run_voxel_light_step(vegetation, row, scattering_options; backend, terrain=explicit)
     for band in (:par, :nir)
         actual_band = getproperty(scattered.light.scattering, band)

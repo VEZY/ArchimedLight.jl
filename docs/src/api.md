@@ -187,8 +187,8 @@ must be zero. Unassigned vegetation retains its own `unknown` default and its
 without a `models` keyword; supplying `models` directly does not mutate the
 scene. Use `check_models(scene, models)` or
 `check_simulation(scene, meteo; models, options, backend)` to validate it.
-`VoxelScene(grid; terrain)` and `VoxelScene(vegetation; terrain)` wrap existing
-in-memory inputs. `missing_pad=:zero_with_diagnostics` is the opt-in alternative
+`VoxelScene(grid; terrain)` and `VoxelScene(input; terrain)` wrap an existing
+PAD grid or imported `VoxelPointInput` without assigning materials. `missing_pad=:zero_with_diagnostics` is the opt-in alternative
 for unknown densities.
 
 `VoxelVegetationStepResult` keeps the native result in `.light`, sparse
@@ -221,15 +221,16 @@ add_ground!(scene, terrain)
 The transform defaults to identity. No CRS conversion, translation, or domain
 extension is inferred; triangulated PLY terrain is non-periodic.
 
-The lower-level `PlanarTerrain`, `HeightFieldTerrain` and
-`TriangulatedTerrain` constructors can still take explicit soil optics for
-stage calculations. Advanced AAIGrid and AMAPVox import/alignment workflows use:
+All terrain constructors and readers create geometry and material IDs. Soil
+optics are supplied only through the voxel model configuration. AAIGrid and
+AMAPVox import/alignment workflows use:
 
 ```julia
 aai = read_aai_grid(dtm_path; crs="EPSG:2154")
-terrain = height_field_terrain(aai, soil; transform=dtm_to_voxel)
+terrain = height_field_terrain(aai; transform=dtm_to_voxel)
 input = VoxelTerrainSceneInput(voxel_path, dtm_path; dtm_to_voxel=dtm_to_voxel)
-scene = read_voxel_terrain_scene(input, soil)
+imported = read_voxel_terrain_scene(input)
+scene = VoxelScene(imported.grid; terrain=imported.terrain)
 ```
 
 See [Voxel Terrain And Soil](voxel_terrain.md) for coordinate, coverage,

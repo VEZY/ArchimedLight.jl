@@ -5,9 +5,9 @@
     grid = VoxelGrid((-0.5, 1.25, 0), (1.5, 4.25, 3),
         reshape([0.1 + 0.02mod(i, 5) for i in 1:18], 2, 3, 3))
     soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)
-    plane = PlanarTerrain(grid, soil; elevation=0.25, periodic=true)
-    height = HeightFieldTerrain([-0.5, 0.5, 1.5], [1.25, 2.75, 4.25],
-        [0.25 0.25 0.25; 0.25 0.6 0.25; 0.25 0.25 0.25], soil; periodic=true)
+    plane = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.25, periodic=true), Dict(1 => soil))
+    height = ArchimedLight._with_terrain_materials(HeightFieldTerrain([-0.5, 0.5, 1.5], [1.25, 2.75, 4.25],
+        [0.25 0.25 0.25; 0.25 0.6 0.25; 0.25 0.25 0.25]; periodic=true), Dict(1 => soil))
     rounded = AL._normalise_voxel_transport_direction((7 / 17, -3 / 13, 0.1 + 7 / 19))
     turtle = AL.TurtleGrid([
         AL.TurtleSector(1, AL.StaticArrays.SVector(0.0, 0.0, 1.0), 1 / 3, :sky),
@@ -37,8 +37,8 @@ end
         for name in fieldnames(typeof(expected)))
     grid = VoxelGrid((0, 0, 0), (2, 3, 3), fill(0.2, 2, 3, 3))
     soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)
-    terrain = HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.5, 3.0],
-        [0.2 0.2 0.2; 0.2 0.6 0.2; 0.2 0.2 0.2], soil)
+    terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.5, 3.0],
+        [0.2 0.2 0.2; 0.2 0.6 0.2; 0.2 0.2 0.2]), Dict(1 => soil))
     backend = VoxelCPUBackend(rays_per_voxel=1)
     options = LightOptions(toricity=false, turtle_sectors=6, all_in_turtle=false,
         scattering=true, nir_interception=true, nir_scattering=true,
@@ -83,10 +83,9 @@ end
     grid = VoxelGrid((0, 0, 0), (2, 3, 3), fill(0.2, 2, 3, 3))
     soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
     bright = SoilOpticalProperties(par_reflectance=0.4, nir_reflectance=0.6)
-    make_height() = HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.5, 3.0],
-        [0.2 0.2 0.2; 0.2 0.6 0.2; 0.2 0.2 0.2], soil)
-    terrains = (PlanarTerrain(grid, soil; elevation=0.2,
-        materials=Dict(1 => soil, 2 => bright)), make_height(), make_height().mesh)
+    make_height() = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.5, 3.0],
+        [0.2 0.2 0.2; 0.2 0.6 0.2; 0.2 0.2 0.2]), Dict(1 => soil))
+    terrains = (ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2), Dict(1 => soil, 2 => bright)), make_height(), make_height().mesh)
     turtle = AL.TurtleGrid([
         AL.TurtleSector(1, AL.StaticArrays.SVector(0.0, 0.0, 1.0), 0.5, :sky),
         AL.TurtleSector(2, AL.StaticArrays.SVector(0.6, 0.0, 0.8), 0.5, :sky),

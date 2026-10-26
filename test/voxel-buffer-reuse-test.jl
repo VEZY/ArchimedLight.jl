@@ -15,13 +15,12 @@
                            (bias + 2, -2.0, elevation), (bias, 2.0, elevation)])
         push!(triangles, (first, first + 1, first + 2))
     end
-    deep = TriangulatedTerrain(vertices, triangles, soil; leaf_size=1,
-        material_ids=[isodd(patch) ? 1 : 2 for patch in 1:patch_count],
-        materials=Dict(1 => soil, 2 => bright))
-    shallow = TriangulatedTerrain([(0.0, 0.0, 0.4), (1.0, 0.0, 0.4),
-                                  (0.0, 1.0, 0.4)], [(1, 2, 3)], soil)
-    periodic = HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.0, 2.0],
-        [0.3 0.3 0.3; 0.3 0.7 0.3; 0.3 0.3 0.3], soil; periodic=true)
+    deep = ArchimedLight._with_terrain_materials(TriangulatedTerrain(vertices, triangles; leaf_size=1,
+        material_ids=[isodd(patch) ? 1 : 2 for patch in 1:patch_count]), Dict(1 => soil, 2 => bright))
+    shallow = ArchimedLight._with_terrain_materials(TriangulatedTerrain([(0.0, 0.0, 0.4), (1.0, 0.0, 0.4),
+                                  (0.0, 1.0, 0.4)], [(1, 2, 3)]), Dict(1 => soil))
+    periodic = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.0, 2.0],
+        [0.3 0.3 0.3; 0.3 0.7 0.3; 0.3 0.3 0.3]; periodic=true), Dict(1 => soil))
     function compare_query(stack, terrain, origin, direction, limit)
         # Scratch contents are not traversal state between independent queries.
         fill!(stack, typemax(Int))

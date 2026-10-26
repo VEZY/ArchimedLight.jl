@@ -28,11 +28,8 @@ transmittance ``\tau``. The single-scattering albedo and absorptance are
 
 All four quantities are dimensionless. ArchimedLight enforces
 ``0 \leq \rho \leq 1``, ``0 \leq \tau \leq 1``, and
-``\rho + \tau \leq 1`` at construction. The compatibility keyword
-`scattering_par` or `scattering_nir` supplies ``\omega`` directly and splits it
-equally between ``\rho`` and ``\tau``. That equal split preserves the total
-coefficient used by this isotropic solver; it is not a claim about measured
-leaf reflection and transmission.
+``\rho + \tau \leq 1`` at construction. Set reflectance and transmittance
+explicitly in `VoxelMaterial` and supply those materials through `models_for`.
 
 Leaf transmittance is not canopy porosity. Gaps are already represented by
 `PAD` through Beer–Lambert attenuation:
@@ -179,7 +176,7 @@ band or timestep results is deferred: the current implementation favors clear
 result ownership and thread-safe read-only caches. A future in-place workspace
 API may reduce the remaining warmed allocations without changing equations.
 
-## Terrain And Legacy Ground Boundaries
+## Terrain Boundaries
 
 `AbstractVoxelTerrain` represents a continuous planar, height-field, or
 triangulated soil receptor. A ray path stops at its nearest terrain
@@ -192,8 +189,8 @@ AMAPVox/DTM import, boundary, and cache contracts.
 Without terrain, lower-boundary radiation is reported as bottom escape. With a
 black soil it is reported as soil absorption. With a reflective soil it can be
 intercepted by foliage again, strike another terrain patch, or leave through
-the top or an open side. `VoxelGroundOptics` remains available as the legacy
-horizontal lower-boundary API; it is mutually exclusive with `terrain`.
+the top or an open side. Attach the ground geometry with `add_ground!` and
+assign its optical properties through `models_for(; ground=soil, ...)`.
 
 ## Scope And Limitations
 

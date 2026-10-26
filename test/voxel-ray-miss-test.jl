@@ -133,11 +133,11 @@ end
         end
     end
 
-    plane = PlanarTerrain(grid, soil; elevation=0.2, periodic=true)
-    height = HeightFieldTerrain(
+    plane = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2, periodic=true), Dict(1 => soil))
+    height = ArchimedLight._with_terrain_materials(HeightFieldTerrain(
         collect(range(grid.minimum[1], grid.maximum[1]; length=3)),
         collect(range(grid.minimum[2], grid.maximum[2]; length=3)),
-        [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2], soil; periodic=true)
+        [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2]; periodic=true), Dict(1 => soil))
     empty_grid = VoxelGrid(grid.minimum, grid.maximum, zeros(size(grid)))
     empty_bounds = AL._prepare_voxel_occupied_bounds(empty_grid, backend, plane, options)
     @test empty_bounds.empty
@@ -191,8 +191,8 @@ end
     soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
     grid = VoxelGrid((0, 0, 0), (1, 1, 3), zeros(1, 1, 3))
     options = LightOptions(toricity=false)
-    gap = TriangulatedTerrain([(0.0, 0.0, 0.5), (1.0, 0.0, 0.5),
-        (0.0, 1.0, 0.5)], [(1, 2, 3)], soil)
+    gap = ArchimedLight._with_terrain_materials(TriangulatedTerrain([(0.0, 0.0, 0.5), (1.0, 0.0, 0.5),
+        (0.0, 1.0, 0.5)], [(1, 2, 3)]), Dict(1 => soil))
     # A top origin can be uncovered even when a near-horizontal ray would
     # escape sideways. With one central origin, coverage can instead fail only
     # at the ray's later bottom intersection. Empty PAD must not hide either.
@@ -204,7 +204,7 @@ end
         @test_throws ArgumentError AL._compute_voxel_direction_response(grid,
             direction, backend, gap, options, launch, AL.VoxelRayWorkspace(), nothing, nothing)
     end
-    below = PlanarTerrain(grid, soil; elevation=-0.1)
+    below = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=-0.1), Dict(1 => soil))
     @test_throws ArgumentError AL.compute_voxel_direction_response(grid,
         (0.0, 0.0, -1.0), VoxelCPUBackend(), below; options)
 
@@ -220,7 +220,7 @@ end
         return 0.2
     end
     AL.intersect_terrain(terrain::RayMissChangingTerrain, origin, direction, limit::Real=Inf) =
-        intersect_terrain(PlanarTerrain(0.2, (0, 1), (0, 1), terrain.soil),
+        intersect_terrain(ArchimedLight._with_terrain_materials(PlanarTerrain(0.2, (0, 1), (0, 1)), Dict(1 => terrain.soil)),
             origin, direction, limit)
     terrain = RayMissChangingTerrain(0.2, soil)
     backend = VoxelCPUBackend(rays_per_voxel=4)

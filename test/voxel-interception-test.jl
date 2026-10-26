@@ -118,7 +118,7 @@ end
     backend = VoxelCPUBackend(rays_per_voxel=4)
     soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.3)
 
-    for terrain in (NoVoxelTerrain(), PlanarTerrain(grid, soil; elevation=0.0))
+    for terrain in (NoVoxelTerrain(), ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.0), Dict(1 => soil)))
         responses = prepare_voxel_responses(grid, turtle, backend, terrain; options)
         baseline = compute_voxel_first_order(
             grid, turtle, fluxes, backend;

@@ -2,7 +2,7 @@
     soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)
     coordinates = [0.0, 1.0, 2.0]
     continuous = [0.0 0.0 0.0; 0.0 0.5 0.0; 0.0 0.0 0.0]
-    terrain = HeightFieldTerrain(coordinates, coordinates, continuous, soil; periodic=true)
+    terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain(coordinates, coordinates, continuous; periodic=true), Dict(1 => soil))
     @test terrain.periodic
     @test terrain_elevation_at(terrain, 0.0, 0.75) ≈
           terrain_elevation_at(terrain, 2.0, 0.75)
@@ -11,38 +11,38 @@
 
     x_seam = [0.0 0.0 0.0; 0.25 0.25 0.25; 0.5 0.5 0.5]
     y_seam = permutedims(x_seam)
-    @test_throws ArgumentError HeightFieldTerrain(
-        coordinates, coordinates, x_seam, soil; periodic=true,
-    )
-    @test_throws ArgumentError HeightFieldTerrain(
-        coordinates, coordinates, y_seam, soil; periodic=true,
-    )
-    @test HeightFieldTerrain(coordinates, coordinates, x_seam, soil).periodic == false
+    @test_throws ArgumentError ArchimedLight._with_terrain_materials(HeightFieldTerrain(
+        coordinates, coordinates, x_seam; periodic=true
+    ), Dict(1 => soil))
+    @test_throws ArgumentError ArchimedLight._with_terrain_materials(HeightFieldTerrain(
+        coordinates, coordinates, y_seam; periodic=true
+    ), Dict(1 => soil))
+    @test ArchimedLight._with_terrain_materials(HeightFieldTerrain(coordinates, coordinates, x_seam), Dict(1 => soil)).periodic == false
 
     # Roundoff at a large absolute elevation is accepted, a genuine step is not.
     high = fill(1.0e6, 3, 3)
     high[end, 2] += 1.0e-9
-    @test HeightFieldTerrain(coordinates, coordinates, high, soil; periodic=true).periodic
+    @test ArchimedLight._with_terrain_materials(HeightFieldTerrain(coordinates, coordinates, high; periodic=true), Dict(1 => soil)).periodic
     high[end, 2] += 1.0e-4
-    @test_throws ArgumentError HeightFieldTerrain(
-        coordinates, coordinates, high, soil; periodic=true,
-    )
+    @test_throws ArgumentError ArchimedLight._with_terrain_materials(HeightFieldTerrain(
+        coordinates, coordinates, high; periodic=true
+    ), Dict(1 => soil))
 end
 
 @testitem "Cached terrain bounds and clipped soil emission points" tags=[:voxel, :terrain, :fast] begin
     soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)
     grid = VoxelGrid((0, 0, 0), (1, 1, 2), zeros(1, 1, 2))
-    plane = PlanarTerrain(0.25, (-2, 2), (-2, 2), soil; cells=(2, 2))
+    plane = ArchimedLight._with_terrain_materials(PlanarTerrain(0.25, (-2, 2), (-2, 2); cells=(2, 2)), Dict(1 => soil))
     @test ArchimedLight._terrain_patch_emission_point(grid, plane, 4) == (0.5, 0.5, 0.25)
     @test ArchimedLight._terrain_patch_emission_point(grid, plane, 1) === nothing
     @test ArchimedLight._terrain_launch_point(grid, plane, 1) === nothing
     @test ArchimedLight._terrain_launch_point(grid, plane, 4)[3] > 0.25
 
     # The full facet centroid lies outside the grid, but its overlap covers the grid.
-    triangle = TriangulatedTerrain(
+    triangle = ArchimedLight._with_terrain_materials(TriangulatedTerrain(
         [(-4.0, -4.0, 0.5), (4.0, -4.0, 0.5), (0.0, 4.0, 1.3)],
-        [(1, 2, 3)], soil,
-    )
+        [(1, 2, 3)]
+    ), Dict(1 => soil))
     @test terrain_patch_point(triangle, 1)[2] < grid.minimum[2]
     @test terrain_bounds(triangle) == ((-4.0, -4.0, 0.5), (4.0, 4.0, 1.3))
     @test terrain_bounds(triangle) == (triangle.bvh.lower[1], triangle.bvh.upper[1])
@@ -52,11 +52,11 @@ end
 
     # A tiny but positive overlap must not be pushed outside by the normal nudge.
     edge = 1.0e-14
-    sliver = TriangulatedTerrain(
+    sliver = ArchimedLight._with_terrain_materials(TriangulatedTerrain(
         [(-1.0, -1.0, 0.0), (edge, -1.0, 0.5), (edge, 2.0, 0.5),
          (2.0, -1.0, 0.5), (2.0, 2.0, 0.5)],
-        [(1, 2, 3), (2, 4, 5), (2, 5, 3)], soil,
-    )
+        [(1, 2, 3), (2, 4, 5), (2, 5, 3)]
+    ), Dict(1 => soil))
     clipped_sliver = ArchimedLight._terrain_patch_emission_point(grid, sliver, 1)
     launch_sliver = ArchimedLight._terrain_launch_point(grid, sliver, 1)
     @test clipped_sliver !== nothing
@@ -69,7 +69,7 @@ end
     )
     @test haskey(sliver_cache.terrain_paths, (1, 1))
 
-    height = HeightFieldTerrain([-2.0, 2.0], [-2.0, 2.0], fill(0.25, 2, 2), soil)
+    height = ArchimedLight._with_terrain_materials(HeightFieldTerrain([-2.0, 2.0], [-2.0, 2.0], fill(0.25, 2, 2)), Dict(1 => soil))
     @test terrain_bounds(height) == ((-2.0, -2.0, 0.25), (2.0, 2.0, 0.25))
     for patch in 1:2
         point = ArchimedLight._terrain_patch_emission_point(grid, height, patch)
@@ -86,7 +86,7 @@ end
     index = CartesianIndex(1, 1, 1)
     # At the horizontal centre the terrain is above the bottom voxel's top.
     # A positive-area strip remains exposed near x=0.
-    height = HeightFieldTerrain([0.0, 1.0], [0.0, 1.0], [0.8 0.8; 1.8 1.8], soil)
+    height = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0], [0.0, 1.0], [0.8 0.8; 1.8 1.8]), Dict(1 => soil))
     @test terrain_elevation_at(height, 0.5, 0.5) > 1.0
     for terrain in (height, height.mesh)
         point = ArchimedLight._terrain_voxel_source_point(grid, index, terrain)
@@ -96,9 +96,9 @@ end
         @test ArchimedLight._terrain_voxel_source_point(grid, CartesianIndex(1, 1, 2), terrain) ==
               (0.5, 0.5, 1.5)
     end
-    buried = PlanarTerrain(grid, soil; elevation=1.2)
+    buried = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=1.2), Dict(1 => soil))
     @test ArchimedLight._terrain_voxel_source_point(grid, index, buried) === nothing
-    flat = PlanarTerrain(grid, soil; elevation=0.1)
+    flat = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.1), Dict(1 => soil))
     @test ArchimedLight._terrain_voxel_source_point(grid, index, flat) == (0.5, 0.5, 0.5)
     @test ArchimedLight._terrain_voxel_source_point(grid, index, NoVoxelTerrain()) ==
           (0.5, 0.5, 0.5)
@@ -118,12 +118,12 @@ end
         for altitude in (0.0, 4096.0)
             grid = VoxelGrid((0, 0, altitude), (1, 1, altitude + 1), ones(1, 1, 1))
             surface = altitude + 0.75
-            terrain = kind == :planar ? PlanarTerrain(grid, soil; elevation=surface) :
-                TriangulatedTerrain(
+            terrain = kind == :planar ? ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=surface), Dict(1 => soil)) :
+                ArchimedLight._with_terrain_materials(TriangulatedTerrain(
                     [(0.0, 0.0, surface), (1.0, 0.0, surface),
                      (1.0, 1.0, surface), (0.0, 1.0, surface)],
-                    [(1, 2, 3), (1, 3, 4)], soil,
-                )
+                    [(1, 2, 3), (1, 3, 4)]
+                ), Dict(1 => soil))
             source = AL._terrain_voxel_source_point(grid, CartesianIndex(1, 1, 1), terrain)
             @test surface < source[3] < grid.maximum[3]
             for patch in 1:terrain_patch_count(terrain)
@@ -170,8 +170,8 @@ end
     for altitude in (0.0, 4096.0)
         pad = reshape([1.0, 0.0], 1, 1, 2)
         grid = VoxelGrid((0, 0, altitude), (1, 1, altitude + 2), pad)
-        height = HeightFieldTerrain([0.0, 1.0], [0.0, 1.0],
-            altitude .+ [0.8 0.8; 1.8 1.8], soil)
+        height = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0], [0.0, 1.0],
+            altitude .+ [0.8 0.8; 1.8 1.8]), Dict(1 => soil))
         # Its column centre is buried, so the source must use the exposed strip.
         @test terrain_elevation_at(height, 0.5, 0.5) > altitude + 1
         for terrain in (height, height.mesh)

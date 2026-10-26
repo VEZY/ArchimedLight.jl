@@ -23,13 +23,9 @@ function _voxel_docs_scene()
         xi + yi < 7 ? 1 : (xi > 10 && yi > 8 ? 3 : 2) for
         xi in 1:(length(x) - 1), yi in 1:(length(y) - 1)
     ]
-    terrain = HeightFieldTerrain(
-        x,
-        y,
-        elevation,
-        _VOXEL_DOCS_SOIL_DRY;
-        material_ids=material_ids,
-        materials=Dict(
+    terrain = ArchimedLight._with_terrain_materials(
+        HeightFieldTerrain(x, y, elevation; material_ids),
+        Dict(
             1 => _VOXEL_DOCS_SOIL_DRY,
             2 => _VOXEL_DOCS_SOIL_MOIST,
             3 => _VOXEL_DOCS_SOIL_LITTER,

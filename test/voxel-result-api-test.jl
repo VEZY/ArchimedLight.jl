@@ -55,7 +55,7 @@ end
         nir_reflectance=0.4, nir_transmittance=0.3)
     wood = VoxelMaterial(g=0.7, par_reflectance=0.2, nir_reflectance=0.4)
     vegetation = VoxelVegetation(input; mode=:point_proxy, leaf, wood)
-    scene = VoxelScene(vegetation)
+    scene = VoxelScene(input)
     row = (step_duration=30.0, Ri_PAR_f=100.0, Ri_NIR_f=50.0,
         sun_azimuth=120.0, sun_elevation=60.0, direct_fraction=0.7)
     options = LightOptions(toricity=false, scattering=false, turtle_sectors=6, all_in_turtle=true)
@@ -127,6 +127,6 @@ end
     @test light_metric_values(mixed, :Ra_PAR_0_q) ≈ 0.8 .* mixed.light.first_order.par_energy
     initial_absorbed = ArchimedLight._voxel_metric_values(vegetation, mixed, :Ra_PAR_0_q)
     @test initial_absorbed ≈ 0.8 .* mixed.light.first_order.par_energy
-    @test ArchimedLight._voxel_metric_values(VoxelScene(vegetation), mixed, :Ri_PAR_f) ≈
+    @test ArchimedLight._voxel_metric_values(VoxelScene(input), mixed, :Ri_PAR_f) ≈
         light_metric_values(mixed, :Ri_PAR_f)
 end

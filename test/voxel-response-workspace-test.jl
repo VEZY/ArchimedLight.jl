@@ -23,7 +23,7 @@
             y = collect(range(minimum[2], maximum[2]; length=3))
             heights = fill(minimum[1] == -1 ? 0.35 : 0.65, 3, 3)
             heights[2, 2] += 0.4
-            periodic = HeightFieldTerrain(x, y, heights, soil; periodic=true)
+            periodic = ArchimedLight._with_terrain_materials(HeightFieldTerrain(x, y, heights; periodic=true), Dict(1 => soil))
             scenes = ((NoVoxelTerrain(), false), (periodic.mesh, false), (periodic, true))
             for (terrain, toricity) in scenes, rays in (1, 16),
                 direction in ((0.0, 0.0, -1.0), (0.4, -0.2, -1.0), (-0.6, 0.2, -0.5))
@@ -52,8 +52,8 @@ end
     AL = ArchimedLight
     soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
     grid = VoxelGrid((0, 0, 0), (2, 2, 3), fill(0.2, 2, 2, 3))
-    terrain = HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.0, 2.0],
-        [0.5 0.5 0.5; 0.5 0.8 0.5; 0.5 0.5 0.5], soil; periodic=true)
+    terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.0, 2.0],
+        [0.5 0.5 0.5; 0.5 0.8 0.5; 0.5 0.5 0.5]; periodic=true), Dict(1 => soil))
     backend = VoxelCPUBackend(rays_per_voxel=4)
     options = LightOptions(toricity=false)
     default_backend, default_options = backend, options
@@ -82,8 +82,7 @@ end
     @test signature(changed) == signature(fresh)
     @test changed.interception_fraction != initial.interception_fraction
     bright = SoilOpticalProperties(par_reflectance=0.6, nir_reflectance=0.8)
-    optical_terrain = HeightFieldTerrain(terrain.x, terrain.y, terrain.elevation,
-        bright; periodic=true)
+    optical_terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain(terrain.x, terrain.y, terrain.elevation; periodic=true), Dict(1 => bright))
     @test signature(cached_response(grid, optical_terrain)) == saved
 
     # A cache must reject changes that move launch points or the terrain under
@@ -98,8 +97,7 @@ end
         VoxelCPUBackend(rays_per_voxel=16))
     @test_throws ArgumentError cached_response(grid, terrain;
         options=LightOptions(toricity=true))
-    raised = HeightFieldTerrain(terrain.x, terrain.y, terrain.elevation .+ 0.3,
-        soil; periodic=true)
+    raised = ArchimedLight._with_terrain_materials(HeightFieldTerrain(terrain.x, terrain.y, terrain.elevation .+ 0.3; periodic=true), Dict(1 => soil))
     @test_throws ArgumentError cached_response(grid, raised)
     raised_cache = AL.VoxelLaunchGeometryCache(grid, raised, backend, false)
     raised_result = cached_response(grid, raised; launch_cache=raised_cache)
@@ -112,8 +110,8 @@ end
     # A bounding box is not a proof of surface coverage. Unused launch points
     # must not trigger eager hole errors, while used origins still must fail.
     small = VoxelGrid((0, 0, 0), (1, 1, 3), zeros(1, 1, 3))
-    gap = TriangulatedTerrain([(0.0, 0.0, 0.5), (1.0, 0.0, 0.5),
-        (0.0, 1.0, 0.5)], [(1, 2, 3)], soil)
+    gap = ArchimedLight._with_terrain_materials(TriangulatedTerrain([(0.0, 0.0, 0.5), (1.0, 0.0, 0.5),
+        (0.0, 1.0, 0.5)], [(1, 2, 3)]), Dict(1 => soil))
     single = VoxelCPUBackend(rays_per_voxel=1)
     lazy = AL.VoxelLaunchGeometryCache(small, gap, single, false)
     covered = AL.compute_voxel_direction_response(small, (0, 0, -1), single, gap;
@@ -137,7 +135,7 @@ end
         terrain.elevation
     function ArchimedLight.intersect_terrain(terrain::MutableElevationTerrain,
                                             origin, direction, maximum_distance::Real=Inf)
-        plane = PlanarTerrain(terrain.elevation, (0.0, 1.0), (0.0, 1.0), terrain.soil)
+        plane = ArchimedLight._with_terrain_materials(PlanarTerrain(terrain.elevation, (0.0, 1.0), (0.0, 1.0)), Dict(1 => terrain.soil))
         return intersect_terrain(plane, origin, direction, maximum_distance)
     end
 
@@ -170,9 +168,9 @@ end
 @testitem "Independent terrain response calls do not share mutable scratch" tags=[:voxel, :terrain, :fast] begin
     soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
     grid = VoxelGrid((0, 0, 0), (2, 3, 4), fill(0.4, 2, 2, 4))
-    low = HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.5, 3.0],
-        [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2], soil)
-    high = HeightFieldTerrain(low.x, low.y, low.elevation .+ 0.8, soil)
+    low = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.5, 3.0],
+        [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2]), Dict(1 => soil))
+    high = ArchimedLight._with_terrain_materials(HeightFieldTerrain(low.x, low.y, low.elevation .+ 0.8), Dict(1 => soil))
     cases = ((low.mesh, (0.5, -0.2, -1.0), 4),
              (high.mesh, (-0.3, 0.4, -0.5), 16),
              (low.mesh, (0.0, 0.0, -1.0), 1),
@@ -196,7 +194,7 @@ end
 @testitem "Terrain path ownership and origin errors survive side exits" tags=[:voxel, :terrain, :fast] begin
     soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
     grid = VoxelGrid((0, 0, 0), (1, 1, 3), ones(1, 1, 3))
-    terrain = PlanarTerrain(grid, soil; elevation=0.5)
+    terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.5), Dict(1 => soil))
     options = LightOptions(toricity=false)
     path = trace_voxel_ray(grid, (0.25, 0.25, 3.0), (0, 0, -1); options, terrain)
     saved = deepcopy(path)
@@ -209,8 +207,8 @@ end
 
     # These rays leave sideways before reaching the soil. Public origin
     # validation must still reject buried origins and holes under the origin.
-    gap = TriangulatedTerrain(
-        [(0.0, 0.0, 0.5), (1.0, 0.0, 0.5), (0.0, 1.0, 0.5)], [(1, 2, 3)], soil)
+    gap = ArchimedLight._with_terrain_materials(TriangulatedTerrain(
+        [(0.0, 0.0, 0.5), (1.0, 0.0, 0.5), (0.0, 1.0, 0.5)], [(1, 2, 3)]), Dict(1 => soil))
     for algorithm in (:dda, :reference)
         @test_throws ArgumentError trace_voxel_ray(grid, (0.9, 0.5, 0.25),
             (1.0, 0.0, -0.01); options, terrain, algorithm)

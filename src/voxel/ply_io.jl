@@ -7,7 +7,7 @@ function _ply_named_entry(entries, name, description)
 end
 
 """
-    read_ply_terrain(path, optics=nothing;
+    read_ply_terrain(path;
                      transform=TerrainCoordinateTransform(), kwargs...)
 
 Read a triangular PLY DTM into the existing `TriangulatedTerrain` representation.
@@ -24,14 +24,13 @@ than silently triangulated.
 `transform` explicitly maps file coordinates to the voxel reference frame;
 the default is identity. No translation, rescaling, CRS conversion, or terrain
 alignment is inferred. Additional keywords are passed to `TriangulatedTerrain`,
-including soil material assignments and BVH `leaf_size`.
+including material IDs and BVH `leaf_size`.
 Generic triangular terrain cannot be periodic.
-Omit optics to import geometry and material identities before configuring soil
-models at simulation setup.
+The reader imports geometry and material identities. Configure soil models
+separately at simulation setup.
 """
 function read_ply_terrain(
-    path::AbstractString,
-    optics::Union{Nothing,SoilOpticalProperties}=nothing;
+    path::AbstractString;
     transform::TerrainCoordinateTransform=TerrainCoordinateTransform(),
     kwargs...,
 )
@@ -70,5 +69,5 @@ function read_ply_terrain(
         ))
         push!(triangles, ntuple(axis -> Int(vertices[axis]) + 1, 3))
     end
-    return TriangulatedTerrain(points, triangles, optics; kwargs...)
+    return TriangulatedTerrain(points, triangles; kwargs...)
 end

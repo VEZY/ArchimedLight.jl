@@ -2,8 +2,8 @@
     grid = VoxelGrid((0, 0, 0), (2, 1, 2), zeros(2, 1, 2))
     dark = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.3)
     bright = SoilOpticalProperties(par_reflectance=0.6, nir_reflectance=0.7)
-    terrain = PlanarTerrain(0, (0, 2), (0, 1), dark; cells=(2, 1),
-        material_ids=reshape([1, 2], 2, 1), materials=Dict(1 => dark, 2 => bright))
+    terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(0, (0, 2), (0, 1); cells=(2, 1),
+        material_ids=reshape([1, 2], 2, 1)), Dict(1 => dark, 2 => bright))
     quadrature = VoxelScatteringQuadrature(
         [(0.0, 0.0, 1.0), (0.0, 0.0, -1.0)], [0.5, 0.5])
     options = LightOptions(toricity=false)
@@ -38,7 +38,7 @@ end
         scattering_stop_ratio=1e-10, nir_interception=true, nir_scattering=false)
     for coefficient in (0.0, 0.4), omega in (0.0, 0.5)
         soil = SoilOpticalProperties(par_reflectance=coefficient, nir_reflectance=coefficient)
-        terrain = PlanarTerrain(grid, soil; elevation=0.0)
+        terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.0), Dict(1 => soil))
         optics = VoxelOpticalProperties(grid; scattering_par=omega, scattering_nir=0.6)
         first = compute_voxel_first_order(grid, turtle, fluxes, backend;
             duration_seconds=1.0, options, terrain)
@@ -70,8 +70,8 @@ end
 @testitem "Terrain diagnostics accumulate internal soil bounces before unresolved cutoff" tags=[:voxel, :terrain, :scattering, :fast] begin
     grid = VoxelGrid((0, 0, 0), (1, 1, 11), zeros(1, 1, 1))
     soil = SoilOpticalProperties(par_reflectance=0.99, nir_reflectance=0.99)
-    terrain = HeightFieldTerrain([0.0, 0.5, 1.0], [0.0, 1.0],
-        [10.0 10.0; 0.0 0.0; 10.0 10.0], soil; periodic=true)
+    terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 0.5, 1.0], [0.0, 1.0],
+        [10.0 10.0; 0.0 0.0; 10.0 10.0]; periodic=true), Dict(1 => soil))
     optics = VoxelOpticalProperties(grid; scattering_par=0.0, scattering_nir=0.0)
     options = LightOptions(toricity=true, turtle_sectors=16, all_in_turtle=true,
         scattering=true, scattering_max_iter=10, scattering_stop_ratio=1e-8)

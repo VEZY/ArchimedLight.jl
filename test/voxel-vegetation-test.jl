@@ -135,8 +135,8 @@ end
     for toric in (false, true)
         options = LightOptions(toricity=toric, scattering=true, turtle_sectors=6,
             all_in_turtle=true, scattering_max_iter=20, scattering_stop_ratio=1e-8)
-        terrain = PlanarTerrain(input.grid, SoilOpticalProperties(par_reflectance=0.1, nir_reflectance=0.3);
-                                elevation=0.0, periodic=toric)
+        terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(input.grid;
+                                elevation=0.0, periodic=toric), Dict(1 => SoilOpticalProperties(par_reflectance=0.1, nir_reflectance=0.3)))
         mixed = run_voxel_light_step(model, row, options; backend, terrain)
         native = run_voxel_light_step(input.grid, row, options; backend, terrain,
             optics=VoxelOpticalProperties(input.grid; scattering_par=0.15, scattering_nir=0.7))

@@ -73,15 +73,17 @@ function physical_checks()
     small = VoxelGrid((0, 0, 0), (1, 1, 2), fill(0.5, 1, 1, 2))
     cpu = VoxelCPUBackend(rays_per_voxel=4, g=0.5, traversal=:dda)
     soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.5)
-    terrain = PlanarTerrain(small, soil; elevation=0.0)
-    optics = VoxelOpticalProperties(small; par_reflectance=0.08, par_transmittance=0.07,
+    scene = VoxelScene(small)
+    add_ground!(scene; elevation=0.0)
+    leaf = VoxelMaterial(g=0.5, par_reflectance=0.08, par_transmittance=0.07,
         nir_reflectance=0.45, nir_transmittance=0.40)
+    models = models_for(; leaf, ground=soil)
     row = (step_duration=3600.0, Ri_PAR_f=100.0, Ri_NIR_f=50.0, sun_azimuth=180.0,
         sun_elevation=35.0, direct_fraction=0.5)
     options = LightOptions(toricity=false, turtle_sectors=1, all_in_turtle=true, scattering=true,
         scattering_max_iter=80, scattering_stop_ratio=1e-10,
         nir_interception=true, nir_scattering=true, radiation_timestep_minutes=5.0)
-    result = run_light(VoxelScene(small; terrain), row; options, backend=cpu, optics)
+    result = run_light(scene, row; models, options, backend=cpu)
     budgets = map((:par, :nir)) do waveband
         band = getproperty(result.scattering, waveband)
         incoming = getproperty(result.first_order, Symbol(waveband, :_incoming_energy))

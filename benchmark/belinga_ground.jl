@@ -22,7 +22,8 @@ end
 
 function _assemble(input, leaf, black)
     vegetation = VoxelVegetation(input; mode=:point_proxy, leaf, wood=black, unknown=black)
-    ground = PlanarTerrain(input, SoilOpticalProperties(par_reflectance=0, nir_reflectance=0))
+    ground = ArchimedLight._resolve_voxel_ground(PlanarTerrain(input),
+        models_for(; ground=SoilOpticalProperties(par_reflectance=0, nir_reflectance=0)))
     return vegetation, ground
 end
 

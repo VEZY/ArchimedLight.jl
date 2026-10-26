@@ -27,8 +27,6 @@ struct VoxelPointInput
     point_count::Array{Int,3}
 end
 
-PlanarTerrain(input::VoxelPointInput, optics::SoilOpticalProperties; kwargs...) =
-    PlanarTerrain(input.grid, optics; kwargs...)
 PlanarTerrain(input::VoxelPointInput; kwargs...) = PlanarTerrain(input.grid; kwargs...)
 
 function _voxel_point_integer(value, label; positive=false)

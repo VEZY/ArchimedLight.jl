@@ -20,7 +20,7 @@
     @test occursin("1 (IDs: \"1\")", sprint(show, MIME"text/plain"(), input))
 
     soil = SoilOpticalProperties(par_reflectance=0.12, nir_reflectance=0.32)
-    terrain = read_ply_terrain(joinpath(directory, "terrain.ply"), soil)
+    terrain = ArchimedLight._with_terrain_materials(read_ply_terrain(joinpath(directory, "terrain.ply")), Dict(1 => soil))
     @test length(terrain.vertices) == 289
     @test terrain_patch_count(terrain) == 512
     @test terrain_bounds(terrain)[1][1:2] == (0.0, 0.0)
@@ -36,7 +36,7 @@ end
     grid = read_voxel_grid(joinpath(directory, "tree.vox"))
     input = read_voxel_point_input(joinpath(directory, "tree.jsonl.gz"))
     soil = SoilOpticalProperties(par_reflectance=0.12, nir_reflectance=0.32)
-    terrain = read_ply_terrain(joinpath(directory, "terrain.ply"), soil)
+    terrain = ArchimedLight._with_terrain_materials(read_ply_terrain(joinpath(directory, "terrain.ply")), Dict(1 => soil))
     scene = VoxelScene(input)
     add_ground!(scene, read_ply_terrain(joinpath(directory, "terrain.ply")))
     row = (step_duration=3600.0, Ri_PAR_f=100.0, Ri_NIR_f=50.0,
@@ -77,6 +77,6 @@ end
                    sum(mixed.light.scattering.nir.absorbed_energy); rtol=1e-6)
     @test input.grid.pad == grid.pad
     @test scene.models === nothing
-    @test scene.vegetation === nothing
+    @test !hasproperty(scene, :vegetation)
     @test isempty(ArchimedLight._terrain_materials(scene.terrain))
 end

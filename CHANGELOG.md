@@ -12,8 +12,8 @@
   `run_light`, `light_metric_values`, `component_values`, and `lightplot`.
   Add mutable `VoxelScene` containers retaining imported observations and
   explicit individual/organ models, plus a triangle-to-voxel migration guide.
-- Construct flat voxel ground directly from point inputs or vegetation, using
-  the scene extent by default and optional ground patch counts.
+- Construct flat voxel ground with `add_ground!`, using the scene extent by
+  default and optional ground patch counts.
 - Add a CPU voxel interception workflow with historical `.vox`
   I/O, open and periodic horizontal boundaries, reference and DDA traversals,
   first-order PAR/NIR Beer–Lambert interception, directional-response caching,
@@ -38,9 +38,9 @@
 
 ### Changed
 
-- Separate voxel ground geometry from material configuration: `add_ground!`
-  and PLY import can create terrain without soil optics, which are assigned
-  through the voxel model configuration.
+- Keep voxel scene import, terrain constructors and `add_ground!` strictly
+  geometric. Configure all vegetation and soil optical properties through
+  `models_for`, supplied to `run_light` or retained with `update_models!`.
 - Replace the unreleased public `voxelplot`/`voxelplot!` helpers with
   `lightplot`/`lightplot!`. Use `colormap` and `colorrange` instead of
   `voxel_colormap` and `voxel_colorrange`; without light results, plots show

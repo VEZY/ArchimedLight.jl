@@ -181,8 +181,9 @@ function make_data(bounds::Vector{Float64}, dims::Vector{Int32}, pad::Vector{Flo
     materials[1] = soil
     # Parsing, facet validation, and BVH construction happened in native Julia.
     # This reconstructs the same read-only geometry, never light responses.
-    terrain = AL.TriangulatedTerrain(points, triangles, ones(Int, length(triangles)),
-        materials, facet_normals, AL.TerrainBVH(lower, upper, left, right, leaves))
+    geometry = AL.TriangulatedTerrain(points, triangles, ones(Int, length(triangles)),
+        AL._SoilMaterialTable(), facet_normals, AL.TerrainBVH(lower, upper, left, right, leaves))
+    terrain = AL._with_terrain_materials(geometry, materials)
     backend = AL.VoxelCPUBackend(; rays_per_voxel=Int(rays_per_voxel), g)
     reflectance, transmittance = similar(density), similar(density)
     @inbounds for i in eachindex(density)

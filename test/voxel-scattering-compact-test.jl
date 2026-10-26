@@ -98,7 +98,7 @@
         @test isempty(empty_path.segments) && empty_path.exit_reason == reason
     end
     soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.3)
-    plane = PlanarTerrain(empty_grid, soil; elevation=0.25)
+    plane = ArchimedLight._with_terrain_materials(PlanarTerrain(empty_grid; elevation=0.25), Dict(1 => soil))
     _, compact, result = check_path(empty_grid, backend,
         (0.5, 0.5, 0.75), (0, 0, -1); terrain=plane)
     @test isempty(compact.segments) && compact.terrain_patch_id == 1
@@ -112,9 +112,9 @@ end
     pad = reshape([i % 4 == 0 ? 0.0 : 0.1 + 0.05mod(i, 5) for i in 1:18], 2, 3, 3)
     grid = VoxelGrid((0, 0, 0), (2, 3, 3), pad)
     soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)
-    height = HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.5, 3.0],
-        [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2], soil; periodic=true)
-    plane = PlanarTerrain(grid, soil; elevation=0.2, periodic=true)
+    height = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.5, 3.0],
+        [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2]; periodic=true), Dict(1 => soil))
+    plane = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2, periodic=true), Dict(1 => soil))
     rounded = AL._normalise_voxel_transport_direction((7 / 17, -3 / 13, 0.1 + 7 / 19))
     @test AL._normalise_voxel_transport_direction(rounded) != rounded
     turtle = AL.TurtleGrid([
@@ -191,8 +191,7 @@ end
     grid = VoxelGrid((0, 0, 0), (2, 3, 2), fill(0.7, 2, 3, 2))
     black = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
     bright = SoilOpticalProperties(par_reflectance=0.4, nir_reflectance=0.6)
-    terrain = PlanarTerrain(grid, black; elevation=0.1,
-        materials=Dict(1 => black, 2 => bright))
+    terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.1), Dict(1 => black, 2 => bright))
     turtle = AL.TurtleGrid([AL.TurtleSector(1,
         AL.StaticArrays.SVector(0.0, 0.0, 1.0), 1.0, :sky)])
     quadrature = prepare_voxel_scattering_quadrature(turtle)
@@ -261,7 +260,7 @@ end
     @test_throws ArgumentError apply_voxel_scattering_transport(grid, emitted, quadrature, backend;
         terrain, options=LightOptions(options; toricity=true), cache)
 
-    mesh = HeightFieldTerrain([0.0, 2.0], [0.0, 3.0], fill(0.1, 2, 2), bright).mesh
+    mesh = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 2.0], [0.0, 3.0], fill(0.1, 2, 2)), Dict(1 => bright)).mesh
     mesh_cache = prepare_voxel_scattering_transport(grid, quadrature, backend, mesh;
         options, compact=true)
     mesh.vertices[1] = (0.0, 0.0, 0.2)
@@ -274,7 +273,7 @@ end
     @test_throws ArgumentError apply_voxel_scattering_transport(empty_grid, ones(size(empty_grid)),
         quadrature, backend; options, cache=empty_cache)
     buried_grid = VoxelGrid((0, 0, 0), (1, 1, 2), reshape([0.5, 0.0], 1, 1, 2))
-    buried_terrain = PlanarTerrain(buried_grid, black; elevation=1.2)
+    buried_terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(buried_grid; elevation=1.2), Dict(1 => black))
     buried_cache = prepare_voxel_scattering_transport(buried_grid, quadrature, backend, buried_terrain;
         options, compact=true)
     @test_throws ArgumentError apply_voxel_scattering_transport(buried_grid, buried_grid.pad,

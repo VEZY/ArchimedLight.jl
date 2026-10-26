@@ -220,11 +220,9 @@ function _triangulated_raster_terrain(
     x,
     y,
     elevation,
-    optics,
     transform;
     material_id,
     material_ids,
-    materials,
 )
     vertices = NTuple{3,Float64}[]
     for j in eachindex(y), i in eachindex(x)
@@ -254,16 +252,14 @@ function _triangulated_raster_terrain(
     end
     return TriangulatedTerrain(
         vertices,
-        triangles,
-        optics;
+        triangles;
         material_id=material_id,
         material_ids=assignments,
-        materials=materials,
     )
 end
 
 """
-    height_field_terrain(aai, optics=nothing; transform=TerrainCoordinateTransform(), ...)
+    height_field_terrain(aai; transform=TerrainCoordinateTransform(), ...)
 
 Convert AAIGrid cell-centre elevations to a continuous triangulated surface.
 Every centre remains an exact vertex; raster edges use constant nearest-cell
@@ -276,13 +272,11 @@ transforms retain a `HeightFieldTerrain`; rotations/shears produce an explicit
 `TriangulatedTerrain` and cannot be periodic.
 """
 function height_field_terrain(
-    aai::AAIGrid,
-    optics::Union{Nothing,SoilOpticalProperties}=nothing;
+    aai::AAIGrid;
     transform::TerrainCoordinateTransform=TerrainCoordinateTransform(),
     periodic::Bool=false,
     material_id::Integer=1,
     material_ids=nothing,
-    materials=nothing,
 )
     x, y, elevation = _cell_centres_to_vertex_grid(
         aai.elevation,
@@ -299,12 +293,10 @@ function height_field_terrain(
         return HeightFieldTerrain(
             transformed_x,
             transformed_y,
-            transformed_z,
-            optics;
+            transformed_z;
             periodic=periodic,
             material_id=material_id,
             material_ids=patch_material_ids,
-            materials=materials,
         )
     end
     periodic && throw(ArgumentError(
@@ -314,11 +306,9 @@ function height_field_terrain(
         x,
         y,
         elevation,
-        optics,
         transform;
         material_id=material_id,
         material_ids=patch_material_ids,
-        materials=materials,
     )
 end
 
@@ -370,8 +360,7 @@ end
 
 function terrain_from_ground_distance(
     grid::VoxelGrid,
-    ground_distance::AbstractArray{<:Real,3},
-    optics::Union{Nothing,SoilOpticalProperties}=nothing;
+    ground_distance::AbstractArray{<:Real,3};
     dtm_used_by_amapvox::Bool,
     periodic::Bool=false,
     atol::Real=1e-6,
@@ -416,7 +405,7 @@ function terrain_from_ground_distance(
         [grid.minimum[2] + (index - 0.5) * grid.voxel_size[2] for index in 1:ny],
         grid.maximum[2],
     )
-    return HeightFieldTerrain(x, y, elevation, optics; periodic=periodic)
+    return HeightFieldTerrain(x, y, elevation; periodic=periodic)
 end
 
 """Authoritative AMAPVox voxel + DTM input contract."""
@@ -452,8 +441,7 @@ struct VoxelTerrainScene{T<:AbstractVoxelTerrain}
 end
 
 function read_voxel_terrain_scene(
-    input::VoxelTerrainSceneInput,
-    optics::Union{Nothing,SoilOpticalProperties}=nothing;
+    input::VoxelTerrainSceneInput;
     periodic::Bool=false,
     validate_alignment::Bool=true,
     alignment_atol::Real=1e-6,
@@ -462,8 +450,7 @@ function read_voxel_terrain_scene(
     grid = read_voxel_grid(input.voxel_path)
     aai = read_aai_grid(input.dtm_path; crs=input.dtm_to_voxel.source_crs)
     terrain = height_field_terrain(
-        aai,
-        optics;
+        aai;
         transform=input.dtm_to_voxel,
         periodic=periodic,
     )

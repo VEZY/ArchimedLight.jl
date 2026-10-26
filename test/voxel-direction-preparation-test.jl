@@ -55,8 +55,8 @@ end
     x = collect(range(grid.minimum[1], grid.maximum[1]; length=3))
     y = collect(range(grid.minimum[2], grid.maximum[2]; length=3))
     heights = [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2]
-    heightfield = HeightFieldTerrain(x, y, heights, soil; periodic=true)
-    planar = PlanarTerrain(grid, soil; elevation=0.2, periodic=true)
+    heightfield = ArchimedLight._with_terrain_materials(HeightFieldTerrain(x, y, heights; periodic=true), Dict(1 => soil))
+    planar = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2, periodic=true), Dict(1 => soil))
     scenes = ((NoVoxelTerrain(), false), (NoVoxelTerrain(), true),
               (planar, false), (planar, true), (heightfield.mesh, false),
               (heightfield, false), (heightfield, true))
@@ -153,7 +153,7 @@ end
     end
     function AL.intersect_terrain(terrain::ChangingBoundsTerrain, origin,
                                   direction, limit::Real=Inf)
-        intersect_terrain(PlanarTerrain(0.2, (0, 1), (0, 1), terrain.soil),
+        intersect_terrain(ArchimedLight._with_terrain_materials(PlanarTerrain(0.2, (0, 1), (0, 1)), Dict(1 => terrain.soil)),
             origin, direction, limit)
     end
     soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
@@ -181,8 +181,8 @@ end
 @testitem "Native voxel steps and series retain changing-sun terrain parity" tags=[:voxel, :terrain, :fast] begin
     grid = VoxelGrid((0, 0, 0), (2, 3, 4), fill(0.2, 2, 2, 3))
     soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.3)
-    terrain = HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.5, 3.0],
-        [0.2 0.2 0.2; 0.2 0.6 0.2; 0.2 0.2 0.2], soil; periodic=true)
+    terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.5, 3.0],
+        [0.2 0.2 0.2; 0.2 0.6 0.2; 0.2 0.2 0.2]; periodic=true), Dict(1 => soil))
     optics = VoxelOpticalProperties(grid; par_reflectance=0.1,
         par_transmittance=0.05, nir_reflectance=0.3, nir_transmittance=0.2)
     backend = VoxelCPUBackend(rays_per_voxel=4)

@@ -485,8 +485,8 @@ Keywords:
 - `plantgeom_backend`: reserved PlantGeom backend selector. The current default
   is `:auto`.
 - Voxel inputs accept `missing_pad`, and `.vox` accepts `pad_column`.
-  For an individual/organ calculation, pass `mode=:point_proxy` and explicit
-  `leaf=VoxelMaterial(...)`, with optional wood and individual overrides.
+  Configure optical properties separately with [`models_for`](@ref), then pass
+  the models to [`run_light`](@ref).
 """
 function read_scene(path::AbstractString; plantgeom_backend=:auto, kwargs...)
     lower_path = lowercase(path)
