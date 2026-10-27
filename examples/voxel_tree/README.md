@@ -12,8 +12,9 @@ There are 576 cells, of which 65 contain vegetation: 4 trunk cells and 61
 crown cells. The three data files together occupy about 25 kB.
 
 - `tree.vox` contains only the grid and total PAD, in m² m⁻³.
-- `tree.jsonl.gz` uses the existing PointCloud2Model/Belinga `schema_version="1.0"`
-  format. Individual `1` owns all occupied cells. Trunk cells contain only
+- `tree.jsonl.gz` uses the JSON Lines voxel format (`schema_version="1.0"`):
+  metadata followed by per-voxel PAD, individual point counts and organ proportions.
+  Individual `1` owns all occupied cells. Trunk cells contain only
   wood; crown cells have 90% foliage and 10% wood.
 - `terrain.ply` contains the matching ground geometry: 289 vertices and 512
   triangles over the complete `[0,8] × [0,8]` horizontal domain. It is an ASCII
@@ -49,7 +50,7 @@ active (use Kaimon in this development workspace). Generation uses the public
 
 Load `.vox` and `.jsonl.gz` with `read_scene`; both return a `VoxelScene`.
 Use `add_ground!(scene)` for a flat ground, or
-`add_ground!(scene, read_ply_terrain(path))` for the bundled MNT. Geometry
+`add_ground!(scene, read_ply_terrain(path))` for the bundled terrain mesh. Geometry
 creation does not assign soil optics.
 Call `run_light(scene, row_or_table; models, options, backend)` and inspect the result
 with `light_metric_values` or `lightplot`.

@@ -127,8 +127,8 @@ mixed crops, and environments shaped by solar panels.
     </li>
     <li>
       <a class="application-card" href="applications/belinga.html">
-        <img src="assets/applications/belinga_composition.png" width="1700" height="1250" loading="lazy" alt="Belinga voxel canopy coloured by leaf, wood and unknown contents above generated flat ground.">
-        <span class="application-card-body"><strong>Belinga voxel canopy</strong><span>Olivier Martin · Pol Kennel · CIRAD–AMAP</span></span>
+        <img src="assets/applications/belinga_composition.png" width="1700" height="1250" loading="lazy" alt="The Belinga natural forest in Cameroon, represented by leaf, wood and unknown voxels above generated flat ground.">
+        <span class="application-card-body"><strong>Belinga natural forest</strong><span>Olivier Martin · Pol Kennel · CIRAD–AMAP</span></span>
       </a>
     </li>
   </ul>

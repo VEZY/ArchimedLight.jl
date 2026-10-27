@@ -1,10 +1,11 @@
 # Voxel Input Files And Individuals
 
-Use the existing merged AMAPVox/individual JSON Lines format directly, as in
-`belinga3_1m_PAD_merged.jsonl.gz`. Each decompressed line contains one JSON
-object: a metadata header followed by voxel records. gzip changes storage
-size, not the data model. No conversion to an ArchimedLight-specific exchange
-schema is required.
+Voxel input files describe plant area density (PAD) on a three-dimensional
+grid. Plain AMAPVox `.vox` files contain this density field; merged JSON Lines
+(`.jsonl` or compressed `.jsonl.gz`) files also describe the individuals and
+leaf/wood mixtures within each cell. Each JSON line contains one object: a
+metadata header followed by voxel records. Compression changes file size,
+not the information available to the model.
 
 ```@contents
 Pages = ["voxel_inputs.md"]
@@ -17,7 +18,7 @@ Depth = 3
 workflow: read a matching `.vox`/`.jsonl.gz` pair and PLY terrain, inspect the
 scene summaries, assign materials per individual and organ, then compare
 interception and absorbed energy. The example files are small and bundled
-under `examples/voxel_tree`; no Belinga data download is needed.
+under `examples/voxel_tree`; no external download is needed.
 
 This page describes the input contract and the additional decisions needed
 for measured scenes, including unknown PAD and unattributed vegetation.
@@ -27,7 +28,9 @@ for measured scenes, including unknown PAD and unattributed vegetation.
 ```julia
 using ArchimedLight
 
-scene = read_scene("belinga3_1m_PAD_merged.jsonl.gz")
+example_dir = joinpath(pkgdir(ArchimedLight), "examples", "voxel_tree")
+input_path = joinpath(example_dir, "tree.jsonl.gz")
+scene = read_scene(input_path)
 input = scene.input
 ```
 
@@ -39,15 +42,13 @@ by `read_scene`; they do not contain the merged individual proportions.
 `read_voxel_grid` and `read_voxel_point_input` remain available when only raw
 input structures are needed.
 
-The supplied Belinga file contains unknown PAD values. The default
-`missing_pad=:error` prevents treating unknown density as observed empty
-space. For an explicit sensitivity run, choose:
+The bundled tree has a known PAD value in every cell. Other exports may
+contain unknown PAD values. The default `missing_pad=:error` rejects these
+instead of treating unknown density as observed empty space. If you explicitly
+choose to test the assumption that missing values are zero, use:
 
 ```julia
-scene = read_scene(
-    "belinga3_1m_PAD_merged.jsonl.gz";
-    missing_pad=:zero_with_diagnostics,
-)
+scene = read_scene(input_path; missing_pad=:zero_with_diagnostics)
 ```
 
 This substitutes zero for transport while retaining a missing-PAD mask in the
@@ -58,38 +59,38 @@ Point counts alone cannot reconstruct a missing PAD value.
 
 ## Read An AMAPVox `.vox` File
 
-The reader accepts the parenthesized coordinate headers and PAD estimator in
-the supplied AMAPVox 2.4.2 export, as well as historical ARCHIMED files. Use a
-column name when choosing a specific PAD estimate:
+The reader accepts AMAPVox coordinate headers, including parenthesized forms,
+as well as historical ARCHIMED files. The bundled `.vox` file stores the same
+density field as the JSONL file above, in a column named `PAD`:
 
 ```julia
-scene = read_scene(
-    "canopy.vox";
-    pad_column="pad_attenuation_PPL_MLE",
-)
+voxel_path = joinpath(example_dir, "tree.vox")
+plain_scene = read_scene(voxel_path; pad_column="PAD")
 ```
 
-The default `pad_column=:auto` recognizes `PAD`, `PadBVTotal`, and
+For your own export, choose the column containing the PAD estimate you want
+to use. The default `pad_column=:auto` recognizes `PAD`, `PadBVTotal`, and
 `pad_attenuation_PPL_MLE`, ignoring case. If several are present, choose one
 explicitly rather than relying on column order. Additional numeric diagnostics
 remain available through `read_voxel_column(path, "column_name")`.
 
 Like null PAD in JSONL, NaN PAD in `.vox` is unknown density, not observed empty
-space. The supplied Belinga file contains such values. For an explicit
-zero-imputation sensitivity run, retain the diagnostic return:
+space. When choosing zero imputation with the lower-level grid reader, retain
+the diagnostic return so the unknown-cell mask remains available:
 
 ```julia
 loaded = read_voxel_grid(
-    "belinga3_1m_PAD.vox";
-    pad_column="pad_attenuation_PPL_MLE",
+    voxel_path;
+    pad_column="PAD",
     missing_pad=:zero_with_diagnostics,
     return_diagnostics=true,
 )
 grid = loaded.grid
 unknown_pad = loaded.missing_pad
-producer_version = loaded.metadata["build-version"]
+producer_version = get(loaded.metadata, "build-version", nothing)
 ```
 
+Producer metadata depends on the export; a build version is not always present.
 This lower-level reader returns a `VoxelGrid` by default.
 For scene-based calculations, `read_scene(path; missing_pad=:zero_with_diagnostics)`
 retains the mask as `scene.missing_pad` and metadata as `scene.metadata`.
@@ -147,7 +148,7 @@ axis. Choose `θ` for the final frame, including any grid convergence, so that
 the same rotation is accounted for once. The [configuration reference](@ref scene_rotation)
 also describes how the fixed local turtle uses this setting.
 
-## The Existing File Structure
+## JSON Lines File Structure
 
 The metadata record uses `record_type="metadata"` and
 `schema_version="1.0"`. The important fields are:
@@ -163,42 +164,34 @@ The metadata record uses `record_type="metadata"` and
 | `voxel_source`, `las_source` | Producer's source paths for provenance |
 | `original_amapvox_columns` | Available diagnostics in voxel records |
 
-In the Belinga example, `min_corner` is `[0,-53,-5]`, `resolution` is
-`[1,1,1]`, and `split` is `[60,60,65]`. Coordinates must be supplied in a
-consistent metric reference frame with Z upwards. Source paths are provenance,
+For the bundled tree, `min_corner` is `[0,0,0]`, `resolution` is `[1,1,1]`,
+and `split` is `[8,8,9]`: an 8 × 8 × 9 grid of one-metre cells.
+Coordinates must use a consistent metric reference frame with Z upwards.
+Source paths are provenance,
 not additional files that the reader opens automatically. The metadata does
 not supply an authoritative CRS or an independent PAD surface convention;
 record that information alongside the simulation when it is known.
 
-The following is a voxel from the supplied file. Additional AMAPVox diagnostic
-columns are omitted from this displayed excerpt:
+The following crown cell from the bundled tree contains synthetic leaf and
+wood point counts for individual `1`:
 
 ```json
 {
   "record_type": "voxel",
-  "i": 19,
-  "j": 25,
-  "k": 6,
+  "i": 2,
+  "j": 3,
+  "k": 5,
   "amapvox": {
-    "ground_distance": 6.5,
-    "pad_attenuation_PPL_MLE": 0.0026008
+    "pad_attenuation_PPL_MLE": 1.088896441539579
   },
-  "point_count": 7,
+  "point_count": 100,
   "trees": [
     {
-      "tree_id": 132,
-      "point_count": 2,
-      "point_ratio": 0.2857142857143,
-      "foliage_ratio": 1,
-      "wood_ratio": 0,
-      "unknown_ratio": 0
-    },
-    {
-      "tree_id": 129,
-      "point_count": 5,
-      "point_ratio": 0.7142857142857,
-      "foliage_ratio": 1,
-      "wood_ratio": 0,
+      "tree_id": 1,
+      "point_count": 100,
+      "point_ratio": 1.0,
+      "foliage_ratio": 0.9,
+      "wood_ratio": 0.1,
       "unknown_ratio": 0
     }
   ]
@@ -207,8 +200,8 @@ columns are omitted from this displayed excerpt:
 
 `amapvox.pad_attenuation_PPL_MLE` is the density used by this workflow, in
 ``\mathrm{m^2\,m^{-3}}``. Every `(i,j,k)` refers to the cell with lower corner
-`min_corner + (i,j,k) .* resolution`. File indices start at zero; users do not
-need to reproduce the old Java linear ordering in Julia.
+`min_corner + (i,j,k) .* resolution`. File indices start at zero; the reader
+converts them to Julia's one-based indexing.
 
 `point_ratio` is the individual's fraction of the voxel's retained points.
 `foliage_ratio`, `wood_ratio`, and `unknown_ratio` are conditional fractions
@@ -217,22 +210,25 @@ checks counts, ratios, coordinates, and duplicates rather than accepting a
 malformed mixture silently. Small decimal export-rounding differences are
 distinct from substantial count/ratio disagreements.
 
-!!! warning "The fractions describe the filtered points"
-    The example's `point_filter` includes `treeID > 0`. Its `point_count` is
-    therefore not a census of all vegetation returns. The ratios cannot
-    reveal what fraction of total plant area belongs to unlabelled returns,
-    or their leaf/wood composition.
+The `trees` list can contain several individuals when they share a voxel.
+The bundled tree's counts are teaching values, not lidar measurements.
+
+!!! note "Check which points were retained"
+    Read the export's `point_filter` before interpreting its counts. For
+    example, a filter such as `treeID > 0` retains only points assigned to
+    individuals. Those counts cannot tell you how much unlabelled vegetation
+    was excluded, or whether it was leaf or wood.
 
 ## Build A Point-Proxy Vegetation Model
 
-The file contains observations; optical parameters remain separate. A JSONL
-scene can be inspected immediately. Supply a separate model configuration to
+Input data and optical parameters remain separate. A JSONL scene can be
+inspected immediately. Supply a separate model configuration to
 `run_light` before interpreting its point proportions. Explicitly select
 `mode=:point_proxy` to acknowledge the
 assumption that point fractions can approximate component area fractions:
 
 ```julia
-# Pedagogical optical values; these are not a Belinga calibration.
+# Pedagogical optical values, not calibrated measurements.
 leaf = VoxelMaterial(
     g=0.5,
     par_reflectance=0.08,
@@ -295,7 +291,7 @@ lookup and output queries:
 ```julia
 models = models_for(;
     mode=:point_proxy, leaf, wood, unknown,
-    individuals=Dict(132 => (leaf=(par_reflectance=0.10,),)),
+    individuals=Dict(1 => (leaf=(par_reflectance=0.10,),)),
 )
 ```
 
@@ -325,15 +321,14 @@ and give each relevant individual a complete material:
 models = models_for(;
     mode=:point_proxy,
     individuals=Dict(
-        132 => (leaf=leaf, wood=wood),
-        204 => (leaf=VoxelMaterial(leaf; par_reflectance=0.10), wood=wood),
+        1 => (leaf=leaf, wood=wood),
     ),
 )
 ```
 
-This schematic example assumes those are the complete set of individuals
-containing leaf components. Materials must cover every positive component;
-missing coverage is an error. Setting an organ default to `nothing` makes that
+Individual `1` is the only tree in the bundled example. For another file,
+provide entries for all relevant individuals. Materials must cover every
+positive component; missing coverage is an error. Setting an organ default to `nothing` makes that
 requirement explicit for the organ as well.
 
 Keep models separate from the imported observations. Pass them with
@@ -344,13 +339,15 @@ Keep models separate from the imported observations. Pass them with
 
 ```julia
 soil = opaque(par=0.10, nir=0.30)
-terrain = read_ply_terrain("terrain_covering_the_voxel_grid.ply")
+terrain = read_ply_terrain(joinpath(example_dir, "terrain.ply"))
 add_ground!(scene, terrain)
 models = models_for(;
     mode=:point_proxy, leaf, wood, unknown, ground=soil,
-    individuals=Dict(132 => (leaf=(par_reflectance=0.10,),)),
+    individuals=Dict(1 => (leaf=(par_reflectance=0.10,),)),
 )
 options = LightOptions(toricity=false, scattering=true)
+meteo_row = (step_duration=60.0, Ri_PAR_f=300.0, Ri_NIR_f=200.0,
+    sun_elevation=45.0, sun_azimuth=180.0, direct_fraction=0.8)
 
 result = run_light(scene, meteo_row; models, options)
 ```
@@ -359,15 +356,10 @@ result = run_light(scene, meteo_row; models, options)
 [in-memory voxel example](voxel_interception.md). PLY vertices must already
 share the grid's coordinate frame, or be transformed explicitly. The solver
 checks terrain/domain compatibility and rejects a terrain with insufficient
-coverage; it does not translate, extend, or invent a ground surface.
-
-!!! warning "The supplied PLY covers only part of the Belinga grid"
-    `quadra1_mnt.ply` spans approximately X=17.03–43.93 m and
-    Y=−36.52–−10.76 m, whereas the full JSONL grid spans X=0–60 m and
-    Y=−53–7 m. Reading that PLY is valid, but using it as the terrain of the
-    complete grid is rejected. Supply a DTM covering the domain or deliberately
-    prepare a covered grid subset. No coordinate shift or automatic padding
-    can supply the missing measured terrain.
+coverage. Use a terrain surface covering the scene's horizontal extent, or
+prepare a matching scene subset. Reading a PLY file does not extend its
+surface or change its coordinates. Without a terrain file, `add_ground!(scene)`
+explicitly creates assumed flat ground instead.
 
 The underlying voxel result is available as `result.light`. Component records
 in `result.components` retain their voxel, individual identity, organ, proxy
@@ -377,7 +369,7 @@ absorbed energy for PAR and NIR. The missing-PAD mask remains available as
 energies by individual and organ, including unattributed vegetation.
 
 For leaf APAR, query `light_metric_values(scene, result, :Ra_PAR_q;
-individual_id=132, organ=:leaf, reduce=sum)`. Omit the individual filter for
+individual_id=1, organ=:leaf, reduce=sum)`. Omit the individual filter for
 all leaves, or use `individual_id=(nothing,)` for unattributed vegetation.
 Wood and unknown-organ absorption belongs to the scene energy balance but is
 not leaf APAR. `domain=:ground` queries the soil separately. The
@@ -392,8 +384,8 @@ scattering caches across the series.
 
 Keep the export filter, PAD inversion convention, any unknown-PAD imputation,
 point-to-area assumption, optional attributed fraction, material coefficients,
-terrain transform, and boundary setting with the run. The existing file does
-not supply all those model assumptions. Calibration should not be presented
+terrain transform, and boundary setting with the run. Input files do not
+supply all those model assumptions. Calibration should not be presented
 as if they were measured by the JSONL export.
 
 For physical equations and comparison with triangle scenes, continue with

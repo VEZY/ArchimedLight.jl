@@ -27,8 +27,8 @@ Each page describes the scientific question, the scene, and the role of Archimed
       <span class="application-card-body"><strong>Oil-palm digital twins</strong><span>JPCE · CIRAD–PT SMART</span><span>Follow measured palm architecture through time at leaflet scale.</span></span>
     </a></li>
     <li><a class="application-card" href="applications/belinga.html">
-      <img src="assets/applications/belinga_composition.png" width="1700" height="1250" loading="lazy" alt="Belinga voxel canopy coloured by leaf, wood and unknown contents above generated flat ground.">
-      <span class="application-card-body"><strong>Belinga voxel canopy</strong><span>Olivier Martin · Pol Kennel · CIRAD–AMAP</span><span>Explore canopy shading from attributed lidar voxels.</span></span>
+      <img src="assets/applications/belinga_composition.png" width="1700" height="1250" loading="lazy" alt="The Belinga natural forest in Cameroon, represented by leaf, wood and unknown voxels above generated flat ground.">
+      <span class="application-card-body"><strong>Belinga natural forest</strong><span>Olivier Martin · Pol Kennel · CIRAD–AMAP</span><span>Follow light through a measured forest canopy in Cameroon.</span></span>
     </a></li>
   </ul>
 </section>

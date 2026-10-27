@@ -148,9 +148,10 @@ write_scene(path, scene)
 
 ## Voxel Inputs And Individual/Organ Mixtures
 
-For the downloadable [Belinga application](applications/belinga.md),
-`example_scene_path(:belinga)` returns the input filename in Julia's artifact
-cache. The first call downloads the approximately 17 MB, checksummed Zenodo
+The [Belinga example](applications/belinga.md) provides a downloadable voxel
+dataset of a natural forest in Cameroon. `example_scene_path(:belinga)` returns
+its input filename in Julia's artifact cache. The first call downloads the
+approximately 17 MB, checksummed Zenodo
 archive; subsequent calls reuse it. Importing ArchimedLight does not download
 the dataset. Missing-PAD handling remains an explicit choice when reading:
 
@@ -181,7 +182,7 @@ totals = component_values(result; level=:individual)
 ```
 
 This is a call-shape reference: `path`, forcing and options must be defined,
-and individual `"12"` must occur in the JSONL input. Global leaf, wood, unknown
+and individual `12` must occur in the JSONL input. Global leaf, wood, unknown
 and ground defaults apply unless overridden. A partial named tuple changes
 only its supplied parameters, inheriting the rest from the matching default.
 A complete `VoxelMaterial` instead replaces that individual's whole organ

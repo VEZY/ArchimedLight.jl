@@ -1,7 +1,7 @@
 # Mixed voxel input: adopted format and modelling assumptions
 
-The authoritative input is the existing merged AMAPVox/individual export,
-illustrated by `belinga3_1m_PAD_merged.jsonl.gz` under `vox_files/`.
+The adopted JSON Lines input combines an AMAPVox plant area density (PAD) grid
+with point counts attributed to individuals and organs.
 Its metadata uses `schema_version="1.0"`, `min_corner`, `resolution`, and
 `split`; voxel records retain `amapvox` diagnostics and a `trees` list with
 point and organ proportions. No replacement exchange schema is proposed.
