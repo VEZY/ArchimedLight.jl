@@ -20,7 +20,7 @@ crown cells. The three data files together occupy about 25 kB.
   PLY with double-precision coordinates, ready for `read_ply_terrain`.
 
 The JSONL counts are **synthetic teaching data**, with 100 points per occupied
-cell. They are not LiDAR observations or measured area fractions. The PAD,
+cell. They are not lidar observations or measured area fractions. The PAD,
 organ allocation, and any example optical parameters are pedagogical. The
 same PAD does not imply the same absorption when organ optics differ.
 
