@@ -30,7 +30,7 @@ end
 
 @testitem "Sparse ray-miss responses equal independent public geometric transport" tags=[:voxel, :terrain, :fast] begin
     AL = ArchimedLight
-    soil = translucent(par=0.2, nir=0.4)
+    soil = opaque(par=0.2, nir=0.4)
     pad = zeros(3, 2, 4)
     pad[2, 1, 3] = 0.7
     grid = VoxelGrid((-1.2, 2.3, -0.5), (2.9, 6.0, 3.5), pad)
@@ -188,7 +188,7 @@ end
 
 @testitem "Ray-miss terrain routing retains coverage and custom validation errors" tags=[:voxel, :terrain, :fast] begin
     AL = ArchimedLight
-    soil = translucent(par=0.0, nir=0.0)
+    soil = opaque(par=0.0, nir=0.0)
     grid = VoxelGrid((0, 0, 0), (1, 1, 3), zeros(1, 1, 3))
     options = LightOptions(toricity=false)
     gap = ArchimedLight._with_terrain_materials(TriangulatedTerrain([(0.0, 0.0, 0.5), (1.0, 0.0, 0.5),

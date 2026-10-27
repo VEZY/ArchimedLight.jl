@@ -447,19 +447,14 @@ function _build_sector_responses(
     scattering_weighted_hits = options.scattering ? Dict{Int,Float64}() : nothing
     scattering_weighted_hits_by_node = options.scattering ? zeros(Float64, length(geometry.node_ids)) : nothing
     scattering_scratch = options.scattering ? ScatteringStackScratch() : nothing
+    opaque_ground = _prepared_opaque_ground_context(prepared)
     no_virtual_nodes = isempty(prepared.virtual_nodes)
 
     for i in 1:n
         sector = turtle.sectors[i]
         projection = _prepared_direction_projection(prepared, sector.direction, options)
-        sector_area = _visible_area_from_projection_dense(
-            projection,
-            options,
-            geometry.plotbox,
-            prepared.virtual_node_mask,
-            prepared.node_transparency_by_index,
-            geometry,
-        )
+        sector_area = _first_order_visible_area(prepared, projection,
+            sector.direction, options, opaque_ground)
         _store_sector_area_and_active_indices!(
             projected_area_by_sector,
             projected_area_active_indices,
@@ -472,28 +467,8 @@ function _build_sector_responses(
             emitter_edge_counts = Dict{UInt64,Int}()
             emitter_observed_edge_counts = Dict{UInt64,Int}()
             emitter_total_from = Dict{Int,Int}()
-            if projection isa DenseDirectionProjectionResult
-                _accumulate_emitter_transfer_counts!(
-                    emitter_edge_counts,
-                    emitter_observed_edge_counts,
-                    emitter_total_from,
-                    projection,
-                    prepared.emitter_node_mask,
-                    prepared.virtual_node_mask,
-                    geometry.node_ids;
-                    stacks_sorted=true,
-                )
-            else
-                _accumulate_emitter_transfer_counts!(
-                    emitter_edge_counts,
-                    emitter_observed_edge_counts,
-                    emitter_total_from,
-                    projection,
-                    prepared.emitter_nodes;
-                    virtual_nodes=prepared.virtual_nodes,
-                    stacks_sorted=true,
-                )
-            end
+            _first_order_emitter_counts!(emitter_edge_counts, emitter_observed_edge_counts,
+                emitter_total_from, projection, prepared, sector.direction, options, opaque_ground)
             _merge_emitter_direction_transfer!(
                 emitter_received_fraction,
                 emitter_observed_fraction,
@@ -505,7 +480,7 @@ function _build_sector_responses(
                 emitter_total_from,
             )
         end
-        if scattering_edge_counts !== nothing
+        if scattering_edge_counts !== nothing && opaque_ground === nothing
             if projection isa DenseDirectionProjectionResult
                 _accumulate_scattering_counts!(
                     scattering_edge_counts,
@@ -558,7 +533,7 @@ function _build_sector_responses(
     ) = _dense_emitter_power(emitter_transfer, prepared)
     scattering_topology =
         if scattering_edge_counts !== nothing
-            _build_scattering_topology_cache(
+            opaque_ground !== nothing ? _opaque_ground_topology(scene, models, prepared, turtle, options, opaque_ground) : _build_scattering_topology_cache(
                 scene,
                 models,
                 prepared,
@@ -932,6 +907,7 @@ function _stream_first_order_with_scattering_topology(
     scattering_weighted_hits = Dict{Int,Float64}()
     scattering_weighted_hits_by_node = zeros(Float64, length(geometry.node_ids))
     scattering_scratch = ScatteringStackScratch()
+    opaque_ground = _opaque_ground_context(geometry, models)
     no_virtual_nodes = isempty(prepared.virtual_nodes)
     emitter_sector_fraction = _lambertian_sector_fractions(turtle)
     emitter_received_fraction =
@@ -943,15 +919,8 @@ function _stream_first_order_with_scattering_topology(
 
     for (k, sector) in enumerate(turtle.sectors)
         projection = _prepared_direction_projection(prepared, sector.direction, options)
-        visible_area =
-            _visible_area_from_projection_dense(
-                projection,
-                options,
-                geometry.plotbox,
-                prepared.virtual_node_mask,
-                prepared.node_transparency_by_index,
-                geometry,
-            )
+        visible_area = _first_order_visible_area(prepared, projection,
+            sector.direction, options, opaque_ground)
 
         _accumulate_projection_hits!(hits_per_node, projection, geometry)
 
@@ -971,28 +940,8 @@ function _stream_first_order_with_scattering_topology(
             emitter_edge_counts = Dict{UInt64,Int}()
             emitter_observed_edge_counts = Dict{UInt64,Int}()
             emitter_total_from = Dict{Int,Int}()
-            if projection isa DenseDirectionProjectionResult
-                _accumulate_emitter_transfer_counts!(
-                    emitter_edge_counts,
-                    emitter_observed_edge_counts,
-                    emitter_total_from,
-                    projection,
-                    prepared.emitter_node_mask,
-                    prepared.virtual_node_mask,
-                    geometry.node_ids;
-                    stacks_sorted=true,
-                )
-            else
-                _accumulate_emitter_transfer_counts!(
-                    emitter_edge_counts,
-                    emitter_observed_edge_counts,
-                    emitter_total_from,
-                    projection,
-                    prepared.emitter_nodes;
-                    virtual_nodes=prepared.virtual_nodes,
-                    stacks_sorted=true,
-                )
-            end
+            _first_order_emitter_counts!(emitter_edge_counts, emitter_observed_edge_counts,
+                emitter_total_from, projection, prepared, sector.direction, options, opaque_ground)
             _merge_emitter_direction_transfer!(
                 emitter_received_fraction,
                 emitter_observed_fraction,
@@ -1004,7 +953,9 @@ function _stream_first_order_with_scattering_topology(
                 emitter_total_from,
             )
         end
-        if projection isa DenseDirectionProjectionResult
+        if opaque_ground !== nothing
+            continue # The facet-aware topology is prepared below.
+        elseif projection isa DenseDirectionProjectionResult
             _accumulate_scattering_counts!(
                 scattering_edge_counts,
                 scattering_weighted_hits_by_node,
@@ -1071,7 +1022,7 @@ function _stream_first_order_with_scattering_topology(
             _emitter_source_node_map(prepared, emitter_escaped_power_nir),
         ),
     )
-    topology = _build_scattering_topology_cache(
+    topology = opaque_ground !== nothing ? _opaque_ground_topology(scene, models, prepared, turtle, options, opaque_ground) : _build_scattering_topology_cache(
         scene,
         models,
         prepared,
@@ -2260,6 +2211,9 @@ function prepare_light_cache(
         "with `geometry_length_unit=...` and keep the target SceneUnits in metres.",
     ))
     ib = _resolve_interception_backend(interception_backend)
+    # Facet-side identifiers are currently prepared on the CPU for opaque
+    # ground; keep the ordinary translucent RasterGPU path unchanged.
+    ib isa RasterGPUBackend && _has_opaque_ground(models) && (ib = RasterCPUBackend())
     prepared =
         if ib isa RasterCPUBackend || ib isa RasterGPUBackend
             _prepare_interception_data(
@@ -3074,11 +3028,9 @@ function _update_sun_response!(
         projection = _prepared_direction_projection(
             responses.prepared, turtle.sectors[new_sun].direction, cache.options,
         )
-        projected_area = _visible_area_from_projection_dense(
-            projection, cache.options, geometry.plotbox,
-            responses.prepared.virtual_node_mask,
-            responses.prepared.node_transparency_by_index, geometry,
-        )
+        projected_area = _first_order_visible_area(responses.prepared, projection,
+            turtle.sectors[new_sun].direction, cache.options,
+            _prepared_opaque_ground_context(responses.prepared))
         _accumulate_projection_hits!(new_hits, projection, geometry)
         projected_area
     else

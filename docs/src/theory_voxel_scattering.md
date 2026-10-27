@@ -184,9 +184,10 @@ intersection. Energy is split into absorbed and reflected fractions, then
 reflected over the existing full-sphere directions with weights proportional
 to quadrature solid angle times ``\max(0,n\cdot\omega)`` around the patch's
 local normal. Set its band reflectances with
-`translucent(par=..., nir=...)`, retaining `transparency=0`. This reuses the
-triangle material type, while preserving terrain's one-sided reflection;
-triangle scattering retains its existing two-sided law. See
+`opaque(par=..., nir=...)`: reflectance is supplied explicitly, transmission
+is zero and absorption is `1 - reflectance`. Triangle ground uses the same
+one-sided optical contract. Triangle plant models using `translucent` retain
+their equal diffuse reflection/transmission approximation. See
 [Voxel Terrain And Soil](voxel_terrain.md) for the geometry, AMAPVox/DTM import,
 boundary, and cache contracts.
 

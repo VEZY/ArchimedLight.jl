@@ -57,6 +57,11 @@ for interception. Each eligible surface contributes its own
 compatibility rule does not compound transmission from one transparent layer
 into the next.
 
+`transparency` describes this first-order rule, not diffuse transmission.
+A `Translucent` component with zero transparency still redistributes scattered
+energy equally between its two sides. `Opaque` ground instead blocks both
+first-order and diffuse transmission and reflects into its outward hemisphere.
+
 ## The Area-Ratio Correction
 
 Rasterization introduces a known bias: a triangle rarely covers an integer number of pixels exactly.

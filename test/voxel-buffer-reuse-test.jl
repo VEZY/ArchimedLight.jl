@@ -1,7 +1,7 @@
 @testitem "Terrain traversal ignores stale reusable stack entries" tags=[:voxel, :terrain, :fast] begin
     AL = ArchimedLight
-    soil = translucent(par=0.2, nir=0.4)
-    bright = translucent(par=0.7, nir=0.8)
+    soil = opaque(par=0.2, nir=0.4)
+    bright = opaque(par=0.7, nir=0.8)
     vertices = NTuple{3,Float64}[]
     triangles = NTuple{3,Int}[]
     # Every node overlaps the central ray. The nearest tied patch with the

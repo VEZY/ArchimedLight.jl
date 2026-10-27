@@ -80,7 +80,7 @@ end
     options = HelperModule._synthetic_options(toricity=false, pixel_size=0.01)
     models = HelperModule._default_synthetic_models()
     fluxes = AL.DirectionalFluxes([1], [1.0], [1.0])
-    soil = translucent(par=0.0, nir=0.0)
+    soil = opaque(par=0.0, nir=0.0)
     flat_scene = HelperModule._synthetic_horizontal_scene([
         (x0=0.0, x1=1.0, y0=0.0, y1=1.0, z=0.0),
     ])

@@ -102,7 +102,7 @@ SUITE["Voxel"]["terrain intersection"] = BenchmarkGroup()
 SUITE["Voxel"]["terrain transport setup"] = BenchmarkGroup()
 
 const VOXEL_TERRAIN_GRID = _voxel_benchmark_grid((16, 16, 16))
-const VOXEL_TERRAIN_SOIL = ArchimedLight.translucent(
+const VOXEL_TERRAIN_SOIL = ArchimedLight.opaque(
     par=0.15,
     nir=0.40,
 )

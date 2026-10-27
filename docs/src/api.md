@@ -61,7 +61,7 @@ end
 
 models = models_for(
     "coffee" => ("Leaf" => translucent(par=0.15, nir=0.90),),
-    "soil" => ("ground" => translucent(par=0.10, nir=0.40),),
+    "soil" => ("ground" => opaque(par=0.10, nir=0.40),),
 )
 
 sim = LightSimulation(scene, models; options=LightOptions())
@@ -105,6 +105,7 @@ PlantGeom.add_ground!(builder; z=0.0, nx=9, ny=9, group="pavement", type="Cobble
 PlantGeom.prepare_scene(mtg; source_path="interactive.opf", scene_xy_bounds=nothing, relabel_ids=false)
 models_for(group => (type => model, ...), ...)
 translucent(; par, nir, transparency=0.0)
+opaque(; par, nir)
 virtual_sensor()
 emitter(; radiance, par=0.48, nir=0.52)
 ```
@@ -159,7 +160,7 @@ leaf = VoxelMaterial(; g=0.5, par_reflectance=0.08, par_transmittance=0.07,
 models = models_for(;
     mode=:point_proxy, leaf,
     wood=VoxelMaterial(), unknown=VoxelMaterial(),
-    ground=translucent(par=0.12, nir=0.32),
+    ground=opaque(par=0.12, nir=0.32),
     individuals=Dict("12" => (leaf=(nir_reflectance=0.40,),)),
 )
 result = run_light(scene, meteo_row; models, options, backend=VoxelCPUBackend())
@@ -206,10 +207,11 @@ individual-only models and soil-region overrides, and
 its minimum Z. Optional `elevation`, `cells=(nx, ny)`, `material_ids` and
 `periodic` control geometry, region identities and boundary compatibility.
 Assign soil optics through `models_for(; ground=soil, ...)` at simulation setup.
-Use `ground=translucent(par=..., nir=...)` for an opaque soil model;
-`transparency` must remain zero. `ground_materials=Dict(id => override)` accepts
-complete `TypeModel` values from `translucent`, or partial `(par=..., nir=...)`
-named tuples inheriting the global ground coefficients. Without a global
+Use `ground=opaque(par=..., nir=...)` for soil: `par`/`nir` are reflectances,
+transmission is zero and absorption is `1 - reflectance`.
+`ground_materials=Dict(id => override)` accepts complete `TypeModel` values
+from `opaque`, or partial `(par=..., nir=...)` named tuples inheriting the
+global ground coefficients. Without a global
 ground default, complete soil models must cover every used material ID. Tree
 IDs and soil material IDs are independent. The validated band coefficients are
 copied when the voxel configuration is built. See the runnable
@@ -217,9 +219,13 @@ copied when the voxel configuration is built. See the runnable
 
 `ground_materials` is a voxel-only keyword. Triangle scenes assign the same
 soil `TypeModel` through their ordinary group/type mapping, for example
-`models_for("soil" => ("ground" => soil,))`. Material definitions are shared;
-the terrain's outward-hemisphere reflection and the triangle solver's
-two-sided scattering laws remain distinct.
+`models_for("soil" => ("ground" => soil,))`. Both ground workflows reflect
+into the outward hemisphere. Triangle `Opaque` supports terrain made of
+nonvertical facets, orienting normals upward independently of input winding.
+Group/type names are arbitrary; the geometry must represent terrain, not an
+arbitrary closed or vertical opaque object. Both PAR/NIR coefficients must be
+explicit. `translucent(..., transparency=0)` still has diffuse transmission and
+is not an opaque ground model.
 
 Use `NoVoxelTerrain()` for an open bottom, or attach imported geometry:
 

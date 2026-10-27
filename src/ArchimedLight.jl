@@ -43,6 +43,7 @@ include("voxel/vegetation.jl")
 include("voxel/models.jl")
 include("voxel/display.jl")
 include("voxel/scene.jl")
+include("opaque_ground.jl")
 include("attach.jl")
 include("outputs.jl")
 include("plantsimengine.jl")
@@ -111,6 +112,7 @@ export read_models
 export prepare_models
 export models_for
 export translucent
+export opaque
 export virtual_sensor
 export emitter
 export read_options

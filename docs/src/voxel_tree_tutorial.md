@@ -60,7 +60,7 @@ readers do not print during file loading.
 Read the independent terrain in the same coordinate frame:
 
 ```@example voxel_tree
-soil = translucent(par=0.12, nir=0.32)
+soil = opaque(par=0.12, nir=0.32)
 terrain = read_ply_terrain(joinpath(example_dir, "terrain.ply"))
 add_ground!(plain_scene, terrain)
 add_ground!(mixed_scene, terrain)
@@ -186,7 +186,7 @@ for positive components produce a validation error.
 
 `ground_materials` assigns soil models to the terrain's material IDs. These IDs
 belong to geometry and are independent of tree IDs. Define the default soil
-with the same `translucent` helper used for triangle materials, then override
+with the same `opaque` helper used for triangle materials, then override
 selected regions in the voxel model configuration:
 
 ```@example voxel_tree
@@ -200,9 +200,11 @@ isempty(check_models(regional_scene, regional_models).errors)
 ```
 
 Region 1 uses `soil`; region 2 changes only `par` and inherits `nir` from that
-global default. A complete `translucent(par=..., nir=...)` model can replace a
-region's whole material. Terrain models must have `transparency=0` (the
-helper's default): the soil is an opaque boundary, not a transmitting layer.
+global default. A complete `opaque(par=..., nir=...)` model can replace a
+region's whole material. `opaque` fixes transmission to zero; `par` and `nir`
+are reflectances and the absorbed fraction is `1 - reflectance`.
+`opaque` has no `transparency` keyword. A `translucent` model, even with
+`transparency=0`, is not accepted for voxel ground.
 The configuration copies the band coefficients; later edits to the original
 `TypeModel` do not change these voxel models.
 
@@ -223,7 +225,7 @@ regional_only_models = models_for(;
     leaf,
     ground_materials=Dict(
         1 => soil,
-        2 => translucent(par=0.20, nir=0.32),
+        2 => opaque(par=0.20, nir=0.32),
     ),
 )
 isempty(check_models(regional_scene, regional_only_models).errors)
@@ -238,9 +240,11 @@ triangle_ground_models = models_for("soil" => ("ground" => soil,))
 typeof(triangle_ground_models)
 ```
 
-Reusing the material definition does not change the directional laws: voxel
-terrain reflects into the outward hemisphere; triangle scattering retains its
-existing two-sided redistribution.
+Both ground workflows use outward-hemisphere reflection. For triangles,
+`opaque` supports terrain made of nonvertical facets; normals are oriented
+upward independently of input winding. The geometry must describe terrain,
+not a closed solid or arbitrary opaque leaf/wood mesh. Triangle `translucent`
+plant models retain the existing equal diffuse reflection/transmission split.
 
 The example changes only band optics. To change extinction, set a component's
 `VoxelMaterial.g`; this changes the projection hypothesis as well as the

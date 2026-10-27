@@ -1713,6 +1713,8 @@ function _emitter_transfer_weights(
     node_ids::Vector{Int},
     cache_ctx;
     projection_workspace=nothing,
+    prepared=nothing,
+    opaque_ground=nothing,
 )
     sector_fraction = _lambertian_sector_fractions(turtle)
     isempty(emitter_nodes) &&
@@ -1736,7 +1738,10 @@ function _emitter_transfer_weights(
         edge_counts = Dict{UInt64,Int}()
         observed_edge_counts = Dict{UInt64,Int}()
         total_from = Dict{Int,Int}()
-        if projection isa DenseDirectionProjectionResult
+        if opaque_ground !== nothing
+            _first_order_emitter_counts!(edge_counts, observed_edge_counts, total_from,
+                projection, prepared, sector.direction, options, opaque_ground)
+        elseif projection isa DenseDirectionProjectionResult
             _accumulate_emitter_transfer_counts!(
                 edge_counts,
                 observed_edge_counts,
@@ -3811,6 +3816,112 @@ function _prepared_direction_projection(
     return _direction_projection_cached(geometry, direction, options, prepared.cache_ctx; upper_hit=prepared.upper_hit)
 end
 
+function _prepared_opaque_ground_context(prepared::PreparedInterceptionData)
+    any(_is_opaque_interception, prepared.node_interception_by_index) || return nothing
+    nodes = Set(prepared.geometry.node_ids[i] for i in eachindex(prepared.node_interception_by_index)
+        if _is_opaque_interception(prepared.node_interception_by_index[i]))
+    return _opaque_ground_context(prepared.geometry, nodes)
+end
+
+function _opaque_first_order_projection(prepared, direction, options, context)
+    geometry = prepared.geometry
+    cache = _projection_cache_context(geometry.vertices, geometry.faces,
+        context.face2node, geometry.plotbox, options)
+    _direction_projection_cached(geometry.vertices, geometry.faces, context.face2node,
+        direction, options, geometry.plotbox, cache; upper_hit=false,
+        projection_workspace=geometry.projection_workspace)
+end
+
+function _first_order_visible_area(prepared, projection, direction, options, ::Nothing)
+    _visible_area_from_projection_dense(projection, options, prepared.geometry.plotbox,
+        prepared.virtual_node_mask, prepared.node_transparency_by_index, prepared.geometry)
+end
+
+function _first_order_visible_area(prepared, projection, direction, options, context)
+    geometry = prepared.geometry
+    facets = _opaque_first_order_projection(prepared, direction, options, context)
+    visible = zeros(Float64, length(geometry.node_ids))
+    pixel_area = _projection_pixel_area(options, geometry.plotbox)
+    for stack in values(facets.pixel_hits)
+        isempty(stack) && continue
+        _sort_hit_stack!(stack)
+        for hit in stack
+            token = _hit_node(hit)
+            node = _opaque_parent(context, token)
+            index = geometry.node_index[node]
+            normal = get(context.normals, token, nothing)
+            if normal !== nothing
+                if dot(normal, direction) > 0
+                    visible[index] += pixel_area * _projection_area_ratio(facets, options, token)
+                end
+                break # The back side still blocks everything behind the ground.
+            elseif prepared.virtual_node_mask[index]
+                visible[index] += pixel_area * _projection_area_ratio(facets, options, token)
+                continue
+            end
+            transparency = prepared.node_transparency_by_index[index]
+            if transparency < 1
+                visible[index] += pixel_area * (1 - transparency) *
+                    _projection_area_ratio(facets, options, token)
+            end
+            prepared.upper_hit && break
+            transparency > 0 || break
+        end
+    end
+    return visible
+end
+
+# Emitters launch down the upward turtle direction. Reject a back-facing ground
+# receiver, but stop the ray there rather than illuminating anything beneath it.
+function _first_order_emitter_counts!(edges, observed, totals, projection,
+    prepared, direction, options, context)
+    if context === nothing
+        if projection isa DenseDirectionProjectionResult
+            _accumulate_emitter_transfer_counts!(edges, observed, totals, projection,
+                prepared.emitter_node_mask, prepared.virtual_node_mask,
+                prepared.geometry.node_ids; stacks_sorted=true)
+        else
+            _accumulate_emitter_transfer_counts!(edges, observed, totals, projection,
+                prepared.emitter_nodes; virtual_nodes=prepared.virtual_nodes,
+                stacks_sorted=true)
+        end
+        return nothing
+    end
+    facets = _opaque_first_order_projection(prepared, direction, options, context)
+    for stack in values(facets.pixel_hits)
+        isempty(stack) && continue
+        _sort_hit_stack!(stack)
+        for j in eachindex(stack)
+            source = _stack_hit_node(stack, j)
+            source in prepared.emitter_nodes || continue
+            _duplicate_emitter_origin(stack, j, source) && continue
+            origin_height = _stack_hit_height(stack, j)
+            totals[source] = get(totals, source, 0) + 1
+            last_observer, last_height = 0, 0.0
+            for k in (j + 1):length(stack)
+                token, height = _stack_hit_node(stack, k), _stack_hit_height(stack, k)
+                node = _opaque_parent(context, token)
+                node == source && _same_emitter_origin_depth(height, origin_height) && continue
+                if node in prepared.virtual_nodes
+                    if node != last_observer || !_same_emitter_origin_depth(height, last_height)
+                        edge = _pack_emitter_edge(node, source)
+                        observed[edge] = get(observed, edge, 0) + 1
+                        last_observer, last_height = node, height
+                    end
+                    continue
+                end
+                normal = get(context.normals, token, nothing)
+                if normal === nothing || dot(normal, direction) > 0
+                    edge = _pack_emitter_edge(node, source)
+                    edges[edge] = get(edges, edge, 0) + 1
+                end
+                break
+            end
+        end
+    end
+    return nothing
+end
+
 function _build_direction_projections(
     prepared::PreparedInterceptionData,
     turtle::TurtleGrid,
@@ -4300,7 +4411,7 @@ function _scene_geometry_for_interception(
     pavement_node_mask = [group == "pavement" for group in node_group_by_index]
     node_type = Dict{Int,String}(nid => get(all_node_type, nid, "") for nid in node_ids)
     node_type_by_index = [get(node_type, nid, "") for nid in node_ids]
-    return InterceptionSceneData(
+    geometry = InterceptionSceneData(
         vertices,
         faces,
         face2node,
@@ -4315,6 +4426,8 @@ function _scene_geometry_for_interception(
         node_type,
         node_type_by_index,
     )
+    _opaque_ground_context(geometry, models) # Validate even without scattering.
+    return geometry
 end
 
 _light_render_geometry(geometry::InterceptionSceneData) =
@@ -5604,6 +5717,10 @@ function _compute_first_order_rastergpu(
     emitter_band_nir::Union{Nothing,AbstractString}="NIR",
 )
     prepared = data.prepared
+    if any(_is_opaque_interception, prepared.node_interception_by_index)
+        return _compute_first_order(prepared, turtle, fluxes, options;
+            emitter_band_par, emitter_band_nir)
+    end
     geometry = prepared.geometry
     has_emitters = !isempty(prepared.emitter_nodes)
 
@@ -5827,6 +5944,10 @@ function compute_first_order(
     emitter_band_nir::Union{Nothing,AbstractString}="NIR",
 )
     prepared = _prepare_interception_data(scene, models, options)
+    if any(_is_opaque_interception, prepared.node_interception_by_index)
+        return _compute_first_order(prepared, turtle, fluxes, options;
+            emitter_band_par, emitter_band_nir)
+    end
     data = _rastergpu_scene_data(prepared, backend.config)
     return _compute_first_order_rastergpu(
         data,
@@ -5848,6 +5969,7 @@ function _compute_first_order(
     emitter_band_nir::Union{Nothing,AbstractString}="NIR",
 )
     geometry = prepared.geometry
+    opaque_ground = _prepared_opaque_ground_context(prepared)
 
     projected_area_per_node = zeros(Float64, length(geometry.node_ids))
     incident_power_par = zeros(Float64, length(geometry.node_ids))
@@ -5858,15 +5980,8 @@ function _compute_first_order(
 
     for (k, sector) in enumerate(turtle.sectors)
         projection = _prepared_direction_projection(prepared, sector.direction, options)
-        visible_area =
-            _visible_area_from_projection_dense(
-                projection,
-                options,
-                geometry.plotbox,
-                prepared.virtual_node_mask,
-                prepared.node_transparency_by_index,
-                geometry,
-            )
+        visible_area = _first_order_visible_area(prepared, projection,
+            sector.direction, options, opaque_ground)
         _accumulate_projection_hits!(hits_per_node, projection, geometry)
 
         par_flux = fluxes.par[k]
@@ -5899,6 +6014,7 @@ function _compute_first_order(
             geometry.node_ids,
             prepared.cache_ctx,
             projection_workspace=geometry.projection_workspace,
+            prepared=prepared, opaque_ground=opaque_ground,
         )
         _accumulate_emitter_band_power!(
             incident_power_par,

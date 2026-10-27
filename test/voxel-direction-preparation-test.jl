@@ -49,7 +49,7 @@ end
 
 @testitem "Prepared voxel responses equal public per-ray terrain tracing" tags=[:voxel, :terrain, :fast] begin
     AL = ArchimedLight
-    soil = translucent(par=0.0, nir=0.0)
+    soil = opaque(par=0.0, nir=0.0)
     grid = VoxelGrid((-1.2, 2.3, -0.5), (2.9, 6.0, 3.5),
         reshape([0.1 + 0.05mod(i, 5) for i in 1:24], 3, 2, 4))
     x = collect(range(grid.minimum[1], grid.maximum[1]; length=3))
@@ -156,7 +156,7 @@ end
         intersect_terrain(ArchimedLight._with_terrain_materials(PlanarTerrain(0.2, (0, 1), (0, 1)), Dict(1 => terrain.soil)),
             origin, direction, limit)
     end
-    soil = translucent(par=0.0, nir=0.0)
+    soil = opaque(par=0.0, nir=0.0)
     grid = VoxelGrid((0, 0, 0), (1, 1, 3), fill(0.2, 1, 1, 3))
     backend = VoxelCPUBackend(rays_per_voxel=4)
     options = LightOptions(toricity=false)
@@ -180,7 +180,7 @@ end
 
 @testitem "Native voxel steps and series retain changing-sun terrain parity" tags=[:voxel, :terrain, :fast] begin
     grid = VoxelGrid((0, 0, 0), (2, 3, 4), fill(0.2, 2, 2, 3))
-    soil = translucent(par=0.2, nir=0.3)
+    soil = opaque(par=0.2, nir=0.3)
     terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.5, 3.0],
         [0.2 0.2 0.2; 0.2 0.6 0.2; 0.2 0.2 0.2]; periodic=true), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     optics = VoxelOpticalProperties(grid; par_reflectance=0.1,

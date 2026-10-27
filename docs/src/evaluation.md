@@ -57,6 +57,10 @@ However, its apparent area decreases when viewed obliquely. This projected area
 introduces a cosine into the power exchanged with another surface. There is also
 a cosine for the receiving surface's projected area.
 
+The four scenes on this page use the `Translucent` approximation described
+below. They retain their existing material definitions; `Opaque` ground uses
+the separate one-sided law in [Scattering And Optical Assumptions](theory_scattering.md#Opaque-Ground).
+
 Let object ``j`` have area ``A_j``, total received power ``P_j``, and scattering
 coefficient ``c_j``. It scatters ``c_j P_j`` and absorbs the rest. To retain the
 model's equal reflection/transmission assumption, half the scattered power

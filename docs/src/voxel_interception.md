@@ -167,7 +167,7 @@ Use an independent surface whenever the lower boundary represents real soil,
 especially when the terrain lies above the grid minimum or is sloped:
 
 ```@example voxel
-soil = translucent(
+soil = opaque(
     par=0.10,
     nir=0.30,
 )
@@ -416,7 +416,7 @@ options = LightOptions(
     toricity=false, scattering=false, turtle_sectors=16, all_in_turtle=true,
 )
 backend = VoxelCPUBackend(rays_per_voxel=16)
-soil = translucent(par=0.0, nir=0.0)
+soil = opaque(par=0.0, nir=0.0)
 models = models_for(; leaf=VoxelMaterial(g=0.5), ground=soil)
 
 period_results = map(periods) do period

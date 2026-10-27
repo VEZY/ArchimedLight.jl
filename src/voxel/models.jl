@@ -8,8 +8,8 @@ Material configuration supplied as models to a voxel run. Component defaults
 apply throughout the scene. An individual may supply complete VoxelMaterial
 values or named tuples of parameters inherited from an organ's default.
 Without a global default, supply a complete material for each participating
-individual/organ. Ground uses the same [`translucent`](@ref) models as triangle
-scenes, with zero `transparency`. Its PAR/NIR scattering fractions are reflected
+individual/organ. Ground uses the same [`opaque`](@ref) models as triangle
+scenes. Its PAR/NIR reflected fractions are distributed
 above the opaque terrain; the remainder is absorbed. `ground_materials` maps
 positive terrain material IDs to complete models or partial `(par=..., nir=...)`
 overrides of `ground`. Resolved coefficients are copied at configuration time.
@@ -30,35 +30,22 @@ struct VoxelModels{F}
 end
 
 function _voxel_soil_material(model::TypeModel)
-    model.light_emitter === nothing || throw(ArgumentError("voxel ground cannot be an emitter"))
-    interception = model.interception
-    interception === nothing && throw(ArgumentError("voxel ground requires an interception model"))
-    lowercase(strip(interception.model)) == "translucent" || throw(ArgumentError(
-        "voxel ground requires an ordinary translucent model"))
-    interception.sensor && throw(ArgumentError("voxel ground cannot be a virtual sensor"))
-    interception.transparency == 0 || throw(ArgumentError(
-        "voxel ground must be opaque; use translucent(..., transparency=0)"))
-    properties = interception.optical_properties
-    properties === nothing && throw(ArgumentError("voxel ground requires PAR and NIR optical properties"))
-    all(band -> get(properties.extras, band, true) === true, ("__has_par", "__has_nir")) ||
-        throw(ArgumentError("voxel ground requires both PAR and NIR coefficients"))
-    all(value -> isfinite(value) && 0 <= value <= 1, (properties.par, properties.nir)) ||
-        throw(ArgumentError("ground PAR and NIR coefficients must be finite and lie in [0, 1]"))
-    (par_reflectance=properties.par, nir_reflectance=properties.nir)
+    coefficients = _opaque_ground_coefficients(model)
+    (par_reflectance=coefficients.par, nir_reflectance=coefficients.nir)
 end
 
 function _voxel_soil_override(base, value)
     value isa TypeModel && return _voxel_soil_material(value)
     value isa NamedTuple || throw(ArgumentError(
-        "soil overrides must be translucent models or named tuples of parameters"))
+        "soil overrides must be opaque models or named tuples of parameters"))
     all(key -> key in (:par, :nir), keys(value)) ||
         throw(ArgumentError("soil overrides may only set par and nir"))
     base === nothing && throw(ArgumentError(
-        "partial soil overrides require a global ground model; otherwise supply translucent(par=..., nir=...)"))
+        "partial soil overrides require a global ground model; otherwise supply opaque(par=..., nir=...)"))
     all(x -> x isa Real, values(value)) ||
         throw(ArgumentError("soil optical parameters must be numbers"))
     params = merge((par=base.par_reflectance, nir=base.nir_reflectance), value)
-    _voxel_soil_material(translucent(; params...))
+    _voxel_soil_material(opaque(; params...))
 end
 
 function VoxelModels(; leaf::Union{Nothing,VoxelMaterial}=nothing,

@@ -2,7 +2,7 @@
     import PlyIO
     import LinearAlgebra
 
-    soil = translucent(par=0.2, nir=0.4)
+    soil = opaque(par=0.2, nir=0.4)
     # Doubles far from the origin detect accidental Float32 rounding before
     # application of the explicitly supplied coordinate transformation.
     x0 = 600_000.123456789
@@ -90,7 +90,7 @@ end
 @testitem "PLY terrain accepts orphan vertices and preserves patch identities" tags=[:voxel, :terrain, :fast] begin
     import PlyIO
 
-    soil = translucent(par=0.2, nir=0.4)
+    soil = opaque(par=0.2, nir=0.4)
     points = [(99.0, 99.0, 99.0), (0.0, 0.0, 0.0), (1.0, 0.0, 0.1),
               (50.0, 50.0, 50.0), (1.0, 1.0, 0.2), (0.0, 1.0, 0.0)]
     ply = PlyIO.Ply()
@@ -105,7 +105,7 @@ end
         for ascii in (true, false)
             path = joinpath(directory, "orphan-$ascii.ply")
             PlyIO.save_ply(ply, path; ascii=ascii)
-            terrain = ArchimedLight._with_terrain_materials(read_ply_terrain(path; material_ids=[2, 1]), models_for(; ground_materials=Dict(1 => soil, 2 => translucent(
+            terrain = ArchimedLight._with_terrain_materials(read_ply_terrain(path; material_ids=[2, 1]), models_for(; ground_materials=Dict(1 => soil, 2 => opaque(
                     par=0.7, nir=0.8))).ground_materials)
             @test terrain.vertices == points[[2, 3, 5, 6]]
             @test terrain.triangles == [(1, 3, 4), (1, 2, 3)]

@@ -68,7 +68,7 @@ models = models_for(
         "Stem" => translucent(par=0.20, nir=0.50),
     ),
     "soil" => (
-        "ground" => translucent(par=0.10, nir=0.40),
+        "ground" => opaque(par=0.10, nir=0.40),
     ),
 )
 
