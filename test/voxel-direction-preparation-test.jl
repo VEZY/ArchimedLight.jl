@@ -55,8 +55,8 @@ end
     x = collect(range(grid.minimum[1], grid.maximum[1]; length=3))
     y = collect(range(grid.minimum[2], grid.maximum[2]; length=3))
     heights = [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2]
-    heightfield = ArchimedLight._with_terrain_materials(HeightFieldTerrain(x, y, heights; periodic=true), Dict(1 => soil))
-    planar = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2, periodic=true), Dict(1 => soil))
+    heightfield = ArchimedLight._with_terrain_materials(HeightFieldTerrain(x, y, heights), Dict(1 => soil))
+    planar = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2), Dict(1 => soil))
     scenes = ((NoVoxelTerrain(), false), (NoVoxelTerrain(), true),
               (planar, false), (planar, true), (heightfield.mesh, false),
               (heightfield, false), (heightfield, true))
@@ -182,7 +182,7 @@ end
     grid = VoxelGrid((0, 0, 0), (2, 3, 4), fill(0.2, 2, 2, 3))
     soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.3)
     terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.5, 3.0],
-        [0.2 0.2 0.2; 0.2 0.6 0.2; 0.2 0.2 0.2]; periodic=true), Dict(1 => soil))
+        [0.2 0.2 0.2; 0.2 0.6 0.2; 0.2 0.2 0.2]), Dict(1 => soil))
     optics = VoxelOpticalProperties(grid; par_reflectance=0.1,
         par_transmittance=0.05, nir_reflectance=0.3, nir_transmittance=0.2)
     backend = VoxelCPUBackend(rays_per_voxel=4)

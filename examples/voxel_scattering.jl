@@ -41,7 +41,7 @@ leaf = VoxelMaterial(
     nir_transmittance=0.40,
 )
 scene = VoxelScene(grid)
-add_ground!(scene; periodic=base_options.toricity)
+add_ground!(scene)
 models = models_for(; leaf,
     ground=SoilOpticalProperties(par_reflectance=0.10, nir_reflectance=0.30))
 

@@ -23,7 +23,7 @@
             y = collect(range(minimum[2], maximum[2]; length=3))
             heights = fill(minimum[1] == -1 ? 0.35 : 0.65, 3, 3)
             heights[2, 2] += 0.4
-            periodic = ArchimedLight._with_terrain_materials(HeightFieldTerrain(x, y, heights; periodic=true), Dict(1 => soil))
+            periodic = ArchimedLight._with_terrain_materials(HeightFieldTerrain(x, y, heights), Dict(1 => soil))
             scenes = ((NoVoxelTerrain(), false), (periodic.mesh, false), (periodic, true))
             for (terrain, toricity) in scenes, rays in (1, 16),
                 direction in ((0.0, 0.0, -1.0), (0.4, -0.2, -1.0), (-0.6, 0.2, -0.5))
@@ -53,7 +53,7 @@ end
     soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
     grid = VoxelGrid((0, 0, 0), (2, 2, 3), fill(0.2, 2, 2, 3))
     terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.0, 2.0],
-        [0.5 0.5 0.5; 0.5 0.8 0.5; 0.5 0.5 0.5]; periodic=true), Dict(1 => soil))
+        [0.5 0.5 0.5; 0.5 0.8 0.5; 0.5 0.5 0.5]), Dict(1 => soil))
     backend = VoxelCPUBackend(rays_per_voxel=4)
     options = LightOptions(toricity=false)
     default_backend, default_options = backend, options
@@ -82,7 +82,7 @@ end
     @test signature(changed) == signature(fresh)
     @test changed.interception_fraction != initial.interception_fraction
     bright = SoilOpticalProperties(par_reflectance=0.6, nir_reflectance=0.8)
-    optical_terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain(terrain.x, terrain.y, terrain.elevation; periodic=true), Dict(1 => bright))
+    optical_terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain(terrain.x, terrain.y, terrain.elevation), Dict(1 => bright))
     @test signature(cached_response(grid, optical_terrain)) == saved
 
     # A cache must reject changes that move launch points or the terrain under
@@ -97,7 +97,7 @@ end
         VoxelCPUBackend(rays_per_voxel=16))
     @test_throws ArgumentError cached_response(grid, terrain;
         options=LightOptions(toricity=true))
-    raised = ArchimedLight._with_terrain_materials(HeightFieldTerrain(terrain.x, terrain.y, terrain.elevation .+ 0.3; periodic=true), Dict(1 => soil))
+    raised = ArchimedLight._with_terrain_materials(HeightFieldTerrain(terrain.x, terrain.y, terrain.elevation .+ 0.3), Dict(1 => soil))
     @test_throws ArgumentError cached_response(grid, raised)
     raised_cache = AL.VoxelLaunchGeometryCache(grid, raised, backend, false)
     raised_result = cached_response(grid, raised; launch_cache=raised_cache)

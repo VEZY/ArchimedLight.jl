@@ -113,8 +113,8 @@ end
     grid = VoxelGrid((0, 0, 0), (2, 3, 3), pad)
     soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)
     height = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.5, 3.0],
-        [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2]; periodic=true), Dict(1 => soil))
-    plane = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2, periodic=true), Dict(1 => soil))
+        [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2]), Dict(1 => soil))
+    plane = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2), Dict(1 => soil))
     rounded = AL._normalise_voxel_transport_direction((7 / 17, -3 / 13, 0.1 + 7 / 19))
     @test AL._normalise_voxel_transport_direction(rounded) != rounded
     turtle = AL.TurtleGrid([

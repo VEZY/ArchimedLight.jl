@@ -58,12 +58,12 @@ end
     # A deep periodic valley retains a significant tail after 128 soil bounces.
     # Empty vegetation must not make that incomplete transport look converged.
     valley(soil) = ArchimedLight._with_terrain_materials(HeightFieldTerrain(
-        [0.0, 0.5, 1.0], [0.0, 1.0], [10.0 10.0; 0.0 0.0; 10.0 10.0]; periodic=true
+        [0.0, 0.5, 1.0], [0.0, 1.0], [10.0 10.0; 0.0 0.0; 10.0 10.0]
     ), Dict(1 => soil))
     cases = (
         (terrain=valley(reflective_soil), converged=false),
         (terrain=valley(black_soil), converged=true),
-        (terrain=ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.0, periodic=true), Dict(1 => reflective_soil)), converged=true),
+        (terrain=ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.0), Dict(1 => reflective_soil)), converged=true),
     )
     for sectors in (16, 46), case in cases
         options = LightOptions(

@@ -171,7 +171,7 @@ soil = SoilOpticalProperties(
     par_reflectance=0.10,
     nir_reflectance=0.30,
 )
-add_ground!(scene; periodic=options.toricity)
+add_ground!(scene)
 models = models_for(; leaf, ground=soil)
 terrain = scene.terrain
 ```
@@ -291,7 +291,7 @@ with a spherical distribution.
 vox_path = joinpath(mktempdir(), "canopy.vox")
 write_voxel_grid(vox_path, grid, step.first_order)
 restored_scene = read_scene(vox_path)
-add_ground!(restored_scene; periodic=scattering_options.toricity)
+add_ground!(restored_scene)
 restored = restored_scene.grid
 
 rows = [
@@ -314,7 +314,7 @@ across a series. The cache key
 includes grid bounds, dimensions, all `PAD` values, the normalized direction,
 `G`, `options.toricity`, traversal, and ray sampling settings. A changed grid,
 toricity, or backend cannot silently reuse an incompatible explicit cache.
-With terrain, the key also includes surface geometry, topology, periodicity, and
+With terrain, the key also includes surface geometry, topology, and
 patch material assignment. Optical albedos and soil reflectance
 are applied during iteration rather than baked into geometric paths, so changing
 only optics does not require rebuilding those paths.
@@ -470,7 +470,7 @@ The primary workflow uses a scene and the shared entry points:
 ```julia
 read_scene(path; missing_pad=:error)
 VoxelScene(source; terrain=NoVoxelTerrain())
-add_ground!(scene; elevation, cells, periodic=false)
+add_ground!(scene; elevation, cells)
 add_ground!(scene, terrain)
 models_for(; leaf, wood, unknown, ground, individuals, ground_materials, mode)
 update_models!(scene, models)

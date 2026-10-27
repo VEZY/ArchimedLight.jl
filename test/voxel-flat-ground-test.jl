@@ -6,7 +6,7 @@
     @test ground.cells == (3, 2)
     @test terrain_patch_count(ground) == 6
     @test terrain_patch_point(ground, 1) == (-11.0, 38.0, 8.0)
-    @test ground.periodic == false
+    @test !hasproperty(ground, :periodic)
     hit = intersect_terrain(ground, (-11, 38, 14), (0, 0, -1))
     @test hit.distance == 6.0
     @test hit.point == (-11.0, 38.0, 8.0)
@@ -18,15 +18,21 @@
     materials = Dict(4 => soil, 7 => bright)
     customized = ArchimedLight._with_terrain_materials(
         PlanarTerrain(grid; elevation=8.5, cells=(1, 2), material_id=4,
-            material_ids=ids, periodic=true), materials)
+            material_ids=ids), materials)
     @test terrain_bounds(customized) == ((-12.0, 37.0, 8.5), (-6.0, 41.0, 8.5))
     @test customized.cells == (1, 2)
-    @test customized.periodic
     @test customized.material_ids == ids
     @test terrain_patch_material(customized, 2) == 7
     @test soil_optics(customized, 7).par_reflectance == 0.4
     @test soil_optics(customized, 7).nir_reflectance == 0.6
     @test PlanarTerrain(grid).cells == (3, 2)
+    @test intersect_terrain(customized, (-5.0, 38.0, 14.0), (0, 0, -1)) === nothing
+    wrapped = intersect_terrain(customized, (-5.0, 38.0, 14.0), (0, 0, -1); toricity=true)
+    @test wrapped.point == (-11.0, 38.0, 8.5)
+    @test_throws MethodError PlanarTerrain(grid; periodic=true)
+    @test_throws MethodError PlanarTerrain(8.0, (-12, -6), (37, 41); periodic=false)
+    @test_throws MethodError HeightFieldTerrain([0., 1.], [0., 1.], zeros(2, 2); periodic=true)
+    @test_throws MethodError add_ground!(VoxelScene(grid); periodic=true)
     for cells in ((0, 1), (1, -2), (1,), (1, 1, 1))
         @test_throws ArgumentError PlanarTerrain(grid; cells)
     end

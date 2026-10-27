@@ -82,7 +82,7 @@
     mesh = ArchimedLight._with_terrain_materials(TriangulatedTerrain(vertices, [(1, 2, 3)]), Dict(1 => soil))
     @test intersect_terrain(mesh, (0.2, 0.2, 1.0), (0, 0, -1), 2.0).patch_id == 1
     @test intersect_terrain(mesh, (0.2, 0.2, 1.0), (0, 0, -1)).distance == 1.0
-    @test_throws ArgumentError ArchimedLight._with_terrain_materials(TriangulatedTerrain(vertices, [(1, 2, 3)]; periodic=true), Dict(1 => soil))
+    @test_throws MethodError ArchimedLight._with_terrain_materials(TriangulatedTerrain(vertices, [(1, 2, 3)]; periodic=true), Dict(1 => soil))
 end
 
 @testitem "Terrain compacts orphan vertices without changing patches" tags=[:voxel, :terrain, :fast] begin
@@ -204,28 +204,24 @@ end
         terrain=mesh_gap,
     )
 
-    nonperiodic = ArchimedLight._with_terrain_materials(PlanarTerrain(side_grid; elevation=0.5, periodic=false), Dict(1 => soil))
-    periodic = ArchimedLight._with_terrain_materials(PlanarTerrain(side_grid; elevation=0.5, periodic=true), Dict(1 => soil))
-    @test_throws ArgumentError trace_voxel_ray(
-        side_grid,
-        (0.5, 0.5, 2.0),
-        (0, 0, -1);
-        options=LightOptions(toricity=true),
-        terrain=nonperiodic,
-    )
-    @test trace_voxel_ray(
-        side_grid,
-        (0.9, 0.5, 2.0),
-        (0.5, 0, -1);
-        options=LightOptions(toricity=true),
-        terrain=periodic,
-    ).exit_reason == :terrain
+    terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(side_grid; elevation=0.5), Dict(1 => soil))
+    for toricity in (false, true, false)
+        path = trace_voxel_ray(side_grid, (0.9, 0.5, 2.0), (0.5, 0, -1);
+            options=LightOptions(; toricity), terrain)
+        @test path.exit_reason == (toricity ? :terrain : :side)
+    end
+    @test_throws ArgumentError trace_voxel_ray(side_grid, (0.5, 0.5, 2.0), (0, 0, -1);
+        options=LightOptions(toricity=true), terrain=mesh_gap)
+    oversized = ArchimedLight._with_terrain_materials(PlanarTerrain(0.5, (-1.0, 2.0), (-1.0, 2.0)), Dict(1 => soil))
+    @test trace_voxel_ray(side_grid, (0.5, 0.5, 2.0), (0, 0, -1);
+        options=LightOptions(toricity=false), terrain=oversized).exit_reason == :terrain
+    @test_throws ArgumentError trace_voxel_ray(side_grid, (0.5, 0.5, 2.0), (0, 0, -1);
+        options=LightOptions(toricity=true), terrain=oversized)
 
     tiled_height = ArchimedLight._with_terrain_materials(HeightFieldTerrain(
         [0.0, 1.0],
         [0.0, 1.0],
-        zeros(2, 2);
-        periodic=true
+        zeros(2, 2)
     ), Dict(1 => soil))
     @test trace_voxel_ray(
         side_grid,
@@ -420,11 +416,8 @@ end
             transform=TerrainCoordinateTransform(rotated_matrix)
         ), Dict(1 => soil))
         @test rotated isa TriangulatedTerrain
-        @test_throws ArgumentError ArchimedLight._with_terrain_materials(height_field_terrain(
-            read_aai_grid(dtm_path);
-            transform=TerrainCoordinateTransform(rotated_matrix),
-            periodic=true
-        ), Dict(1 => soil))
+        @test_throws ArgumentError intersect_terrain(rotated,
+            (0.5, 0.5, 2.0), (0, 0, -1), 3.0; toricity=true)
 
         ground_distance = read_voxel_column(voxel_path, "ground_distance")
         fallback = ArchimedLight._with_terrain_materials(terrain_from_ground_distance(
@@ -564,9 +557,9 @@ end
 
     flat = AAIGrid(2, 2, 0.0, 0.0, 1.0, zeros(2, 2), nothing, nothing)
     periodic = ArchimedLight._with_terrain_materials(height_field_terrain(flat;
-        material_ids=[1 2; 2 1], periodic=true), materials)
-    @test periodic.periodic
-    @test intersect_terrain(periodic, (2.75, -0.25, 1.0), (0, 0, -1), 2.0).material_id == 2
+        material_ids=[1 2; 2 1]), materials)
+    @test intersect_terrain(periodic, (2.75, -0.25, 1.0), (0, 0, -1), 2.0) === nothing
+    @test intersect_terrain(periodic, (2.75, -0.25, 1.0), (0, 0, -1), 2.0; toricity=true).material_id == 2
     @test terrain_bounds(periodic) == ((0.0, 0.0, 0.0), (2.0, 2.0, 0.0))
 
     # Existing assignments to the already-expanded patch grid or to individual

@@ -58,7 +58,8 @@ the vegetation. Material identifiers remain part of the geometry in either case.
 
 The source is unchanged. Attach the returned terrain with
 `add_ground!(scene, ground)` and supply its soil model through [`models_for`](@ref)
-to [`run_light`](@ref). Set `periodic=true` when using `LightOptions(toricity=true)`.
+to [`run_light`](@ref). `LightOptions.toricity` controls whether the ground
+repeats horizontally during a simulation.
 """
 struct PlanarTerrain{T<:AbstractFloat} <: AbstractVoxelTerrain
     elevation::T
@@ -67,7 +68,6 @@ struct PlanarTerrain{T<:AbstractFloat} <: AbstractVoxelTerrain
     cells::NTuple{2,Int}
     material_ids::Matrix{Int}
     materials::_SoilMaterialTable
-    periodic::Bool
 end
 
 function PlanarTerrain(
@@ -77,7 +77,6 @@ function PlanarTerrain(
     cells=(1, 1),
     material_id::Integer=1,
     material_ids=nothing,
-    periodic::Bool=false,
 )
     z = Float64(elevation)
     isfinite(z) || throw(ArgumentError("planar terrain elevation must be finite"))
@@ -97,7 +96,7 @@ function PlanarTerrain(
         "planar material_ids has size $(size(assignments)); expected $cell_count",
     ))
     _validate_material_ids(assignments, prod(cell_count))
-    return PlanarTerrain(z, xb, yb, cell_count, Matrix(assignments), _SoilMaterialTable(), periodic)
+    return PlanarTerrain(z, xb, yb, cell_count, Matrix(assignments), _SoilMaterialTable())
 end
 
 # Separate method avoids clever tuple slicing in the public grid constructor.
@@ -107,7 +106,6 @@ function PlanarTerrain(
     cells=size(grid)[1:2],
     material_id::Integer=1,
     material_ids=nothing,
-    periodic::Bool=false,
 )
     return PlanarTerrain(
         elevation,
@@ -116,7 +114,6 @@ function PlanarTerrain(
         cells=cells,
         material_id=material_id,
         material_ids=material_ids,
-        periodic=periodic,
     )
 end
 
@@ -208,12 +205,8 @@ function TriangulatedTerrain(
     triangles;
     material_id::Integer=1,
     material_ids=nothing,
-    periodic::Bool=false,
     leaf_size::Integer=8,
 )
-    periodic && throw(ArgumentError(
-        "periodic generic triangle meshes are not supported; use HeightFieldTerrain",
-    ))
     points = NTuple{3,Float64}[]
     for (index, vertex) in enumerate(vertices)
         length(vertex) == 3 || throw(ArgumentError("terrain vertex $index must contain three coordinates"))
@@ -268,8 +261,8 @@ end
 
 Triangulated height samples at increasing vertex coordinates `x` and `y`.
 Every cell uses the fixed southwest-to-northeast diagonal. A BVH is built once
-and reused. `periodic=true` tiles the height field horizontally and requires
-matching elevations on opposite edges.
+and reused. A simulation with `LightOptions(toricity=true)` tiles the height
+field horizontally and requires matching elevations on opposite edges.
 Soil models are assigned at simulation setup.
 """
 struct HeightFieldTerrain{T<:AbstractFloat} <: AbstractVoxelTerrain
@@ -277,7 +270,6 @@ struct HeightFieldTerrain{T<:AbstractFloat} <: AbstractVoxelTerrain
     y::Vector{T}
     elevation::Matrix{T}
     diagonal::Symbol
-    periodic::Bool
     mesh::TriangulatedTerrain{T}
 end
 
@@ -286,7 +278,6 @@ function HeightFieldTerrain(
     y,
     elevation::AbstractMatrix;
     diagonal::Symbol=:southwest_northeast,
-    periodic::Bool=false,
     material_id::Integer=1,
     material_ids=nothing,
 )
@@ -304,15 +295,6 @@ function HeightFieldTerrain(
     ))
     z = Float64.(elevation)
     all(isfinite, z) || throw(ArgumentError("height-field elevations must be finite (no NODATA)"))
-    if periodic
-        scale = max(maximum(abs, z), xv[end] - xv[1], yv[end] - yv[1], 1.0)
-        tolerance = 256eps(Float64) * scale
-        all(abs(z[1, j] - z[end, j]) <= tolerance for j in eachindex(yv)) ||
-            throw(ArgumentError("periodic height-field elevations must match on opposite x edges"))
-        all(abs(z[i, 1] - z[i, end]) <= tolerance for i in eachindex(xv)) ||
-            throw(ArgumentError("periodic height-field elevations must match on opposite y edges"))
-    end
-
     vertices = NTuple{3,Float64}[]
     for j in eachindex(yv), i in eachindex(xv)
         push!(vertices, (xv[i], yv[j], z[i, j]))
@@ -344,9 +326,8 @@ function HeightFieldTerrain(
         triangles;
         material_id=material_id,
         material_ids=assignments,
-        periodic=false,
     )
-    return HeightFieldTerrain(xv, yv, z, diagonal, periodic, mesh)
+    return HeightFieldTerrain(xv, yv, z, diagonal, mesh)
 end
 
 terrain_bounds(::NoVoxelTerrain) = nothing
@@ -443,7 +424,7 @@ function _with_terrain_materials(terrain::PlanarTerrain, materials::_SoilMateria
     table = _soil_material_table(materials)
     _validate_material_ids(terrain.material_ids, table, terrain_patch_count(terrain))
     return PlanarTerrain(terrain.elevation, terrain.x_bounds, terrain.y_bounds,
-        terrain.cells, terrain.material_ids, table, terrain.periodic)
+        terrain.cells, terrain.material_ids, table)
 end
 
 function _with_terrain_materials(terrain::TriangulatedTerrain, materials::_SoilMaterialTable)
@@ -455,7 +436,7 @@ end
 
 function _with_terrain_materials(terrain::HeightFieldTerrain, materials::_SoilMaterialTable)
     return HeightFieldTerrain(terrain.x, terrain.y, terrain.elevation,
-        terrain.diagonal, terrain.periodic, _with_terrain_materials(terrain.mesh, materials))
+        terrain.diagonal, _with_terrain_materials(terrain.mesh, materials))
 end
 
 _no_terrain_soil_optics_error() = throw(ArgumentError(
@@ -637,30 +618,41 @@ function _periodic_tile_indices(lower, upper, origin, direction, maximum_distanc
     return ix, iy, width, height
 end
 
-intersect_terrain(::NoVoxelTerrain, origin, direction, maximum_distance::Real=Inf) = nothing
+"""
+    intersect_terrain(terrain, origin, direction, maximum_distance=Inf; toricity=false)
+
+Find the nearest terrain intersection along a normalized ray. Standalone
+queries use finite terrain by default; `toricity=true` repeats planar or
+height-field terrain horizontally. A periodic height field must have matching
+opposite-edge elevations and a finite `maximum_distance`.
+Simulation transport takes this boundary mode from `LightOptions.toricity`.
+"""
+intersect_terrain(::NoVoxelTerrain, origin, direction, maximum_distance::Real=Inf;
+    toricity::Bool=false) = nothing
 
 function intersect_terrain(
     terrain::PlanarTerrain,
     origin,
     direction,
-    maximum_distance::Real=Inf,
+    maximum_distance::Real=Inf;
+    toricity::Bool=false,
 )
     ray_origin = ntuple(axis -> Float64(origin[axis]), 3)
     ray_direction = _normalise_terrain_vector(direction, "terrain ray direction")
     limit = Float64(maximum_distance)
     isfinite(limit) && limit >= 0 || limit == Inf ||
         throw(ArgumentError("maximum terrain distance must be non-negative"))
-    return _intersect_planar_base(terrain, ray_origin, ray_direction, limit)
+    return _intersect_planar_base(terrain, ray_origin, ray_direction, limit, toricity)
 end
 
-function _intersect_planar_base(terrain::PlanarTerrain, ray_origin, ray_direction, limit)
+function _intersect_planar_base(terrain::PlanarTerrain, ray_origin, ray_direction, limit, toricity::Bool)
     abs(ray_direction[3]) > eps(Float64) || return nothing
     distance = (terrain.elevation - ray_origin[3]) / ray_direction[3]
     tolerance = 256eps(Float64) * max(isfinite(limit) ? limit : abs(distance), 1.0)
     tolerance < distance <= limit + tolerance || return nothing
     x = ray_origin[1] + distance * ray_direction[1]
     y = ray_origin[2] + distance * ray_direction[2]
-    if terrain.periodic
+    if toricity
         x = terrain.x_bounds[1] + mod(x - terrain.x_bounds[1], terrain.x_bounds[2] - terrain.x_bounds[1])
         y = terrain.y_bounds[1] + mod(y - terrain.y_bounds[1], terrain.y_bounds[2] - terrain.y_bounds[1])
     else
@@ -688,16 +680,25 @@ function intersect_terrain(
     terrain::TriangulatedTerrain,
     origin,
     direction,
-    maximum_distance::Real=Inf,
+    maximum_distance::Real=Inf;
+    toricity::Bool=false,
 )
-    return _intersect_terrain_with_stack(terrain, origin, direction, maximum_distance, Int[])
+    return _intersect_terrain_with_stack(terrain, origin, direction, maximum_distance, Int[], toricity)
 end
 
-_intersect_terrain_with_stack(terrain::AbstractVoxelTerrain, origin, direction,
-    maximum_distance, stack::Vector{Int}) = intersect_terrain(terrain, origin, direction, maximum_distance)
+function _intersect_terrain_with_stack(terrain::AbstractVoxelTerrain, origin, direction,
+    maximum_distance, stack::Vector{Int}, toricity::Bool=false)
+    toricity && _validate_terrain_periodicity(terrain)
+    return intersect_terrain(terrain, origin, direction, maximum_distance)
+end
+
+_intersect_terrain_with_stack(terrain::PlanarTerrain, origin, direction,
+    maximum_distance, stack::Vector{Int}, toricity::Bool=false) =
+    intersect_terrain(terrain, origin, direction, maximum_distance; toricity)
 
 function _intersect_terrain_with_stack(terrain::TriangulatedTerrain, origin, direction,
-                                      maximum_distance, stack::Vector{Int})
+                                      maximum_distance, stack::Vector{Int}, toricity::Bool=false)
+    toricity && _validate_terrain_periodicity(terrain)
     ray_origin = ntuple(axis -> Float64(origin[axis]), 3)
     ray_direction = _normalise_terrain_vector(direction, "terrain ray direction")
     limit = Float64(maximum_distance)
@@ -710,24 +711,26 @@ function intersect_terrain(
     terrain::HeightFieldTerrain,
     origin,
     direction,
-    maximum_distance::Real=Inf,
+    maximum_distance::Real=Inf;
+    toricity::Bool=false,
 )
-    return _intersect_terrain_with_stack(terrain, origin, direction, maximum_distance, Int[])
+    return _intersect_terrain_with_stack(terrain, origin, direction, maximum_distance, Int[], toricity)
 end
 
 function _intersect_terrain_with_stack(terrain::HeightFieldTerrain, origin, direction,
-                                      maximum_distance, stack::Vector{Int})
+                                      maximum_distance, stack::Vector{Int}, toricity::Bool=false)
+    toricity && _validate_terrain_periodicity(terrain)
     ray_origin = ntuple(axis -> Float64(origin[axis]), 3)
     ray_direction = _normalise_terrain_vector(direction, "terrain ray direction")
     limit = Float64(maximum_distance)
     (isfinite(limit) && limit >= 0) || limit == Inf ||
         throw(ArgumentError("maximum terrain distance must be non-negative"))
-    return _intersect_height_field_base(terrain, ray_origin, ray_direction, limit, stack)
+    return _intersect_height_field_base(terrain, ray_origin, ray_direction, limit, stack, toricity)
 end
 
 function _intersect_height_field_base(terrain::HeightFieldTerrain, ray_origin,
-                                      ray_direction, limit, stack::Vector{Int})
-    terrain.periodic || return _intersect_triangulated_base(
+                                      ray_direction, limit, stack::Vector{Int}, toricity::Bool)
+    toricity || return _intersect_triangulated_base(
         terrain.mesh,
         ray_origin,
         ray_direction,
@@ -763,20 +766,20 @@ _prepare_voxel_terrain_direction(
 ) = _normalise_terrain_vector(direction, "terrain ray direction")
 
 _intersect_terrain_prepared_with_stack(terrain::AbstractVoxelTerrain, origin,
-    direction, maximum_distance, stack::Vector{Int}, ::Nothing) =
-    _intersect_terrain_with_stack(terrain, origin, direction, maximum_distance, stack)
+    direction, maximum_distance, stack::Vector{Int}, ::Nothing, toricity::Bool) =
+    _intersect_terrain_with_stack(terrain, origin, direction, maximum_distance, stack, toricity)
 
 _intersect_terrain_prepared_with_stack(terrain::PlanarTerrain, origin, direction,
-    maximum_distance, stack::Vector{Int}, prepared_direction::NTuple{3,Float64}) =
-    _intersect_planar_base(terrain, origin, prepared_direction, maximum_distance)
+    maximum_distance, stack::Vector{Int}, prepared_direction::NTuple{3,Float64}, toricity::Bool) =
+    _intersect_planar_base(terrain, origin, prepared_direction, maximum_distance, toricity)
 
 _intersect_terrain_prepared_with_stack(terrain::TriangulatedTerrain, origin, direction,
-    maximum_distance, stack::Vector{Int}, prepared_direction::NTuple{3,Float64}) =
+    maximum_distance, stack::Vector{Int}, prepared_direction::NTuple{3,Float64}, toricity::Bool) =
     _intersect_triangulated_base(terrain, origin, prepared_direction, maximum_distance, stack)
 
 _intersect_terrain_prepared_with_stack(terrain::HeightFieldTerrain, origin, direction,
-    maximum_distance, stack::Vector{Int}, prepared_direction::NTuple{3,Float64}) =
-    _intersect_height_field_base(terrain, origin, prepared_direction, maximum_distance, stack)
+    maximum_distance, stack::Vector{Int}, prepared_direction::NTuple{3,Float64}, toricity::Bool) =
+    _intersect_height_field_base(terrain, origin, prepared_direction, maximum_distance, stack, toricity)
 
 function terrain_elevation_at(terrain::AbstractVoxelTerrain, x::Real, y::Real)
     return _terrain_elevation_at(terrain, x, y, Int[])
@@ -802,10 +805,26 @@ function _terrain_elevation_at(terrain::AbstractVoxelTerrain, x::Real, y::Real, 
     return hit.point[3]
 end
 
-function _terrain_periodic(terrain::AbstractVoxelTerrain)
-    terrain isa PlanarTerrain && return terrain.periodic
-    terrain isa HeightFieldTerrain && return terrain.periodic
-    return false
+function _validate_terrain_periodicity(::AbstractVoxelTerrain)
+    throw(ArgumentError(
+        "periodic terrain transport requires PlanarTerrain or HeightFieldTerrain; " *
+        "periodic generic triangle meshes are not supported",
+    ))
+end
+
+_validate_terrain_periodicity(::NoVoxelTerrain) = nothing
+_validate_terrain_periodicity(::PlanarTerrain) = nothing
+
+function _validate_terrain_periodicity(terrain::HeightFieldTerrain)
+    z = terrain.elevation
+    scale = max(maximum(abs, z), terrain.x[end] - terrain.x[1],
+        terrain.y[end] - terrain.y[1], 1.0)
+    tolerance = 256eps(Float64) * scale
+    all(abs(z[1, j] - z[end, j]) <= tolerance for j in eachindex(terrain.y)) ||
+        throw(ArgumentError("periodic height-field elevations must match on opposite x edges"))
+    all(abs(z[i, 1] - z[i, end]) <= tolerance for i in eachindex(terrain.x)) ||
+        throw(ArgumentError("periodic height-field elevations must match on opposite y edges"))
+    return nothing
 end
 
 function _validate_terrain_for_grid(
@@ -824,9 +843,7 @@ function _validate_terrain_for_grid(
         "terrain must remain below the voxel-grid top boundary",
     ))
     if toricity
-        _terrain_periodic(terrain) || throw(ArgumentError(
-            "periodic voxel boundaries require terrain constructed with periodic=true",
-        ))
+        _validate_terrain_periodicity(terrain)
         for axis in 1:2
             isapprox(lower[axis], grid.minimum[axis]; atol=tolerance, rtol=0) &&
             isapprox(upper[axis], grid.maximum[axis]; atol=tolerance, rtol=0) ||
@@ -845,7 +862,7 @@ _terrain_geometry_fingerprint(::NoVoxelTerrain) = UInt(0)
 
 function _terrain_geometry_fingerprint(terrain::PlanarTerrain)
     state = hash(:planar_terrain)
-    for value in (terrain.elevation, terrain.x_bounds, terrain.y_bounds, terrain.cells, terrain.periodic)
+    for value in (terrain.elevation, terrain.x_bounds, terrain.y_bounds, terrain.cells)
         state = hash(value, state)
     end
     for id in terrain.material_ids
@@ -869,7 +886,7 @@ function _terrain_geometry_fingerprint(terrain::TriangulatedTerrain)
 end
 
 function _terrain_geometry_fingerprint(terrain::HeightFieldTerrain)
-    state = hash(:height_field_terrain, hash((terrain.diagonal, terrain.periodic)))
+    state = hash(:height_field_terrain, hash(terrain.diagonal))
     state = hash(_terrain_geometry_fingerprint(terrain.mesh), state)
     return UInt(state)
 end
@@ -1079,7 +1096,7 @@ function _truncate_voxel_path_at_terrain!(
     terrain isa NoVoxelTerrain && return path
     _validate_terrain_for_grid(grid, terrain, toricity)
     return _truncate_voxel_path_at_terrain_body!(grid, path, origin, direction,
-        terrain, workspace, cached_surface, nothing)
+        terrain, toricity, workspace, cached_surface, nothing)
 end
 
 # The generic fallback deliberately retains validation and custom intersection
@@ -1098,7 +1115,7 @@ function _truncate_voxel_path_at_terrain_prepared!(
     workspace, cached_surface, prepared_direction::NTuple{3,Float64},
 )
     return _truncate_voxel_path_at_terrain_body!(grid, path, origin, direction,
-        terrain, workspace, cached_surface, prepared_direction)
+        terrain, toricity, workspace, cached_surface, prepared_direction)
 end
 
 function _check_voxel_terrain_origin!(origin, terrain, workspace, cached_surface)
@@ -1111,7 +1128,7 @@ function _check_voxel_terrain_origin!(origin, terrain, workspace, cached_surface
     return nothing
 end
 
-function _voxel_terrain_terminal_hit(origin, direction, terrain, workspace,
+function _voxel_terrain_terminal_hit(origin, direction, terrain, toricity, workspace,
     prepared_direction, has_segments, exit_reason, maximum_distance)
     if !has_segments
         exit_reason == :bottom && throw(ArgumentError(
@@ -1120,7 +1137,7 @@ function _voxel_terrain_terminal_hit(origin, direction, terrain, workspace,
         return nothing
     end
     hit = _intersect_terrain_prepared_with_stack(terrain, origin, direction, maximum_distance,
-        workspace.terrain_stack, prepared_direction)
+        workspace.terrain_stack, prepared_direction, toricity)
     if hit === nothing
         exit_reason == :bottom && throw(ArgumentError(
             "terrain has a horizontal coverage gap along a ray reaching the voxel bottom",
@@ -1133,14 +1150,14 @@ function _voxel_terrain_terminal_hit(origin, direction, terrain, workspace,
 end
 
 function _truncate_voxel_path_at_terrain_body!(
-    grid, path, origin, direction, terrain, workspace, cached_surface, prepared_direction,
+    grid, path, origin, direction, terrain, toricity, workspace, cached_surface, prepared_direction,
 )
     _check_voxel_terrain_origin!(origin, terrain, workspace, cached_surface)
     # Query custom terrain before reading path storage, matching the original
     # validation/intersection ordering even for user-defined query methods.
     has_segments = !isempty(path.segments)
     maximum_distance = has_segments ? path.segments[end].t_exit : 0.0
-    hit = _voxel_terrain_terminal_hit(origin, direction, terrain, workspace,
+    hit = _voxel_terrain_terminal_hit(origin, direction, terrain, toricity, workspace,
         prepared_direction, has_segments, path.exit_reason, maximum_distance)
     hit === nothing && return path
     tolerance = _voxel_tolerance(maximum_distance)

@@ -271,7 +271,7 @@ end
     grid = VoxelGrid((0, 0, 0), (1, 2, 1), reshape([0.5, 1.5], 1, 2, 1))
     original_pad = copy(grid.pad)
     scene = VoxelScene(grid)
-    add_ground!(scene; cells=(1, 2), periodic=true)
+    add_ground!(scene; cells=(1, 2))
     update_models!(scene, models_for(; leaf=VoxelMaterial(),
         ground=SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)))
     options = LightOptions(toricity=false, scattering=false, turtle_sectors=6, all_in_turtle=true)

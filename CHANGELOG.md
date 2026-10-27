@@ -41,6 +41,9 @@
 
 ### Changed
 
+- Derive voxel ground boundaries from `LightOptions.toricity`. Remove terrain
+  `periodic` fields and constructor/importer keywords; validate terrain bounds
+  and height-field seams when periodic transport is selected.
 - Keep voxel scene import, terrain constructors and `add_ground!` strictly
   geometric. Configure all vegetation and soil optical properties through
   `models_for`, supplied to `run_light` or retained with `update_models!`.

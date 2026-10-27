@@ -191,8 +191,9 @@ axis-aligned normals, which can bias both shadows and reflected radiation.
 The reference solver now supports finite planes, regular height fields,
 arbitrary non-periodic triangle meshes, exact intersections, facet normals,
 BVH acceleration, aligned AAIGrid/AMAPVox input, and
-geometry-only cache invalidation. Open and periodic semantics are explicit;
-periodic canopy transport over non-periodic topography is rejected.
+geometry-only cache invalidation. `LightOptions.toricity` controls horizontal
+boundaries for both canopy and terrain. Toric transport validates height-field
+seams and matching grid bounds; generic triangle terrain requires open boundaries.
 
 Potential future terrain work includes wavelength-resolved or BRDF soil
 reflection, robust overhang semantics for general meshes, external GIS raster

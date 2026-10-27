@@ -342,6 +342,12 @@ wrap horizontally through repeating copies of the grid; with `false`, they
 terminate at the first lateral grid boundary. Voxel transport does not use a
 raster projection canvas.
 
+For voxel scenes with ground, the same option controls terrain repetition;
+ground constructors do not require a separate periodicity setting. Toric
+transport requires terrain bounds to match the grid, and height fields must
+also have matching elevations on opposite edges. Generic triangle terrain
+requires `toricity=false`.
+
 See [Scene Files And Semantics](reference_scene.md) for the physical plot-domain
 inputs.
 

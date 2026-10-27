@@ -167,7 +167,7 @@ end
     grid = VoxelGrid((0, 0, 0), (1, 1, 11), zeros(1, 1, 1))
     soil = SoilOpticalProperties(par_reflectance=0.99, nir_reflectance=0.98)
     terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 0.5, 1.0], [0.0, 1.0],
-        [10.0 10.0; 0.0 0.0; 10.0 10.0]; periodic=true), Dict(1 => soil))
+        [10.0 10.0; 0.0 0.0; 10.0 10.0]), Dict(1 => soil))
     options = LightOptions(toricity=true, turtle_sectors=16, all_in_turtle=true,
         scattering=true, scattering_max_iter=10, scattering_stop_ratio=1e-8)
     row = (step_duration=1.0, Ri_PAR_f=1.0, Ri_NIR_f=0.5,

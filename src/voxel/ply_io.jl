@@ -25,7 +25,7 @@ than silently triangulated.
 the default is identity. No translation, rescaling, CRS conversion, or terrain
 alignment is inferred. Additional keywords are passed to `TriangulatedTerrain`,
 including material IDs and BVH `leaf_size`.
-Generic triangular terrain cannot be periodic.
+Generic triangular terrain requires `LightOptions(toricity=false)` when run.
 The reader imports geometry and material identities. Configure soil models
 separately at simulation setup.
 """
