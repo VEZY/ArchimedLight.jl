@@ -148,6 +148,17 @@ write_scene(path, scene)
 
 ## Voxel Inputs And Individual/Organ Mixtures
 
+For the downloadable [Belinga application](applications/belinga.md),
+`example_scene_path(:belinga)` returns the input filename in Julia's artifact
+cache. The first call downloads the approximately 17 MB, checksummed Zenodo
+archive; subsequent calls reuse it. Importing ArchimedLight does not download
+the dataset. Missing-PAD handling remains an explicit choice when reading:
+
+```julia
+scene = read_scene(example_scene_path(:belinga);
+    missing_pad=:zero_with_diagnostics)
+```
+
 Use the dedicated [Voxel Modelling](voxel_overview.md) section for workflows
 and model assumptions. Read observations first, then configure materials
 separately from geometry and numerical options:

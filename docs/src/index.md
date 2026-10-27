@@ -125,6 +125,12 @@ mixed crops, and environments shaped by solar panels.
         <span class="application-card-body"><strong>Oil-palm reconstructions</strong><span>JPCE · CIRAD–PT SMART</span></span>
       </a>
     </li>
+    <li>
+      <a class="application-card" href="applications/belinga.html">
+        <img src="assets/applications/belinga_composition.png" width="1700" height="1250" loading="lazy" alt="Belinga voxel canopy coloured by leaf, wood and unknown contents above generated flat ground.">
+        <span class="application-card-body"><strong>Belinga voxel canopy</strong><span>Olivier Martin · Pol Kennel · CIRAD–AMAP</span></span>
+      </a>
+    </li>
   </ul>
 </section>
 ```

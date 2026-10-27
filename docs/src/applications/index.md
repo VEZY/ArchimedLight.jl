@@ -4,7 +4,7 @@ How does a crop share light with its neighbours? What changes beneath solar pane
 How can a measured plant architecture help explain whole-canopy gas exchange?
 These applications use explicit 3D scenes to connect plant structure with its light environment.
 
-Explore four research workflows, from wheat–maize mixtures to oil-palm digital twins.
+Explore five workflows, from wheat–maize mixtures to measured voxel canopies.
 Each page describes the scientific question, the scene, and the role of ArchimedLight.
 
 ```@raw html
@@ -25,6 +25,10 @@ Each page describes the scientific question, the scene, and the role of Archimed
     <li><a class="application-card" href="applications/oil-palm.html">
       <img src="assets/applications/oil-palm.png" width="3600" height="1500" loading="lazy" alt="Measurement-driven reconstructions of an oil palm at three successive dates.">
       <span class="application-card-body"><strong>Oil-palm digital twins</strong><span>JPCE · CIRAD–PT SMART</span><span>Follow measured palm architecture through time at leaflet scale.</span></span>
+    </a></li>
+    <li><a class="application-card" href="applications/belinga.html">
+      <img src="assets/applications/belinga_composition.png" width="1700" height="1250" loading="lazy" alt="Belinga voxel canopy coloured by leaf, wood and unknown contents above generated flat ground.">
+      <span class="application-card-body"><strong>Belinga voxel canopy</strong><span>Olivier Martin · Pol Kennel · CIRAD–AMAP</span><span>Explore canopy shading from attributed lidar voxels.</span></span>
     </a></li>
   </ul>
 </section>

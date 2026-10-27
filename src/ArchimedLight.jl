@@ -19,7 +19,9 @@ import CSV
 import JSON
 import CodecZlib
 import PlyIO
+using LazyArtifacts
 
+include("example_scenes.jl")
 include("types.jl")
 include("io.jl")
 include("meteo.jl")
@@ -52,6 +54,7 @@ include("query.jl")
 include("voxel/results.jl")
 
 export LightRenderGeometry
+export example_scene_path
 export LightNodeMetadata
 export LightComponentMetadata
 export LightModels

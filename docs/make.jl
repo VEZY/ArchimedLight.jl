@@ -62,6 +62,7 @@ makedocs(;
             "Agrivoltaics" => "applications/agrivoltaics.md",
             "Reconstructed Rice" => "applications/rice.md",
             "Oil-Palm Digital Twins" => "applications/oil-palm.md",
+            "Belinga Voxel Canopy" => "applications/belinga.md",
         ],
         "Tutorials" => [
             "Beginner Workflows" => "tutorial_beginner_workflows.md",
