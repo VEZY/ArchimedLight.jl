@@ -8,8 +8,11 @@ Material configuration supplied as models to a voxel run. Component defaults
 apply throughout the scene. An individual may supply complete VoxelMaterial
 values or named tuples of parameters inherited from an organ's default.
 Without a global default, supply a complete material for each participating
-individual/organ. Soil material IDs follow the same rule using
-SoilOpticalProperties and ground_materials.
+individual/organ. Ground uses the same [`opaque`](@ref) models as triangle
+scenes. Its PAR/NIR reflected fractions are distributed
+above the opaque terrain; the remainder is absorbed. `ground_materials` maps
+positive terrain material IDs to complete models or partial `(par=..., nir=...)`
+overrides of `ground`. Resolved coefficients are copied at configuration time.
 
 Merged JSONL inputs require mode=:point_proxy explicitly. This records the
 assumption that point proportions allocate exported PAD; unassigned vegetation
@@ -19,35 +22,36 @@ struct VoxelModels{F}
     leaf::Union{Nothing,VoxelMaterial}
     wood::Union{Nothing,VoxelMaterial}
     unknown::Union{Nothing,VoxelMaterial}
-    ground::Union{Nothing,SoilOpticalProperties{Float64}}
+    ground::Union{Nothing,_SoilMaterial}
     individuals::Dict{String,NamedTuple}
-    ground_materials::Dict{Int,SoilOpticalProperties{Float64}}
+    ground_materials::_SoilMaterialTable
     mode::Union{Nothing,Symbol}
     identified_area_fraction::F
 end
 
+function _voxel_soil_material(model::TypeModel)
+    coefficients = _opaque_ground_coefficients(model)
+    (par_reflectance=coefficients.par, nir_reflectance=coefficients.nir)
+end
+
 function _voxel_soil_override(base, value)
-    if value isa SoilOpticalProperties
-        return SoilOpticalProperties(; par_reflectance=value.par_reflectance,
-            nir_reflectance=value.nir_reflectance)
-    end
+    value isa TypeModel && return _voxel_soil_material(value)
     value isa NamedTuple || throw(ArgumentError(
-        "soil overrides must be SoilOpticalProperties or named tuples of parameters"))
-    all(key -> key in (:par_reflectance, :nir_reflectance), keys(value)) ||
-        throw(ArgumentError("soil overrides may only set par_reflectance and nir_reflectance"))
+        "soil overrides must be opaque models or named tuples of parameters"))
+    all(key -> key in (:par, :nir), keys(value)) ||
+        throw(ArgumentError("soil overrides may only set par and nir"))
     base === nothing && throw(ArgumentError(
-        "partial soil overrides require a global ground model; otherwise supply full SoilOpticalProperties"))
+        "partial soil overrides require a global ground model; otherwise supply opaque(par=..., nir=...)"))
     all(x -> x isa Real, values(value)) ||
         throw(ArgumentError("soil optical parameters must be numbers"))
-    params = merge((par_reflectance=base.par_reflectance,
-                    nir_reflectance=base.nir_reflectance), value)
-    SoilOpticalProperties(; params...)
+    params = merge((par=base.par_reflectance, nir=base.nir_reflectance), value)
+    _voxel_soil_material(opaque(; params...))
 end
 
 function VoxelModels(; leaf::Union{Nothing,VoxelMaterial}=nothing,
     wood::Union{Nothing,VoxelMaterial}=VoxelMaterial(),
     unknown::Union{Nothing,VoxelMaterial}=VoxelMaterial(),
-    ground::Union{Nothing,SoilOpticalProperties}=nothing,
+    ground::Union{Nothing,TypeModel}=nothing,
     individuals=Dict(), ground_materials=Dict(), mode::Union{Nothing,Symbol}=nothing,
     identified_area_fraction=nothing)
     mode in (nothing, :point_proxy) || throw(ArgumentError("only mode=:point_proxy is supported"))
@@ -55,7 +59,7 @@ function VoxelModels(; leaf::Union{Nothing,VoxelMaterial}=nothing,
     defaults = (; leaf, wood, unknown)
     resolved_individuals = _resolve_voxel_individual_materials(defaults, individuals)
     soil = ground === nothing ? nothing : _voxel_soil_override(nothing, ground)
-    resolved_soils = Dict{Int,SoilOpticalProperties{Float64}}()
+    resolved_soils = _SoilMaterialTable()
     for (id, value) in pairs(ground_materials)
         id isa Integer && id > 0 ||
             throw(ArgumentError("ground material IDs must be positive integers"))
@@ -77,7 +81,7 @@ function _resolve_voxel_ground(terrain::AbstractVoxelTerrain, models::VoxelModel
     used = Set(terrain_patch_material(terrain, patch) for patch in 1:terrain_patch_count(terrain))
     all(id -> id in used, keys(models.ground_materials)) ||
         throw(ArgumentError("ground override references a material ID absent from the terrain"))
-    table = Dict{Int,SoilOpticalProperties{Float64}}()
+    table = _SoilMaterialTable()
     for id in used
         material = get(models.ground_materials, id, models.ground)
         material === nothing && throw(ArgumentError(

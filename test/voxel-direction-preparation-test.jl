@@ -49,14 +49,14 @@ end
 
 @testitem "Prepared voxel responses equal public per-ray terrain tracing" tags=[:voxel, :terrain, :fast] begin
     AL = ArchimedLight
-    soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
+    soil = opaque(par=0.0, nir=0.0)
     grid = VoxelGrid((-1.2, 2.3, -0.5), (2.9, 6.0, 3.5),
         reshape([0.1 + 0.05mod(i, 5) for i in 1:24], 3, 2, 4))
     x = collect(range(grid.minimum[1], grid.maximum[1]; length=3))
     y = collect(range(grid.minimum[2], grid.maximum[2]; length=3))
     heights = [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2]
-    heightfield = ArchimedLight._with_terrain_materials(HeightFieldTerrain(x, y, heights; periodic=true), Dict(1 => soil))
-    planar = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2, periodic=true), Dict(1 => soil))
+    heightfield = ArchimedLight._with_terrain_materials(HeightFieldTerrain(x, y, heights), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
+    planar = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     scenes = ((NoVoxelTerrain(), false), (NoVoxelTerrain(), true),
               (planar, false), (planar, true), (heightfield.mesh, false),
               (heightfield, false), (heightfield, true))
@@ -142,7 +142,7 @@ end
     mutable struct ChangingBoundsTerrain <: AL.AbstractVoxelTerrain
         upper::Float64
         invalidate_on_query::Bool
-        soil::SoilOpticalProperties{Float64}
+        soil::ArchimedLight._SoilMaterial
     end
     AL.terrain_bounds(terrain::ChangingBoundsTerrain) =
         ((0.0, 0.0, 0.2), (1.0, 1.0, terrain.upper))
@@ -156,16 +156,16 @@ end
         intersect_terrain(ArchimedLight._with_terrain_materials(PlanarTerrain(0.2, (0, 1), (0, 1)), Dict(1 => terrain.soil)),
             origin, direction, limit)
     end
-    soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
+    soil = opaque(par=0.0, nir=0.0)
     grid = VoxelGrid((0, 0, 0), (1, 1, 3), fill(0.2, 1, 1, 3))
     backend = VoxelCPUBackend(rays_per_voxel=4)
     options = LightOptions(toricity=false)
     for traversal in (:dda, :reference)
         current_backend = VoxelCPUBackend(rays_per_voxel=4, traversal=traversal)
-        terrain = ChangingBoundsTerrain(0.2, true, soil)
+        terrain = ChangingBoundsTerrain(0.2, true, ArchimedLight._voxel_soil_material(soil))
         @test_throws ArgumentError AL.compute_voxel_direction_response(grid,
             (0.3, -0.2, -1.0), current_backend, terrain; options)
-        terrain = ChangingBoundsTerrain(0.2, false, soil)
+        terrain = ChangingBoundsTerrain(0.2, false, ArchimedLight._voxel_soil_material(soil))
         custom = AL.compute_voxel_direction_response(grid, (0.3, -0.2, -1.0),
             current_backend, terrain; options)
         @test custom.terrain_incident_weight > 0
@@ -180,9 +180,9 @@ end
 
 @testitem "Native voxel steps and series retain changing-sun terrain parity" tags=[:voxel, :terrain, :fast] begin
     grid = VoxelGrid((0, 0, 0), (2, 3, 4), fill(0.2, 2, 2, 3))
-    soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.3)
+    soil = opaque(par=0.2, nir=0.3)
     terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.5, 3.0],
-        [0.2 0.2 0.2; 0.2 0.6 0.2; 0.2 0.2 0.2]; periodic=true), Dict(1 => soil))
+        [0.2 0.2 0.2; 0.2 0.6 0.2; 0.2 0.2 0.2]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     optics = VoxelOpticalProperties(grid; par_reflectance=0.1,
         par_transmittance=0.05, nir_reflectance=0.3, nir_transmittance=0.2)
     backend = VoxelCPUBackend(rays_per_voxel=4)

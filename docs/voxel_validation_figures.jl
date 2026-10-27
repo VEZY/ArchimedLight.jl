@@ -72,7 +72,7 @@ function physical_checks()
     # Same explicit optical/soil contract and budget as voxel-terrain-test.jl.
     small = VoxelGrid((0, 0, 0), (1, 1, 2), fill(0.5, 1, 1, 2))
     cpu = VoxelCPUBackend(rays_per_voxel=4, g=0.5, traversal=:dda)
-    soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.5)
+    soil = opaque(par=0.2, nir=0.5)
     scene = VoxelScene(small)
     add_ground!(scene; elevation=0.0)
     leaf = VoxelMaterial(g=0.5, par_reflectance=0.08, par_transmittance=0.07,

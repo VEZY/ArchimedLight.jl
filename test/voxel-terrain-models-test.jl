@@ -1,7 +1,7 @@
 @testitem "Terrain geometry can precede soil models without rebuilding acceleration" tags=[:voxel, :terrain, :models, :fast] begin
-    soil = SoilOpticalProperties(par_reflectance=0.12, nir_reflectance=0.32)
-    bright = SoilOpticalProperties(par_reflectance=0.3, nir_reflectance=0.5)
-    materials = Dict(1 => soil, 2 => bright)
+    soil = opaque(par=0.12, nir=0.32)
+    bright = opaque(par=0.3, nir=0.5)
+    materials = models_for(; ground_materials=Dict(1 => soil, 2 => bright)).ground_materials
     grid = VoxelGrid((0, 0, 0), (2, 1, 2), zeros(2, 1, 2))
     plane = PlanarTerrain(grid; material_ids=reshape([1, 2], 2, 1))
     vertices = [(0., 0., 0.), (1., 0., 0.), (2., 0., 0.),
@@ -22,11 +22,16 @@
         @test terrain_bounds(bound) == terrain_bounds(terrain)
         @test ArchimedLight._terrain_geometry_fingerprint(bound) ==
               ArchimedLight._terrain_geometry_fingerprint(terrain)
-        @test soil_optics(bound, 1) == soil
-        @test soil_optics(bound, 2) == bright
+        @test soil_optics(bound, 1) == ArchimedLight._voxel_soil_material(soil)
+        @test soil_optics(bound, 2) == ArchimedLight._voxel_soil_material(bright)
         @test isempty(ArchimedLight._terrain_materials(terrain))
-        @test_throws ArgumentError ArchimedLight._with_terrain_materials(terrain, Dict(1 => soil))
+        @test_throws ArgumentError ArchimedLight._with_terrain_materials(terrain,
+            Dict(1 => ArchimedLight._voxel_soil_material(soil)))
         @test_throws ArgumentError ArchimedLight._with_terrain_materials(terrain, empty(materials))
+        @test_throws ArgumentError ArchimedLight._with_terrain_materials(terrain,
+            Dict(1 => (par_reflectance=-0.1, nir_reflectance=0.2), 2 => materials[2]))
+        @test_throws ArgumentError ArchimedLight._with_terrain_materials(terrain,
+            Dict(1 => (par_reflectance=0.1, nir_reflectance=Inf), 2 => materials[2]))
         if terrain isa PlanarTerrain
             @test bound.material_ids === terrain.material_ids
         else
@@ -59,10 +64,10 @@
 end
 
 @testitem "Deferred terrain materials preserve native transport and imported geometry" tags=[:voxel, :terrain, :models, :fast] begin
-    soil = SoilOpticalProperties(par_reflectance=0.12, nir_reflectance=0.32)
+    soil = opaque(par=0.12, nir=0.32)
     grid = VoxelGrid((0, 0, 0), (2, 2, 3), fill(0.4, 2, 2, 3))
     geometry = PlanarTerrain(grid; cells=(2, 2))
-    resolved = ArchimedLight._with_terrain_materials(geometry, Dict(1 => soil))
+    resolved = ArchimedLight._with_terrain_materials(geometry, models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     row = (step_duration=60., Ri_PAR_f=100., Ri_NIR_f=50., direct_fraction=0.6,
            sun_azimuth=130., sun_elevation=40.)
     options = LightOptions(toricity=false, scattering=true, turtle_sectors=6,
@@ -83,7 +88,7 @@ end
     path = joinpath(pkgdir(ArchimedLight), "examples", "voxel_tree", "terrain.ply")
     imported = read_ply_terrain(path)
     @test isempty(imported.materials)
-    rebound = ArchimedLight._with_terrain_materials(imported, Dict(1 => soil))
+    rebound = ArchimedLight._with_terrain_materials(imported, models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     @test rebound.bvh === imported.bvh
     @test rebound.vertices === imported.vertices
     @test rebound.triangles === imported.triangles

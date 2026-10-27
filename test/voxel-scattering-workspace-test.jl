@@ -6,10 +6,10 @@
          (0.0, 0.0, -1.0), (-0.6, 0.0, -0.8)], fill(0.25, 4))
     backend = VoxelCPUBackend(rays_per_voxel=1)
     options = LightOptions(toricity=false)
-    dark = SoilOpticalProperties(par_reflectance=0.1, nir_reflectance=0.2)
-    bright = SoilOpticalProperties(par_reflectance=0.6, nir_reflectance=0.8)
+    dark = opaque(par=0.1, nir=0.2)
+    bright = opaque(par=0.6, nir=0.8)
     plane = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2,
-        material_ids=reshape([1, 2], 2, 1)), Dict(1 => dark, 2 => bright))
+        material_ids=reshape([1, 2], 2, 1)), models_for(; ground_materials=Dict(1 => dark, 2 => bright)).ground_materials)
     legacy = VoxelGroundOptics(grid; par_reflectance=0.2,
         nir_reflectance=reshape([0.4, 0.7], 2, 1))
     emitted = reshape(collect(0.1:0.1:0.6), size(grid))
@@ -61,8 +61,8 @@ end
     options = LightOptions(toricity=false, scattering=true, scattering_max_iter=4,
         scattering_stop_ratio=0.0, nir_interception=true, nir_scattering=true)
     optics = VoxelOpticalProperties(grid; scattering_par=0.65, scattering_nir=0.85)
-    soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.5)
-    plane = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2), Dict(1 => soil))
+    soil = opaque(par=0.2, nir=0.5)
+    plane = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     legacy = VoxelGroundOptics(grid; par_reflectance=0.2, nir_reflectance=0.5)
 
     # Independent iteration oracle: public geometric transport owns a fresh
@@ -165,9 +165,9 @@ end
 @testitem "Scattering workspace ping-pong preserves the 128-bounce terrain tail" tags=[:voxel, :terrain, :scattering, :fast] begin
     AL = ArchimedLight
     grid = VoxelGrid((0, 0, 0), (1, 1, 11), zeros(1, 1, 1))
-    soil = SoilOpticalProperties(par_reflectance=0.99, nir_reflectance=0.98)
+    soil = opaque(par=0.99, nir=0.98)
     terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 0.5, 1.0], [0.0, 1.0],
-        [10.0 10.0; 0.0 0.0; 10.0 10.0]; periodic=true), Dict(1 => soil))
+        [10.0 10.0; 0.0 0.0; 10.0 10.0]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     options = LightOptions(toricity=true, turtle_sectors=16, all_in_turtle=true,
         scattering=true, scattering_max_iter=10, scattering_stop_ratio=1e-8)
     row = (step_duration=1.0, Ri_PAR_f=1.0, Ri_NIR_f=0.5,

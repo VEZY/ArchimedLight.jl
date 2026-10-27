@@ -1,7 +1,7 @@
 @testitem "Terrain traversal ignores stale reusable stack entries" tags=[:voxel, :terrain, :fast] begin
     AL = ArchimedLight
-    soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)
-    bright = SoilOpticalProperties(par_reflectance=0.7, nir_reflectance=0.8)
+    soil = opaque(par=0.2, nir=0.4)
+    bright = opaque(par=0.7, nir=0.8)
     vertices = NTuple{3,Float64}[]
     triangles = NTuple{3,Int}[]
     # Every node overlaps the central ray. The nearest tied patch with the
@@ -16,16 +16,16 @@
         push!(triangles, (first, first + 1, first + 2))
     end
     deep = ArchimedLight._with_terrain_materials(TriangulatedTerrain(vertices, triangles; leaf_size=1,
-        material_ids=[isodd(patch) ? 1 : 2 for patch in 1:patch_count]), Dict(1 => soil, 2 => bright))
+        material_ids=[isodd(patch) ? 1 : 2 for patch in 1:patch_count]), models_for(; ground_materials=Dict(1 => soil, 2 => bright)).ground_materials)
     shallow = ArchimedLight._with_terrain_materials(TriangulatedTerrain([(0.0, 0.0, 0.4), (1.0, 0.0, 0.4),
-                                  (0.0, 1.0, 0.4)], [(1, 2, 3)]), Dict(1 => soil))
+                                  (0.0, 1.0, 0.4)], [(1, 2, 3)]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     periodic = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.0, 2.0],
-        [0.3 0.3 0.3; 0.3 0.7 0.3; 0.3 0.3 0.3]; periodic=true), Dict(1 => soil))
-    function compare_query(stack, terrain, origin, direction, limit)
+        [0.3 0.3 0.3; 0.3 0.7 0.3; 0.3 0.3 0.3]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
+    function compare_query(stack, terrain, origin, direction, limit; toricity=false)
         # Scratch contents are not traversal state between independent queries.
         fill!(stack, typemax(Int))
-        expected = intersect_terrain(terrain, origin, direction, limit)
-        actual = AL._intersect_terrain_with_stack(terrain, origin, direction, limit, stack)
+        expected = intersect_terrain(terrain, origin, direction, limit; toricity)
+        actual = AL._intersect_terrain_with_stack(terrain, origin, direction, limit, stack, toricity)
         @test actual === expected
         return actual
     end
@@ -43,10 +43,10 @@
         @test small_hit.patch_id == 1
         @test small_hit.distance ≈ 1.6 atol=1e-14
         # Periodic intersection reuses the same stack for several tile queries.
-        tiled_hit = compare_query(stack, periodic, (0.25, 0.4, 2.0), (2.4, -1.7, -1.0), 8.0)
+        tiled_hit = compare_query(stack, periodic, (0.25, 0.4, 2.0), (2.4, -1.7, -1.0), 8.0; toricity=true)
         @test tiled_hit !== nothing
         @test tiled_hit.normal == terrain_patch_normal(periodic, tiled_hit.patch_id)
-        @test compare_query(stack, periodic, (0.25, 0.4, 2.0), (0, 0, 1), 8.0) === nothing
+        @test compare_query(stack, periodic, (0.25, 0.4, 2.0), (0, 0, 1), 8.0; toricity=true) === nothing
     end
 end
 

@@ -80,7 +80,7 @@ end
     options = HelperModule._synthetic_options(toricity=false, pixel_size=0.01)
     models = HelperModule._default_synthetic_models()
     fluxes = AL.DirectionalFluxes([1], [1.0], [1.0])
-    soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
+    soil = opaque(par=0.0, nir=0.0)
     flat_scene = HelperModule._synthetic_horizontal_scene([
         (x0=0.0, x1=1.0, y0=0.0, y1=1.0, z=0.0),
     ])
@@ -92,7 +92,7 @@ end
         # Different air heights and voxel shapes must illuminate the same square metre.
         for height in (0.25, 1.0, 3.0)
             grid = VoxelGrid((0, 0, 0), (1, 1, height), zeros(1, 1, Int(max(1, height))))
-            terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.0), Dict(1 => soil))
+            terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.0), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
             diagonal = direction[1] != 0 && direction[2] != 0
             voxel = AL.compute_voxel_direction_response(
                 grid, direction, VoxelCPUBackend(rays_per_voxel=diagonal ? 16384 : 256),
@@ -112,7 +112,7 @@ end
     ])
     terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain(
         [0.0, 1.0], [0.0, 1.0], [0.0 0.0; slope slope]
-    ), Dict(1 => soil))
+    ), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     grid = VoxelGrid((0, 0, -0.25), (1, 1, 1.25), zeros(1, 1, 1))
     for direction in ((1.0, 0.0, -1.0), (-1.0, 0.0, -1.0), (0.37, -0.21, -1.0))
         source = -AL.StaticArrays.normalize(AL.StaticArrays.SVector{3,Float64}(direction))
@@ -132,7 +132,7 @@ end
 
     # Side quadrature converges for a tall single voxel with unequal face dimensions.
     tall = VoxelGrid((0, 0, 0), (1, 1, 3), zeros(1, 1, 1))
-    flat = ArchimedLight._with_terrain_materials(PlanarTerrain(tall; elevation=0.0), Dict(1 => soil))
+    flat = ArchimedLight._with_terrain_materials(PlanarTerrain(tall; elevation=0.0), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     coarse = AL.compute_voxel_direction_response(
         tall, (1, 0, -1), VoxelCPUBackend(rays_per_voxel=400), flat; options,
     ).terrain_incident_weight

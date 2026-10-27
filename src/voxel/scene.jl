@@ -52,8 +52,8 @@ end
 
 Attach flat ground using the scene's horizontal extent and bottom elevation,
 without assigning optical properties. Supply ground models to [`run_light`](@ref).
-`cells=(nx, ny)` controls soil
-patch resolution; `periodic=true` declares compatibility with toric transport.
+`cells=(nx, ny)` controls soil patch resolution. `options.toricity` selects
+horizontal wrapping for both the canopy and ground when running the simulation.
 Pass an existing terrain as the second argument to attach a PLY/MNT instead.
 Returns the same scene and leaves PAD unchanged.
 """

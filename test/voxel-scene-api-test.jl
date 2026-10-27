@@ -43,7 +43,7 @@ end
         sun_azimuth=130.,sun_elevation=40.)
     rows = [row, merge(row,(Ri_PAR_f=80.,sun_azimuth=180.,sun_elevation=55.))]
     backend = VoxelCPUBackend(rays_per_voxel=1)
-    soil = SoilOpticalProperties(par_reflectance=0.1,nir_reflectance=0.3)
+    soil = opaque(par=0.1,nir=0.3)
     add_ground!(scene)
     add_ground!(model_scene)
     models = models_for(; mode=:point_proxy, leaf, wood, ground=soil)

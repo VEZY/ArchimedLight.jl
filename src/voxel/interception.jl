@@ -390,7 +390,7 @@ function _compute_voxel_direction_response(grid::VoxelGrid, propagation_directio
             if !(terrain isa NoVoxelTerrain)
                 _check_voxel_terrain_origin!(ray_origin, terrain, workspace, surface)
                 terrain_hit = _voxel_terrain_terminal_hit(ray_origin, setup.direction,
-                    terrain, workspace, terrain_direction, terminal.has_segments,
+                    terrain, options.toricity, workspace, terrain_direction, terminal.has_segments,
                     terminal.exit_reason, terminal.maximum_distance)
             end
             exit_reason = terrain_hit === nothing ? terminal.exit_reason : :terrain

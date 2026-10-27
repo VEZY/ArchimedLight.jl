@@ -182,8 +182,13 @@ triangulated soil receptor. A ray path stops at its nearest terrain
 intersection. Energy is split into absorbed and reflected fractions, then
 reflected over the existing full-sphere directions with weights proportional
 to quadrature solid angle times ``\max(0,n\cdot\omega)`` around the patch's
-local normal. See [Voxel Terrain And Soil](voxel_terrain.md) for the geometry,
-AMAPVox/DTM import, boundary, and cache contracts.
+local normal. Set its band reflectances with
+`opaque(par=..., nir=...)`: reflectance is supplied explicitly, transmission
+is zero and absorption is `1 - reflectance`. Triangle ground uses the same
+one-sided optical contract. Triangle plant models using `translucent` retain
+their equal diffuse reflection/transmission approximation. See
+[Voxel Terrain And Soil](voxel_terrain.md) for the geometry, AMAPVox/DTM import,
+boundary, and cache contracts.
 
 Without terrain, lower-boundary radiation is reported as bottom escape. With a
 black soil it is reported as soil absorption. With a reflective soil it can be

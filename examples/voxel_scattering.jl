@@ -41,9 +41,9 @@ leaf = VoxelMaterial(
     nir_transmittance=0.40,
 )
 scene = VoxelScene(grid)
-add_ground!(scene; periodic=base_options.toricity)
+add_ground!(scene)
 models = models_for(; leaf,
-    ground=SoilOpticalProperties(par_reflectance=0.10, nir_reflectance=0.30))
+    ground=opaque(par=0.10, nir=0.30))
 
 first_only = run_light(scene, row; models, options=base_options, backend)
 one_order = run_light(

@@ -19,8 +19,8 @@
     @test occursin("synthetic", input.metadata["point_filter"])
     @test occursin("1 (IDs: \"1\")", sprint(show, MIME"text/plain"(), input))
 
-    soil = SoilOpticalProperties(par_reflectance=0.12, nir_reflectance=0.32)
-    terrain = ArchimedLight._with_terrain_materials(read_ply_terrain(joinpath(directory, "terrain.ply")), Dict(1 => soil))
+    soil = opaque(par=0.12, nir=0.32)
+    terrain = ArchimedLight._with_terrain_materials(read_ply_terrain(joinpath(directory, "terrain.ply")), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     @test length(terrain.vertices) == 289
     @test terrain_patch_count(terrain) == 512
     @test terrain_bounds(terrain)[1][1:2] == (0.0, 0.0)
@@ -35,8 +35,8 @@ end
     directory = joinpath(pkgdir(ArchimedLight), "examples", "voxel_tree")
     grid = read_voxel_grid(joinpath(directory, "tree.vox"))
     input = read_voxel_point_input(joinpath(directory, "tree.jsonl.gz"))
-    soil = SoilOpticalProperties(par_reflectance=0.12, nir_reflectance=0.32)
-    terrain = ArchimedLight._with_terrain_materials(read_ply_terrain(joinpath(directory, "terrain.ply")), Dict(1 => soil))
+    soil = opaque(par=0.12, nir=0.32)
+    terrain = ArchimedLight._with_terrain_materials(read_ply_terrain(joinpath(directory, "terrain.ply")), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     scene = VoxelScene(input)
     add_ground!(scene, read_ply_terrain(joinpath(directory, "terrain.ply")))
     row = (step_duration=3600.0, Ri_PAR_f=100.0, Ri_NIR_f=50.0,

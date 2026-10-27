@@ -1,7 +1,7 @@
 @testitem "Voxel scenes configure materials only through models" tags=[:voxel, :terrain, :fast] begin
     grid = VoxelGrid((0, 0, 0), (1, 1, 2), ones(1, 1, 2))
     scene = VoxelScene(grid)
-    soil = SoilOpticalProperties(par_reflectance=0.15, nir_reflectance=0.4)
+    soil = opaque(par=0.15, nir=0.4)
     leaf = VoxelMaterial(par_reflectance=0.1, par_transmittance=0.05)
     row = (step_duration=60., Ri_PAR_f=100., Ri_NIR_f=50., direct_fraction=1.,
         sun_azimuth=0., sun_elevation=90.)
@@ -26,7 +26,7 @@
     result = run_light(scene, row; models, options, backend)
     @test isempty(scene.terrain.materials) # Run-time binding does not mutate geometry.
     @test scene.models === nothing
-    @test soil_optics(result.terrain, 1) == soil
+    @test soil_optics(result.terrain, 1) == ArchimedLight._voxel_soil_material(soil)
     @test isempty(check_simulation(scene, row; models, options, backend).errors)
     @test update_models!(scene, models) === scene
     @test run_light(scene, row; options, backend).first_order.par_energy == result.first_order.par_energy

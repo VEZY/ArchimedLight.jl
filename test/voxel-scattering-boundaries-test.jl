@@ -1,9 +1,9 @@
 @testitem "Scattering retains interception in a terrain-cut voxel" tags=[:voxel, :terrain, :scattering, :fast] begin
     grid = VoxelGrid((0, 0, 0), (1, 1, 3), reshape([1.0, 0.0, 0.0], 1, 1, 3))
-    soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.3)
+    soil = opaque(par=0.2, nir=0.3)
     # The horizontal cell centre is buried above the occupied voxel, although
     # the left part of that voxel is exposed and intercepts incoming light.
-    terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0, 1], [0, 1], [0.0 0.0; 2.4 2.4]), Dict(1 => soil))
+    terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0, 1], [0, 1], [0.0 0.0; 2.4 2.4]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     turtle = ArchimedLight.TurtleGrid([
         ArchimedLight.TurtleSector(
             1, ArchimedLight.StaticArrays.SVector(0.0, 0.0, 1.0), 1.0, :sky,
@@ -53,17 +53,17 @@ end
         step_duration=1.0, Ri_PAR_f=1.0, Ri_NIR_f=0.5,
         sun_azimuth=90.0, sun_elevation=45.0, direct_fraction=0.5,
     )
-    reflective_soil = SoilOpticalProperties(par_reflectance=0.99, nir_reflectance=0.99)
-    black_soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
+    reflective_soil = opaque(par=0.99, nir=0.99)
+    black_soil = opaque(par=0.0, nir=0.0)
     # A deep periodic valley retains a significant tail after 128 soil bounces.
     # Empty vegetation must not make that incomplete transport look converged.
     valley(soil) = ArchimedLight._with_terrain_materials(HeightFieldTerrain(
-        [0.0, 0.5, 1.0], [0.0, 1.0], [10.0 10.0; 0.0 0.0; 10.0 10.0]; periodic=true
-    ), Dict(1 => soil))
+        [0.0, 0.5, 1.0], [0.0, 1.0], [10.0 10.0; 0.0 0.0; 10.0 10.0]
+    ), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     cases = (
         (terrain=valley(reflective_soil), converged=false),
         (terrain=valley(black_soil), converged=true),
-        (terrain=ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.0, periodic=true), Dict(1 => reflective_soil)), converged=true),
+        (terrain=ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.0), models_for(; ground_materials=Dict(1 => reflective_soil)).ground_materials), converged=true),
     )
     for sectors in (16, 46), case in cases
         options = LightOptions(
@@ -93,7 +93,7 @@ end
 
 @testitem "Terrain reflection launches within each patch's overlap with the grid" tags=[:voxel, :terrain, :scattering, :fast] begin
     grid = VoxelGrid((0, 0, 0), (1, 1, 2), zeros(1, 1, 2))
-    soil = SoilOpticalProperties(par_reflectance=1.0, nir_reflectance=1.0)
+    soil = opaque(par=1.0, nir=1.0)
     quadrature = VoxelScatteringQuadrature(
         [(0.0, 0.0, 1.0), (0.0, 0.0, -1.0)], [0.5, 0.5],
     )
@@ -101,11 +101,11 @@ end
     options = LightOptions(toricity=false)
     # This patch covers the grid, but its untrimmed centre is outside it.
     for terrain in (
-        ArchimedLight._with_terrain_materials(PlanarTerrain(0, (-3, 1), (0, 1)), Dict(1 => soil)),
+        ArchimedLight._with_terrain_materials(PlanarTerrain(0, (-3, 1), (0, 1)), models_for(; ground_materials=Dict(1 => soil)).ground_materials),
         ArchimedLight._with_terrain_materials(TriangulatedTerrain(
             [(-10.0, -10.0, 0.0), (40.0, -10.0, 0.0), (-10.0, 40.0, 0.0)],
             [(1, 2, 3)]
-        ), Dict(1 => soil)),
+        ), models_for(; ground_materials=Dict(1 => soil)).ground_materials),
     )
         cache = prepare_voxel_scattering_transport(grid, quadrature, backend, terrain; options)
         result = apply_voxel_scattering_transport(
@@ -118,7 +118,7 @@ end
         @test abs(result.balance_residual) <= 1e-12
     end
 
-    larger = ArchimedLight._with_terrain_materials(PlanarTerrain(0, (-1, 2), (0, 1); cells=(3, 1)), Dict(1 => soil))
+    larger = ArchimedLight._with_terrain_materials(PlanarTerrain(0, (-1, 2), (0, 1); cells=(3, 1)), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     cache = prepare_voxel_scattering_transport(grid, quadrature, backend, larger; options)
     @test Set(keys(cache.terrain_direction_weights)) == Set([2])
     result = apply_voxel_scattering_transport(
@@ -134,8 +134,8 @@ end
 
 @testitem "Validated scattering kernels preserve public cache invalidation" tags=[:voxel, :terrain, :scattering, :fast] begin
     grid = VoxelGrid((0, 0, 0), (1, 1, 2), fill(0.7, 1, 1, 2))
-    soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.3)
-    terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.0), Dict(1 => soil))
+    soil = opaque(par=0.2, nir=0.3)
+    terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.0), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     turtle = ArchimedLight.TurtleGrid([
         ArchimedLight.TurtleSector(
             1, ArchimedLight.StaticArrays.SVector(0.0, 0.0, 1.0), 1.0, :sky,

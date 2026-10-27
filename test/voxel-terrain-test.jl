@@ -1,14 +1,14 @@
 @testitem "Voxel terrain geometry validates optics and exact intersections" tags=[:voxel, :terrain, :fast] begin
-    soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.45)
-    @test soil.par_reflectance == 0.2
-    @test soil.nir_reflectance == 0.45
-    @test_throws ArgumentError SoilOpticalProperties(par_reflectance=-0.1, nir_reflectance=0.2)
-    @test_throws ArgumentError SoilOpticalProperties(par_reflectance=0.1, nir_reflectance=Inf)
+    soil = opaque(par=0.2, nir=0.45)
+    @test soil.interception.optical_properties.par == 0.2
+    @test soil.interception.optical_properties.nir == 0.45
+    @test_throws ArgumentError models_for(; ground=opaque(par=-0.1, nir=0.2))
+    @test_throws ArgumentError models_for(; ground=opaque(par=0.1, nir=Inf))
     @test_throws ArgumentError TerrainHit(1.0, (0, 0, 0), (0, 0, 2), 1, 1)
     @test_throws ArgumentError TerrainHit(1.0, (0, 0, 0), (0, 0, -1), 1, 1)
 
     grid = VoxelGrid((0, 0, 0), (2, 2, 3), zeros(2, 2, 3))
-    plane = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.75), Dict(1 => soil))
+    plane = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.75), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     hit = intersect_terrain(plane, (0.25, 0.25, 3.0), (0, 0, -1), 3.0)
     @test hit.distance == 2.25
     @test hit.point == (0.25, 0.25, 0.75)
@@ -18,14 +18,14 @@
     @test terrain_patch_count(plane) == 4
     @test terrain_patch_point(plane, 4) == (1.5, 1.5, 0.75)
     @test soil_optics(plane, hit).par_reflectance == 0.2
-    bright = SoilOpticalProperties(par_reflectance=0.7, nir_reflectance=0.8)
+    bright = opaque(par=0.7, nir=0.8)
     heterogeneous = ArchimedLight._with_terrain_materials(PlanarTerrain(
         0.75,
         (0.0, 2.0),
         (0.0, 1.0);
         cells=(2, 1),
         material_ids=reshape([1, 2], 2, 1)
-    ), Dict(1 => soil, 2 => bright))
+    ), models_for(; ground_materials=Dict(1 => soil, 2 => bright)).ground_materials)
     bright_hit = intersect_terrain(heterogeneous, (1.5, 0.5, 2.0), (0, 0, -1))
     @test bright_hit.patch_id == 2
     @test soil_optics(heterogeneous, bright_hit, :par) == 0.7
@@ -34,7 +34,7 @@
         [0.0, 1.0, 2.0],
         [0.0, 1.0, 2.0],
         fill(0.75, 3, 3)
-    ), Dict(1 => soil))
+    ), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     for origin in ((0.2, 0.3, 3.0), (1.5, 0.4, 2.5), (0.5, 1.5, 2.0))
         planar_hit = intersect_terrain(plane, origin, (0.2, -0.1, -1.0), 5.0)
         height_hit = intersect_terrain(flat, origin, (0.2, -0.1, -1.0), 5.0)
@@ -48,7 +48,7 @@
         [0.0, 1.0],
         [0.0, 1.0],
         [0.0 0.0; 1.0 1.0]
-    ), Dict(1 => soil))
+    ), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     slope_hit = intersect_terrain(slope, (0.25, 0.25, 2.0), (0, 0, -1), 3.0)
     @test all(isapprox.(slope_hit.point, (0.25, 0.25, 0.25); atol=1e-13))
     @test all(isapprox.(
@@ -74,27 +74,27 @@
         [0.0, 1.0, 2.0],
         [0.0, 1.0, 2.0],
         [0.0 0.0 0.0; 0.0 0.5 0.0; 0.0 0.0 0.0]
-    ), Dict(1 => soil))
+    ), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     hill_hit = intersect_terrain(hill, (0.8, 0.8, 2.0), (0, 0, -1), 3.0)
     @test hill_hit.normal == terrain_patch_normal(hill, hill_hit.patch_id)
 
     vertices = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
-    mesh = ArchimedLight._with_terrain_materials(TriangulatedTerrain(vertices, [(1, 2, 3)]), Dict(1 => soil))
+    mesh = ArchimedLight._with_terrain_materials(TriangulatedTerrain(vertices, [(1, 2, 3)]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     @test intersect_terrain(mesh, (0.2, 0.2, 1.0), (0, 0, -1), 2.0).patch_id == 1
     @test intersect_terrain(mesh, (0.2, 0.2, 1.0), (0, 0, -1)).distance == 1.0
-    @test_throws ArgumentError ArchimedLight._with_terrain_materials(TriangulatedTerrain(vertices, [(1, 2, 3)]; periodic=true), Dict(1 => soil))
+    @test_throws MethodError ArchimedLight._with_terrain_materials(TriangulatedTerrain(vertices, [(1, 2, 3)]; periodic=true), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
 end
 
 @testitem "Terrain compacts orphan vertices without changing patches" tags=[:voxel, :terrain, :fast] begin
-    soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)
-    bright = SoilOpticalProperties(par_reflectance=0.7, nir_reflectance=0.8)
+    soil = opaque(par=0.2, nir=0.4)
+    bright = opaque(par=0.7, nir=0.8)
     points = [(99.0, 99.0, 99.0), (0.0, 0.0, 0.0), (1.0, 0.0, 0.1),
               (50.0, 50.0, 50.0), (1.0, 1.0, 0.2), (0.0, 1.0, 0.0)]
     faces = [(2, 5, 6), (2, 3, 5)]
     terrain = ArchimedLight._with_terrain_materials(TriangulatedTerrain(points, faces;
-        material_ids=[2, 1]), Dict(1 => soil, 2 => bright))
+        material_ids=[2, 1]), models_for(; ground_materials=Dict(1 => soil, 2 => bright)).ground_materials)
     reference = ArchimedLight._with_terrain_materials(TriangulatedTerrain(points[[2, 3, 5, 6]], [(1, 3, 4), (1, 2, 3)];
-        material_ids=[2, 1]), Dict(1 => soil, 2 => bright))
+        material_ids=[2, 1]), models_for(; ground_materials=Dict(1 => soil, 2 => bright)).ground_materials)
     @test terrain.vertices == reference.vertices
     @test terrain.triangles == reference.triangles
     @test terrain.material_ids == [2, 1]
@@ -113,19 +113,19 @@ end
     end
     invalid = copy(points)
     invalid[1] = (NaN, 99.0, 99.0)
-    @test_throws ArgumentError ArchimedLight._with_terrain_materials(TriangulatedTerrain(invalid, faces), Dict(1 => soil))
-    @test_throws ArgumentError ArchimedLight._with_terrain_materials(TriangulatedTerrain(points, [(2, 3, 7)]), Dict(1 => soil))
-    @test_throws ArgumentError ArchimedLight._with_terrain_materials(TriangulatedTerrain(points, [(2, 3, 2)]), Dict(1 => soil))
+    @test_throws ArgumentError ArchimedLight._with_terrain_materials(TriangulatedTerrain(invalid, faces), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
+    @test_throws ArgumentError ArchimedLight._with_terrain_materials(TriangulatedTerrain(points, [(2, 3, 7)]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
+    @test_throws ArgumentError ArchimedLight._with_terrain_materials(TriangulatedTerrain(points, [(2, 3, 2)]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     @test_throws ArgumentError ArchimedLight._with_terrain_materials(TriangulatedTerrain(
         [(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0)], [(1, 2, 3)]
-    ), Dict(1 => soil))
+    ), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
 end
 
 @testitem "Terrain-aware DDA stops before subterranean voxels and classifies boundaries" tags=[:voxel, :terrain, :fast] begin
-    soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
+    soil = opaque(par=0.0, nir=0.0)
     pad = reshape([10.0, 0.0, 0.0], 1, 1, 3)
     grid = VoxelGrid((0, 0, 0), (1, 1, 3), pad)
-    terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=1.2), Dict(1 => soil))
+    terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=1.2), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
 
     dda = trace_voxel_ray(
         grid,
@@ -166,7 +166,7 @@ end
     @test [segment.index for segment in open_path] == [(1, 1, 3), (1, 1, 2), (1, 1, 1)]
 
     side_grid = VoxelGrid((0, 0, 0), (1, 1, 2), zeros(1, 1, 2))
-    side_terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(side_grid; elevation=0.5), Dict(1 => soil))
+    side_terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(side_grid; elevation=0.5), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     side = trace_voxel_ray(
         side_grid,
         (0.9, 0.5, 2.0),
@@ -184,7 +184,7 @@ end
     @test side.exit_reason == :side
     @test downward.exit_reason == :terrain
 
-    incomplete = ArchimedLight._with_terrain_materials(PlanarTerrain(0.5, (0.0, 0.8), (0.0, 1.0)), Dict(1 => soil))
+    incomplete = ArchimedLight._with_terrain_materials(PlanarTerrain(0.5, (0.0, 0.8), (0.0, 1.0)), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     @test_throws ArgumentError trace_voxel_ray(
         side_grid,
         (0.5, 0.5, 2.0),
@@ -195,7 +195,7 @@ end
     mesh_gap = ArchimedLight._with_terrain_materials(TriangulatedTerrain(
         [(0.0, 0.0, 0.5), (1.0, 0.0, 0.5), (0.0, 1.0, 0.5)],
         [(1, 2, 3)]
-    ), Dict(1 => soil))
+    ), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     @test_throws ArgumentError trace_voxel_ray(
         side_grid,
         (0.9, 0.9, 2.0),
@@ -204,29 +204,25 @@ end
         terrain=mesh_gap,
     )
 
-    nonperiodic = ArchimedLight._with_terrain_materials(PlanarTerrain(side_grid; elevation=0.5, periodic=false), Dict(1 => soil))
-    periodic = ArchimedLight._with_terrain_materials(PlanarTerrain(side_grid; elevation=0.5, periodic=true), Dict(1 => soil))
-    @test_throws ArgumentError trace_voxel_ray(
-        side_grid,
-        (0.5, 0.5, 2.0),
-        (0, 0, -1);
-        options=LightOptions(toricity=true),
-        terrain=nonperiodic,
-    )
-    @test trace_voxel_ray(
-        side_grid,
-        (0.9, 0.5, 2.0),
-        (0.5, 0, -1);
-        options=LightOptions(toricity=true),
-        terrain=periodic,
-    ).exit_reason == :terrain
+    terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(side_grid; elevation=0.5), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
+    for toricity in (false, true, false)
+        path = trace_voxel_ray(side_grid, (0.9, 0.5, 2.0), (0.5, 0, -1);
+            options=LightOptions(; toricity), terrain)
+        @test path.exit_reason == (toricity ? :terrain : :side)
+    end
+    @test_throws ArgumentError trace_voxel_ray(side_grid, (0.5, 0.5, 2.0), (0, 0, -1);
+        options=LightOptions(toricity=true), terrain=mesh_gap)
+    oversized = ArchimedLight._with_terrain_materials(PlanarTerrain(0.5, (-1.0, 2.0), (-1.0, 2.0)), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
+    @test trace_voxel_ray(side_grid, (0.5, 0.5, 2.0), (0, 0, -1);
+        options=LightOptions(toricity=false), terrain=oversized).exit_reason == :terrain
+    @test_throws ArgumentError trace_voxel_ray(side_grid, (0.5, 0.5, 2.0), (0, 0, -1);
+        options=LightOptions(toricity=true), terrain=oversized)
 
     tiled_height = ArchimedLight._with_terrain_materials(HeightFieldTerrain(
         [0.0, 1.0],
         [0.0, 1.0],
-        zeros(2, 2);
-        periodic=true
-    ), Dict(1 => soil))
+        zeros(2, 2)
+    ), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     @test trace_voxel_ray(
         side_grid,
         (0.9, 0.5, 2.0),
@@ -282,13 +278,13 @@ end
         [0.5, 0.5],
     )
     emitted = reshape([0.0, 1.0, 0.0], 1, 1, 3)
-    black_optics = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
-    white_optics = SoilOpticalProperties(par_reflectance=1.0, nir_reflectance=1.0)
+    black_optics = opaque(par=0.0, nir=0.0)
+    white_optics = opaque(par=1.0, nir=1.0)
     terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(
         0.75,
         (0.0, 1.0),
         (0.0, 1.0)
-    ), Dict(1 => black_optics, 2 => black_optics))
+    ), models_for(; ground_materials=Dict(1 => black_optics, 2 => black_optics)).ground_materials)
     cache = prepare_voxel_scattering_transport(grid, quadrature, backend, terrain; options)
     @test sum(cache.terrain_direction_weights[1][2]) == 1.0
     black = apply_voxel_scattering_transport(
@@ -308,7 +304,7 @@ end
     @test abs(black.balance_residual) <= 1e-14
 
     # Reflectance is optical state, not geometry: the same path cache remains valid.
-    terrain.materials[1] = white_optics
+    terrain.materials[1] = ArchimedLight._voxel_soil_material(white_optics)
     white = apply_voxel_scattering_transport(
         grid,
         emitted,
@@ -340,7 +336,7 @@ end
     subterranean_terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(
         subterranean_grid;
         elevation=1.1
-    ), Dict(1 => black_optics))
+    ), models_for(; ground_materials=Dict(1 => black_optics)).ground_materials)
     subterranean_emission = reshape([1.0, 0.0], 1, 1, 2)
     @test_throws ArgumentError apply_voxel_scattering_transport(
         subterranean_grid,
@@ -355,7 +351,7 @@ end
 @testitem "AAIGrid and AMAPVox ground_distance form a validated scene contract" tags=[:voxel, :terrain, :io, :fast] begin
     using LinearAlgebra: I
 
-    soil = SoilOpticalProperties(par_reflectance=0.15, nir_reflectance=0.35)
+    soil = opaque(par=0.15, nir=0.35)
     mktempdir() do directory
         voxel_path = joinpath(directory, "scene.vox")
         open(voxel_path, "w") do io
@@ -410,7 +406,7 @@ end
         translated = ArchimedLight._with_terrain_materials(height_field_terrain(
             read_aai_grid(dtm_path);
             transform=TerrainCoordinateTransform(translated_matrix)
-        ), Dict(1 => soil))
+        ), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
         @test terrain_bounds(translated) == ((3.0, -2.0, 0.5), (5.0, 0.0, 0.5))
 
         rotated_matrix = Matrix{Float64}(I, 4, 4)
@@ -418,26 +414,23 @@ end
         rotated = ArchimedLight._with_terrain_materials(height_field_terrain(
             read_aai_grid(dtm_path);
             transform=TerrainCoordinateTransform(rotated_matrix)
-        ), Dict(1 => soil))
+        ), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
         @test rotated isa TriangulatedTerrain
-        @test_throws ArgumentError ArchimedLight._with_terrain_materials(height_field_terrain(
-            read_aai_grid(dtm_path);
-            transform=TerrainCoordinateTransform(rotated_matrix),
-            periodic=true
-        ), Dict(1 => soil))
+        @test_throws ArgumentError intersect_terrain(rotated,
+            (0.5, 0.5, 2.0), (0, 0, -1), 3.0; toricity=true)
 
         ground_distance = read_voxel_column(voxel_path, "ground_distance")
         fallback = ArchimedLight._with_terrain_materials(terrain_from_ground_distance(
             scene.grid,
             ground_distance;
             dtm_used_by_amapvox=true
-        ), Dict(1 => soil))
+        ), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
         @test terrain_bounds(fallback) == terrain_bounds(scene.terrain)
         @test_throws ArgumentError ArchimedLight._with_terrain_materials(terrain_from_ground_distance(
             scene.grid,
             ground_distance;
             dtm_used_by_amapvox=false
-        ), Dict(1 => soil))
+        ), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
 
         shifted_path = joinpath(directory, "shifted.asc")
         open(shifted_path, "w") do io
@@ -475,7 +468,7 @@ end
             println(io, "NODATA_value -9999")
             println(io, "0 1")
         end
-        varying = ArchimedLight._with_terrain_materials(height_field_terrain(read_aai_grid(varying_path)), Dict(1 => soil))
+        varying = ArchimedLight._with_terrain_materials(height_field_terrain(read_aai_grid(varying_path)), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
         @test terrain_elevation_at(varying, 0.5, 0.5) == 0.0
         @test terrain_elevation_at(varying, 1.5, 0.5) == 1.0
 
@@ -486,15 +479,15 @@ end
             scene.grid,
             inconsistent;
             dtm_used_by_amapvox=true
-        ), Dict(1 => soil))
+        ), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     end
 end
 
 @testitem "Raster soil materials retain their original pixel footprints" tags=[:voxel, :terrain, :io, :fast] begin
     using LinearAlgebra: I
 
-    black = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
-    white = SoilOpticalProperties(par_reflectance=1.0, nir_reflectance=1.0)
+    black = opaque(par=0.0, nir=0.0)
+    white = opaque(par=1.0, nir=1.0)
     materials = Dict(1 => black, 2 => white)
     quadrature = VoxelScatteringQuadrature([(0.0, 0.0, 1.0), (0.0, 0.0, -1.0)], [0.5, 0.5])
     backend = VoxelCPUBackend(rays_per_voxel=16)
@@ -503,7 +496,7 @@ end
         nx, ny = dimensions
         aai = AAIGrid(nx, ny, 0.0, 0.0, 1.0, zeros(dimensions), nothing, nothing)
         terrain = ArchimedLight._with_terrain_materials(height_field_terrain(aai;
-            material_ids=reshape([1, 2], dimensions)), materials)
+            material_ids=reshape([1, 2], dimensions)), models_for(; ground_materials=materials).ground_materials)
         for (coordinate, expected) in zip((0.25, 0.75, 1.25, 1.75), (1, 1, 2, 2))
             origin = nx == 2 ? (coordinate, 0.25, 1.0) : (0.25, coordinate, 1.0)
             @test intersect_terrain(terrain, origin, (0, 0, -1)).material_id == expected
@@ -523,15 +516,15 @@ end
     aai = AAIGrid(3, 3, 0.0, 0.0, 1.0,
         [0.2 0.8 0.3; 0.9 0.1 0.7; 0.4 0.6 0.5], nothing, nothing)
     ids = [isodd(i + j) ? 1 : 2 for i in 1:3, j in 1:3]
-    original = ArchimedLight._with_terrain_materials(height_field_terrain(aai), Dict(1 => black))
-    refined = ArchimedLight._with_terrain_materials(height_field_terrain(aai; material_ids=ids), materials)
-    uniform = ArchimedLight._with_terrain_materials(height_field_terrain(aai; material_ids=fill(2, 3, 3)), materials)
+    original = ArchimedLight._with_terrain_materials(height_field_terrain(aai), models_for(; ground_materials=Dict(1 => black)).ground_materials)
+    refined = ArchimedLight._with_terrain_materials(height_field_terrain(aai; material_ids=ids), models_for(; ground_materials=materials).ground_materials)
+    uniform = ArchimedLight._with_terrain_materials(height_field_terrain(aai; material_ids=fill(2, 3, 3)), models_for(; ground_materials=materials).ground_materials)
     @test uniform.x == original.x && uniform.y == original.y
     @test uniform.elevation == original.elevation
     @test uniform.mesh.triangles == original.mesh.triangles
     @test all(==(2), uniform.mesh.material_ids)
     same_optics = ArchimedLight._with_terrain_materials(height_field_terrain(aai;
-        material_ids=ids), Dict(1 => black, 2 => black))
+        material_ids=ids), models_for(; ground_materials=Dict(1 => black, 2 => black)).ground_materials)
     @test same_optics.x == refined.x && length(same_optics.x) > length(original.x)
     @test same_optics.mesh.material_ids == refined.mesh.material_ids
     @test terrain_bounds(refined) == terrain_bounds(original)
@@ -553,7 +546,7 @@ end
     matrix[1:2, 1:2] .= [0.0 -1.0; 1.0 0.0]
     matrix[1:3, 4] .= [10.0, 20.0, 0.25]
     rotated = ArchimedLight._with_terrain_materials(height_field_terrain(aai; material_ids=ids,
-        transform=TerrainCoordinateTransform(matrix)), materials)
+        transform=TerrainCoordinateTransform(matrix)), models_for(; ground_materials=materials).ground_materials)
     @test rotated isa TriangulatedTerrain
     for i in 1:3, j in 1:3
         x, y = i - 0.25, j - 0.25
@@ -564,17 +557,17 @@ end
 
     flat = AAIGrid(2, 2, 0.0, 0.0, 1.0, zeros(2, 2), nothing, nothing)
     periodic = ArchimedLight._with_terrain_materials(height_field_terrain(flat;
-        material_ids=[1 2; 2 1], periodic=true), materials)
-    @test periodic.periodic
-    @test intersect_terrain(periodic, (2.75, -0.25, 1.0), (0, 0, -1), 2.0).material_id == 2
+        material_ids=[1 2; 2 1]), models_for(; ground_materials=materials).ground_materials)
+    @test intersect_terrain(periodic, (2.75, -0.25, 1.0), (0, 0, -1), 2.0) === nothing
+    @test intersect_terrain(periodic, (2.75, -0.25, 1.0), (0, 0, -1), 2.0; toricity=true).material_id == 2
     @test terrain_bounds(periodic) == ((0.0, 0.0, 0.0), (2.0, 2.0, 0.0))
 
     # Existing assignments to the already-expanded patch grid or to individual
     # facets keep their original geometry and ordering.
     expanded_ids = [isodd(i + j) ? 1 : 2 for i in 1:4, j in 1:4]
-    expanded = ArchimedLight._with_terrain_materials(height_field_terrain(aai; material_ids=expanded_ids), materials)
+    expanded = ArchimedLight._with_terrain_materials(height_field_terrain(aai; material_ids=expanded_ids), models_for(; ground_materials=materials).ground_materials)
     facet_ids = repeat(vec(expanded_ids); inner=2)
-    facets = ArchimedLight._with_terrain_materials(height_field_terrain(aai; material_ids=facet_ids), materials)
+    facets = ArchimedLight._with_terrain_materials(height_field_terrain(aai; material_ids=facet_ids), models_for(; ground_materials=materials).ground_materials)
     @test expanded.x == facets.x == original.x
     @test expanded.y == facets.y == original.y
     @test expanded.elevation == facets.elevation == original.elevation
@@ -584,8 +577,8 @@ end
 @testitem "Terrain pipeline closes complete PAR and NIR balances" tags=[:voxel, :terrain, :scattering, :fast] begin
     grid = VoxelGrid((0, 0, 0), (1, 1, 2), fill(0.5, 1, 1, 2))
     backend = VoxelCPUBackend(rays_per_voxel=4, g=0.5, traversal=:dda)
-    soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.5)
-    terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.0), Dict(1 => soil))
+    soil = opaque(par=0.2, nir=0.5)
+    terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.0), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     optics = VoxelOpticalProperties(
         grid;
         par_reflectance=0.08,

@@ -30,7 +30,7 @@ end
 
 @testitem "Sparse ray-miss responses equal independent public geometric transport" tags=[:voxel, :terrain, :fast] begin
     AL = ArchimedLight
-    soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)
+    soil = opaque(par=0.2, nir=0.4)
     pad = zeros(3, 2, 4)
     pad[2, 1, 3] = 0.7
     grid = VoxelGrid((-1.2, 2.3, -0.5), (2.9, 6.0, 3.5), pad)
@@ -133,11 +133,11 @@ end
         end
     end
 
-    plane = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2, periodic=true), Dict(1 => soil))
+    plane = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     height = ArchimedLight._with_terrain_materials(HeightFieldTerrain(
         collect(range(grid.minimum[1], grid.maximum[1]; length=3)),
         collect(range(grid.minimum[2], grid.maximum[2]; length=3)),
-        [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2]; periodic=true), Dict(1 => soil))
+        [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     empty_grid = VoxelGrid(grid.minimum, grid.maximum, zeros(size(grid)))
     empty_bounds = AL._prepare_voxel_occupied_bounds(empty_grid, backend, plane, options)
     @test empty_bounds.empty
@@ -188,11 +188,11 @@ end
 
 @testitem "Ray-miss terrain routing retains coverage and custom validation errors" tags=[:voxel, :terrain, :fast] begin
     AL = ArchimedLight
-    soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
+    soil = opaque(par=0.0, nir=0.0)
     grid = VoxelGrid((0, 0, 0), (1, 1, 3), zeros(1, 1, 3))
     options = LightOptions(toricity=false)
     gap = ArchimedLight._with_terrain_materials(TriangulatedTerrain([(0.0, 0.0, 0.5), (1.0, 0.0, 0.5),
-        (0.0, 1.0, 0.5)], [(1, 2, 3)]), Dict(1 => soil))
+        (0.0, 1.0, 0.5)], [(1, 2, 3)]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     # A top origin can be uncovered even when a near-horizontal ray would
     # escape sideways. With one central origin, coverage can instead fail only
     # at the ray's later bottom intersection. Empty PAD must not hide either.
@@ -204,13 +204,13 @@ end
         @test_throws ArgumentError AL._compute_voxel_direction_response(grid,
             direction, backend, gap, options, launch, AL.VoxelRayWorkspace(), nothing, nothing)
     end
-    below = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=-0.1), Dict(1 => soil))
+    below = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=-0.1), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     @test_throws ArgumentError AL.compute_voxel_direction_response(grid,
         (0.0, 0.0, -1.0), VoxelCPUBackend(), below; options)
 
     mutable struct RayMissChangingTerrain <: AL.AbstractVoxelTerrain
         upper::Float64
-        soil::SoilOpticalProperties{Float64}
+        soil::ArchimedLight._SoilMaterial
     end
     AL.terrain_bounds(terrain::RayMissChangingTerrain) =
         ((0.0, 0.0, 0.2), (1.0, 1.0, terrain.upper))
@@ -222,7 +222,7 @@ end
     AL.intersect_terrain(terrain::RayMissChangingTerrain, origin, direction, limit::Real=Inf) =
         intersect_terrain(ArchimedLight._with_terrain_materials(PlanarTerrain(0.2, (0, 1), (0, 1)), Dict(1 => terrain.soil)),
             origin, direction, limit)
-    terrain = RayMissChangingTerrain(0.2, soil)
+    terrain = RayMissChangingTerrain(0.2, ArchimedLight._voxel_soil_material(soil))
     backend = VoxelCPUBackend(rays_per_voxel=4)
     @test AL._prepare_voxel_occupied_bounds(grid, backend, terrain, options) === nothing
     @test_throws ArgumentError AL.compute_voxel_direction_response(grid,

@@ -19,28 +19,6 @@ abstract type AbstractVoxelTerrain end
 """Open lower boundary: rays may leave the voxel grid through `:bottom`."""
 struct NoVoxelTerrain <: AbstractVoxelTerrain end
 
-"""
-    SoilOpticalProperties(; par_reflectance, nir_reflectance)
-
-Lambertian soil reflectance in the operational PAR and NIR bands. Soil is
-opaque in the initial terrain model, so absorptance is `1 - reflectance` and
-transmittance is zero.
-"""
-struct SoilOpticalProperties{T<:AbstractFloat}
-    par_reflectance::T
-    nir_reflectance::T
-end
-
-function SoilOpticalProperties(; par_reflectance::Real, nir_reflectance::Real)
-    par = Float64(par_reflectance)
-    nir = Float64(nir_reflectance)
-    isfinite(par) && 0 <= par <= 1 ||
-        throw(ArgumentError("soil PAR reflectance must be finite and lie in [0, 1]"))
-    isfinite(nir) && 0 <= nir <= 1 ||
-        throw(ArgumentError("soil NIR reflectance must be finite and lie in [0, 1]"))
-    return SoilOpticalProperties(par, nir)
-end
-
 """The nearest positive terrain intersection along a normalized ray."""
 struct TerrainHit{T<:AbstractFloat}
     distance::T

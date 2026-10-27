@@ -269,12 +269,12 @@ the original pixel footprints; heterogeneous IDs subdivide this same surface
 at pixel edges. Expanded surface-cell matrices and facet vectors retain their
 direct assignment semantics. Axis-aligned affine
 transforms retain a `HeightFieldTerrain`; rotations/shears produce an explicit
-`TriangulatedTerrain` and cannot be periodic.
+`TriangulatedTerrain`, which requires `LightOptions(toricity=false)` when run.
+Boundary behavior is selected by the simulation options rather than the reader.
 """
 function height_field_terrain(
     aai::AAIGrid;
     transform::TerrainCoordinateTransform=TerrainCoordinateTransform(),
-    periodic::Bool=false,
     material_id::Integer=1,
     material_ids=nothing,
 )
@@ -294,14 +294,10 @@ function height_field_terrain(
             transformed_x,
             transformed_y,
             transformed_z;
-            periodic=periodic,
             material_id=material_id,
             material_ids=patch_material_ids,
         )
     end
-    periodic && throw(ArgumentError(
-        "periodic AAIGrid terrain requires an axis-aligned coordinate transform",
-    ))
     return _triangulated_raster_terrain(
         x,
         y,
@@ -362,7 +358,6 @@ function terrain_from_ground_distance(
     grid::VoxelGrid,
     ground_distance::AbstractArray{<:Real,3};
     dtm_used_by_amapvox::Bool,
-    periodic::Bool=false,
     atol::Real=1e-6,
     rtol::Real=1e-8,
 )
@@ -405,7 +400,7 @@ function terrain_from_ground_distance(
         [grid.minimum[2] + (index - 0.5) * grid.voxel_size[2] for index in 1:ny],
         grid.maximum[2],
     )
-    return HeightFieldTerrain(x, y, elevation; periodic=periodic)
+    return HeightFieldTerrain(x, y, elevation)
 end
 
 """Authoritative AMAPVox voxel + DTM input contract."""
@@ -442,7 +437,6 @@ end
 
 function read_voxel_terrain_scene(
     input::VoxelTerrainSceneInput;
-    periodic::Bool=false,
     validate_alignment::Bool=true,
     alignment_atol::Real=1e-6,
     alignment_rtol::Real=1e-8,
@@ -452,9 +446,8 @@ function read_voxel_terrain_scene(
     terrain = height_field_terrain(
         aai;
         transform=input.dtm_to_voxel,
-        periodic=periodic,
     )
-    _validate_terrain_for_grid(grid, terrain, periodic)
+    _validate_terrain_for_grid(grid, terrain, false)
     ground_distance = read_voxel_column(
         input.voxel_path,
         "ground_distance";

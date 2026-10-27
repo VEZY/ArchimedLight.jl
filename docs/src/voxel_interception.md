@@ -167,11 +167,11 @@ Use an independent surface whenever the lower boundary represents real soil,
 especially when the terrain lies above the grid minimum or is sloped:
 
 ```@example voxel
-soil = SoilOpticalProperties(
-    par_reflectance=0.10,
-    nir_reflectance=0.30,
+soil = opaque(
+    par=0.10,
+    nir=0.30,
 )
-add_ground!(scene; periodic=options.toricity)
+add_ground!(scene)
 models = models_for(; leaf, ground=soil)
 terrain = scene.terrain
 ```
@@ -291,7 +291,7 @@ with a spherical distribution.
 vox_path = joinpath(mktempdir(), "canopy.vox")
 write_voxel_grid(vox_path, grid, step.first_order)
 restored_scene = read_scene(vox_path)
-add_ground!(restored_scene; periodic=scattering_options.toricity)
+add_ground!(restored_scene)
 restored = restored_scene.grid
 
 rows = [
@@ -314,7 +314,7 @@ across a series. The cache key
 includes grid bounds, dimensions, all `PAD` values, the normalized direction,
 `G`, `options.toricity`, traversal, and ray sampling settings. A changed grid,
 toricity, or backend cannot silently reuse an incompatible explicit cache.
-With terrain, the key also includes surface geometry, topology, periodicity, and
+With terrain, the key also includes surface geometry, topology, and
 patch material assignment. Optical albedos and soil reflectance
 are applied during iteration rather than baked into geometric paths, so changing
 only optics does not require rebuilding those paths.
@@ -416,7 +416,7 @@ options = LightOptions(
     toricity=false, scattering=false, turtle_sectors=16, all_in_turtle=true,
 )
 backend = VoxelCPUBackend(rays_per_voxel=16)
-soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
+soil = opaque(par=0.0, nir=0.0)
 models = models_for(; leaf=VoxelMaterial(g=0.5), ground=soil)
 
 period_results = map(periods) do period
@@ -470,7 +470,7 @@ The primary workflow uses a scene and the shared entry points:
 ```julia
 read_scene(path; missing_pad=:error)
 VoxelScene(source; terrain=NoVoxelTerrain())
-add_ground!(scene; elevation, cells, periodic=false)
+add_ground!(scene; elevation, cells)
 add_ground!(scene, terrain)
 models_for(; leaf, wood, unknown, ground, individuals, ground_materials, mode)
 update_models!(scene, models)
@@ -490,7 +490,6 @@ VoxelGrid(minimum, maximum, pad)
 VoxelCPUBackend(; rays_per_voxel, g, traversal, lidf)
 VoxelOpticalProperties(grid; par_reflectance, par_transmittance,
                        nir_reflectance, nir_transmittance)
-VoxelGroundOptics(grid; par_reflectance, nir_reflectance)
 read_voxel_grid(path)
 write_voxel_grid(path, grid, result=nothing)
 trace_voxel_ray(grid, origin, direction; options, algorithm)
