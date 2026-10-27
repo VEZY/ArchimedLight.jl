@@ -10,14 +10,14 @@ using ArchimedLight, Printf, SHA, TOML
 
 const SOURCE = "Olivier Martin and Pol Kennel, CIRAD–AMAP · CC0 1.0 · doi:10.5281/zenodo.23695138"
 
-"""Read the lazy example artifact and explicitly assume flat ground and proxy materials."""
+"""Read the lazy example artifact and explicitly assume flat ground, proxy materials and leaf optics for unknown vegetation."""
 function prepare_scene(; input_path::AbstractString=example_scene_path(:belinga))
     scene = read_scene(input_path; missing_pad=:zero_with_diagnostics)
     add_ground!(scene) # Domain-bottom elevation; no measured terrain is supplied.
     leaf = VoxelMaterial(g=0.5, par_reflectance=0.08, par_transmittance=0.07)
     black = VoxelMaterial(g=0.5)
     update_models!(scene, models_for(; mode=:point_proxy, leaf,
-        wood=black, unknown=black, ground=opaque(par=0.0, nir=0.0)))
+        wood=black, unknown=leaf, ground=opaque(par=0.0, nir=0.0)))
     return scene
 end
 
@@ -66,7 +66,8 @@ function render_scene(scene, output_directory::AbstractString; makie::Module,
     M.Label(figure[5, 1:2],
         "Assumed flat ground at z = $(scene.terrain.elevation) m · $(count(scene.missing_pad)) unknown-PAD cells explicitly set to zero";
         fontsize=14)
-    M.Label(figure[6, 1:2], source_description; fontsize=13)
+    M.Label(figure[6, 1:2], "Optical assumption: unknown / unattributed vegetation uses the leaf material"; fontsize=14)
+    M.Label(figure[7, 1:2], source_description; fontsize=13)
     mkpath(output_directory)
     path = abspath(joinpath(output_directory, "belinga_composition.png"))
     M.save(path, figure)
@@ -145,7 +146,8 @@ function _daylight_figure(M, scene, slots, timestep, soil, caption, colour_range
         label="Incident PAR (W m⁻² plant for vegetation; W m⁻² ground for soil)")
     M.Label(figure[4, 1:2], "Synthetic model hours · no observed weather or verified geographic orientation";
         fontsize=15)
-    M.Label(figure[5, 1:2], source_description; fontsize=13)
+    M.Label(figure[5, 1:2], "Unknown / unattributed vegetation: leaf optics · wood and soil: black"; fontsize=14)
+    M.Label(figure[6, 1:2], source_description; fontsize=13)
     M.colsize!(figure.layout, 1, M.Relative(0.56))
     return figure
 end
@@ -153,10 +155,10 @@ end
 """
     record_day(scene, output_directory; makie, hours=range(6, 18; length=73), ...)
 
-Compute and record fresh native snapshots on a fixed colour scale. A two-slot
-rolling result vector and a public `timestep` Observable refresh the recipe
-without retaining a day of dense fields. Each snapshot calls public `run_light`; changing sun directions is
-therefore recomputed, with no interpolation between simulated frames.
+Compute and record native snapshots on a fixed colour scale. Public `run_light`
+processes bounded batches, reusing fixed sky responses within each batch while
+computing each sun direction. Two plotting slots and a public `timestep`
+Observable refresh the recipe. No light fields are interpolated between frames.
 
 `scene_rotation_deg=0` explicitly assumes geographic north along +y for this
 illustration. It does not recover the unknown geographic orientation of the
@@ -166,36 +168,53 @@ function record_day(scene, output_directory::AbstractString; makie::Module,
     hours=range(6.0, 18.0; length=73), peak_par::Real=600.0,
     maximum_elevation::Real=60.0, direct_fraction::Real=0.8,
     snapshot_seconds::Real=60.0, scene_rotation_deg::Real=0.0,
-    rays_per_voxel::Integer=16, turtle_sectors::Integer=16,
+    rays_per_voxel::Integer=256, turtle_sectors::Integer=16,
     colour_range=(0.0, 600.0), framerate::Integer=8,
+    px_per_unit::Real=1.0, compression::Integer=20,
+    batch_size::Integer=8,
     figure_size=(1700, 1000), scene_label::AbstractString="Belinga",
     source_description::AbstractString=SOURCE)
     M = makie
     length(colour_range) == 2 && all(isfinite, colour_range) &&
         colour_range[1] < colour_range[2] || throw(ArgumentError("invalid fixed colour range"))
     framerate > 0 || throw(ArgumentError("framerate must be positive"))
+    isfinite(px_per_unit) && px_per_unit > 0 ||
+        throw(ArgumentError("px_per_unit must be finite and positive"))
+    0 <= compression <= 51 || throw(ArgumentError("compression must lie in [0, 51]"))
+    batch_size > 0 || throw(ArgumentError("batch_size must be positive"))
     forcing = synthetic_day(; hours, peak_par, maximum_elevation, direct_fraction, snapshot_seconds)
     options = LightOptions(toricity=false, scattering=false, turtle_sectors=turtle_sectors,
         all_in_turtle=false, nir_interception=false, nir_scattering=false,
         scene_rotation_deg=Float64(scene_rotation_deg))
     backend = VoxelCPUBackend(; rays_per_voxel)
     isempty(check_meteo(forcing.rows; options).errors) || error("invalid synthetic movie forcing")
-    initial = run_light(scene, first(forcing.rows); options, backend)
-    residuals = Float64[_check_frame(initial)]
-    slots, timestep = [initial, initial], M.Observable(1)
-    soil, caption = M.Observable(_ground_flux(scene, initial)), M.Observable("")
+    batch_start, batch_stop = 1, min(batch_size, length(forcing.rows))
+    batch = run_light(scene, forcing.rows[batch_start:batch_stop]; options, backend)
+    largest_batch_bytes = Base.summarysize(batch)
+    residuals = Float64[]
+    slots, timestep = [first(batch), first(batch)], M.Observable(1)
+    soil, caption = M.Observable(_ground_flux(scene, first(batch))), M.Observable("")
     figure = _daylight_figure(M, scene, slots, timestep, soil, caption, colour_range,
         scene_label, source_description, figure_size)
     mkpath(output_directory)
     directory = abspath(output_directory)
     path = joinpath(directory, "belinga_daylight.mp4")
     stills = unique([1, cld(length(forcing.rows), 2), length(forcing.rows)])
-    M.record(figure, path, eachindex(forcing.rows); framerate,
-        compression=18, profile="high", pixel_format="yuv420p") do index
+    M.record(figure, path, eachindex(forcing.rows); framerate, px_per_unit,
+        compression, profile="high", pixel_format="yuv420p") do index
+        if index > batch_stop
+            # Release the old batch before allocating its replacement. The
+            # plotting slots retain at most two previous snapshots meanwhile.
+            empty!(batch)
+            batch_start, batch_stop = index, min(index + batch_size - 1, length(forcing.rows))
+            append!(batch, run_light(scene, forcing.rows[batch_start:batch_stop]; options, backend))
+            largest_batch_bytes = max(largest_batch_bytes, Base.summarysize(batch))
+        end
+        current = batch[index - batch_start + 1]
+        push!(residuals, _check_frame(current))
         if index > 1
             slot = mod1(index, 2)
-            slots[slot] = run_light(scene, forcing.rows[index]; options, backend)
-            push!(residuals, _check_frame(slots[slot]))
+            slots[slot] = current
             # Alternate the scalar value: Makie's compute graph deliberately
             # ignores a notification of an unchanged integer timestep.
             timestep[] = slot
@@ -204,18 +223,29 @@ function record_day(scene, output_directory::AbstractString; makie::Module,
         row = forcing.rows[index]
         caption[] = @sprintf("Model hour %05.2f · PAR %.0f W m⁻² · elevation %.1f° · azimuth %.1f°",
             forcing.hours[index], row.Ri_PAR_f, row.sun_elevation, row.sun_azimuth)
-        index in stills && M.save(joinpath(directory, "belinga_daylight_frame_$(lpad(string(index), 3, '0')).png"), figure)
+        index in stills && M.save(joinpath(directory, "belinga_daylight_frame_$(lpad(string(index), 3, '0')).png"), figure; px_per_unit)
         if index == 1 || index % 10 == 0 || index == length(forcing.rows)
             @info "Belinga daylight frame" frame=index frames=length(forcing.rows)
         end
     end
     report = Dict("video"=>path, "frames"=>length(forcing.rows), "framerate"=>framerate,
+        "video_pixels_per_unit"=>Float64(px_per_unit), "video_compression_crf"=>compression,
+        "native_batch_size"=>batch_size, "largest_batch_retained_bytes"=>largest_batch_bytes,
         "model_hours"=>forcing.hours, "snapshot_seconds"=>Float64(snapshot_seconds),
         "synthetic_peak_horizontal_PAR_W_m2"=>Float64(peak_par),
         "synthetic_maximum_sun_elevation_deg"=>Float64(maximum_elevation),
         "direct_fraction"=>Float64(direct_fraction), "scene_rotation_deg"=>Float64(scene_rotation_deg),
         "rays_per_voxel"=>rays_per_voxel, "sky_sectors"=>turtle_sectors,
         "scattering"=>false, "NIR"=>false, "toricity"=>false,
+        "unknown_optics"=>"same material as leaf; organ identities unchanged",
+        "leaf_g"=>scene.models.leaf.g,
+        "leaf_PAR_reflectance"=>scene.models.leaf.par_reflectance,
+        "leaf_PAR_transmittance"=>scene.models.leaf.par_transmittance,
+        "unknown_PAR_reflectance"=>scene.models.unknown.par_reflectance,
+        "unknown_PAR_transmittance"=>scene.models.unknown.par_transmittance,
+        "display_bounds_m"=>[scene.grid.minimum[1],scene.grid.maximum[1],
+            scene.grid.minimum[2],scene.grid.maximum[2],scene.grid.minimum[3],scene.grid.maximum[3]],
+        "view_selection"=>"full scene", "view_only_crop"=>false,
         "fixed_colour_range_W_m2"=>Float64.(collect(colour_range)),
         "missing_PAD_zero_imputed"=>count(scene.missing_pad),
         "assumed_ground_elevation_m"=>scene.terrain.elevation,

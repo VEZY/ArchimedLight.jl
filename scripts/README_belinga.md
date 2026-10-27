@@ -55,14 +55,52 @@ GLMakie.activate!()
 include(joinpath(pkgdir(ArchimedLight), "examples", "belinga", "visualize.jl"))
 scene = BelingaVisualization.prepare_scene()
 BelingaVisualization.render_scene(scene, output_directory; makie=GLMakie)
-movie = BelingaVisualization.record_day(scene, output_directory; makie=GLMakie)
+movie = BelingaVisualization.record_day(scene, output_directory; makie=GLMakie,
+    rays_per_voxel=256, batch_size=8, framerate=8, figure_size=(1700, 1000),
+    px_per_unit=1, compression=20)
 ```
 
-The script downloads through `example_scene_path(:belinga)`, renders the organ
+The script downloads through `example_scene_path(:belinga)`, renders the full-scene organ
 composition and three mixture fractions, then simulates and records 73 light
-snapshots. The video has a fixed colour scale, two rolling result slots, checks
-each frame's PAR balance, and writes representative PNG frames plus a settings
-report. The application assets live in `docs/src/assets/applications/`.
+snapshots. Public `run_light` series compute batches of at most eight snapshots,
+reusing fixed sky responses within each batch. The recorder clears the old batch
+before computing the next and keeps two rolling plotting slots. The video has
+a fixed colour scale, checks each frame's PAR balance, and writes representative
+PNG frames plus a settings report. The application assets live in
+`docs/src/assets/applications/`.
+
+This is a manual media-generation step. The selected MP4, poster and settings
+receipt are committed for the documentation to serve. Neither `makedocs` nor
+CI rerenders the Belinga video. Keep trial outputs in the ignored
+`benchmark/results/` directory; update the committed media and receipt only
+when the inputs or chosen settings change, rather than recording a new binary
+for routine documentation builds.
+
+The video keeps 73 frames at 8 frames per second. Explicit `px_per_unit=1`
+encodes the 1700 × 1000 figure at 1700 × 1000 pixels instead of the earlier
+Retina-dependent 3400 × 2000 output. MP4 uses H.264 with `compression=20`
+(CRF 20). These encoding settings affect media size and quality without
+changing the simulated fields. The one-metre ground raster remains visible
+with `interpolate=false`; ray refinement does not change its spatial resolution.
+
+The supplied 73-frame, full-scene MP4 occupies 1,913,866 bytes, approximately
+1.91 MB (1.83 MiB), compared with 6.69 MB for the previous recording.
+
+The selected sampling is 256 rays per voxel with 16 sky sectors. A limited noon
+comparison against a 1024-ray numerical reference reduced maximum ground-patch
+PAR difference from about 67 W m⁻² at 16 rays to 20 W m⁻² at 256 rays. This is
+a numerical sampling check, not field validation.
+
+`prepare_scene` gives unknown and unattributed vegetation the same optics as
+leaves (`unknown=leaf`), with wood and soil black. Unknown vegetation keeps its
+identity, organ label and slate composition colour. Because all vegetation has
+`g=0.5` and scattering is disabled, this assumption changes absorbed PAR without
+changing the first-order incident PAR in the video.
+
+The published version 1.0.0 archive includes an earlier example with black
+unknown optics. That is a historical demonstration setting, not an input-data
+type or material requirement. Rebuilding application media does not require
+repacking or changing the published archive, citation or checksums.
 
 The figures and video use synthetic sunlight, generated flat ground, explicit
 missing-PAD zero imputation and point-based area allocation. Keep these assumptions
