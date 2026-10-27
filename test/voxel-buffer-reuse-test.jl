@@ -20,12 +20,12 @@
     shallow = ArchimedLight._with_terrain_materials(TriangulatedTerrain([(0.0, 0.0, 0.4), (1.0, 0.0, 0.4),
                                   (0.0, 1.0, 0.4)], [(1, 2, 3)]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     periodic = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.0, 2.0],
-        [0.3 0.3 0.3; 0.3 0.7 0.3; 0.3 0.3 0.3]; periodic=true), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
-    function compare_query(stack, terrain, origin, direction, limit)
+        [0.3 0.3 0.3; 0.3 0.7 0.3; 0.3 0.3 0.3]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
+    function compare_query(stack, terrain, origin, direction, limit; toricity=false)
         # Scratch contents are not traversal state between independent queries.
         fill!(stack, typemax(Int))
-        expected = intersect_terrain(terrain, origin, direction, limit)
-        actual = AL._intersect_terrain_with_stack(terrain, origin, direction, limit, stack)
+        expected = intersect_terrain(terrain, origin, direction, limit; toricity)
+        actual = AL._intersect_terrain_with_stack(terrain, origin, direction, limit, stack, toricity)
         @test actual === expected
         return actual
     end
@@ -43,10 +43,10 @@
         @test small_hit.patch_id == 1
         @test small_hit.distance ≈ 1.6 atol=1e-14
         # Periodic intersection reuses the same stack for several tile queries.
-        tiled_hit = compare_query(stack, periodic, (0.25, 0.4, 2.0), (2.4, -1.7, -1.0), 8.0)
+        tiled_hit = compare_query(stack, periodic, (0.25, 0.4, 2.0), (2.4, -1.7, -1.0), 8.0; toricity=true)
         @test tiled_hit !== nothing
         @test tiled_hit.normal == terrain_patch_normal(periodic, tiled_hit.patch_id)
-        @test compare_query(stack, periodic, (0.25, 0.4, 2.0), (0, 0, 1), 8.0) === nothing
+        @test compare_query(stack, periodic, (0.25, 0.4, 2.0), (0, 0, 1), 8.0; toricity=true) === nothing
     end
 end
 

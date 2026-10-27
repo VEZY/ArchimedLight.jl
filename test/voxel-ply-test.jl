@@ -42,7 +42,7 @@
             transform = TerrainCoordinateTransform(matrix)
             shifted = ArchimedLight._with_terrain_materials(read_ply_terrain(path; transform=transform), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
             @test shifted.vertices == [(0.0, 3.0, 0.0), (1.0, 3.0, 0.0), (0.0, 4.0, 1.0)]
-            @test_throws ArgumentError ArchimedLight._with_terrain_materials(read_ply_terrain(path; periodic=true), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
+            @test_throws MethodError ArchimedLight._with_terrain_materials(read_ply_terrain(path; periodic=true), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
         end
 
         # Both names commonly used for zero-based face indices are supported.

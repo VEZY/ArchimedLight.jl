@@ -106,8 +106,8 @@ initial sky preparation and live sun tracing work; they retain the same sampler
 and scattering angular quadrature.
 
 This phase does not expose NIR, toricity or individual optical controls.
-The supplied sloped MNT is not periodic. The `.jsonl.gz` reader is checked
-against the `.vox` PAD and preserves the wood attribution in the effective
+The supplied triangulated MNT uses open horizontal boundaries. The `.jsonl.gz`
+reader is checked against the `.vox` PAD and preserves the wood attribution in the effective
 voxel optics. The tree and terrain are synthetic teaching geometry.
 
 ## Reproduce
@@ -227,7 +227,7 @@ routing, tiny and opaque optical depths, cache invalidation and raw/compact
 PAR/NIR parity.
 Another **104 assertions** cover sparse indexed paths, missing directions,
 independent compact storage and reusable DDA scratch with both traversals and
-periodic/non-periodic terrain.
+periodic/open terrain transport.
 Another **85 assertions** check batch/standalone directional parity, native
 PAR/NIR step/series results and stale geometry rejection on all-hit rows.
 

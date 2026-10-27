@@ -203,8 +203,9 @@ individual-only models and soil-region overrides, and
 ## Voxel Terrain API
 
 `add_ground!(scene)` creates a horizontal plane covering the voxel domain at
-its minimum Z. Optional `elevation`, `cells=(nx, ny)`, `material_ids` and
-`periodic` control geometry, region identities and boundary compatibility.
+its minimum Z. Optional `elevation`, `cells=(nx, ny)` and `material_ids`
+control geometry and soil region identities. `LightOptions.toricity` controls
+horizontal wrapping for the canopy and ground together.
 Assign soil optics through `models_for(; ground=soil, ...)` at simulation setup.
 Use `ground=translucent(par=..., nir=...)` for an opaque soil model;
 `transparency` must remain zero. `ground_materials=Dict(id => override)` accepts
@@ -229,7 +230,7 @@ add_ground!(scene, terrain)
 ```
 
 The transform defaults to identity. No CRS conversion, translation, or domain
-extension is inferred; triangulated PLY terrain is non-periodic.
+extension is inferred; triangulated PLY terrain requires `toricity=false`.
 
 All terrain constructors and readers create geometry and material IDs. Soil
 optics are supplied only through the voxel model configuration. AAIGrid and

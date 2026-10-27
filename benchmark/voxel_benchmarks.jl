@@ -116,13 +116,11 @@ const VOXEL_TERRAIN_MODELS = ArchimedLight.models_for(; ground=VOXEL_TERRAIN_SOI
 const VOXEL_TERRAIN_PLANAR = ArchimedLight._resolve_voxel_ground(ArchimedLight.PlanarTerrain(
     VOXEL_TERRAIN_GRID;
     elevation=0.75,
-    periodic=true,
 ), VOXEL_TERRAIN_MODELS)
 const VOXEL_TERRAIN_HEIGHT = ArchimedLight._resolve_voxel_ground(ArchimedLight.HeightFieldTerrain(
     VOXEL_TERRAIN_X,
     VOXEL_TERRAIN_Y,
-    VOXEL_TERRAIN_Z;
-    periodic=true,
+    VOXEL_TERRAIN_Z,
 ), VOXEL_TERRAIN_MODELS)
 const VOXEL_TERRAIN_MESH = VOXEL_TERRAIN_HEIGHT.mesh
 const VOXEL_TERRAIN_OPEN_OPTIONS = ArchimedLight.LightOptions(
@@ -132,17 +130,18 @@ const VOXEL_TERRAIN_OPEN_OPTIONS = ArchimedLight.LightOptions(
 const VOXEL_TERRAIN_RAY_ORIGIN = (8.25, 7.5, 16.0)
 const VOXEL_TERRAIN_RAY_DIRECTION = (0.37, -0.21, -1.0)
 
-for (name, terrain) in (
-    "planar 16x16 patches" => VOXEL_TERRAIN_PLANAR,
-    "height field 16x16 cells" => VOXEL_TERRAIN_HEIGHT,
-    "triangle mesh 512 facets" => VOXEL_TERRAIN_MESH,
+for (name, terrain, toricity) in (
+    ("planar 16x16 patches", VOXEL_TERRAIN_PLANAR, true),
+    ("height field 16x16 cells", VOXEL_TERRAIN_HEIGHT, true),
+    ("triangle mesh 512 facets", VOXEL_TERRAIN_MESH, false),
 )
     SUITE["Voxel"]["terrain intersection"][name] =
         @benchmarkable ArchimedLight.intersect_terrain(
             $terrain,
             $VOXEL_TERRAIN_RAY_ORIGIN,
             $VOXEL_TERRAIN_RAY_DIRECTION,
-            32.0,
+            32.0;
+            toricity=$toricity,
         )
 end
 

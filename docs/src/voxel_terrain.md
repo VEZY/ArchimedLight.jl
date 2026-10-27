@@ -130,12 +130,17 @@ assign them through `models_for` when running a simulation.
 For a large scene, choose fewer soil patches with `cells=(nx, ny)`. This controls
 the ground output resolution and reflection source sampling, while preserving
 the continuous flat surface. Use `elevation=` to set a known horizontal ground
-level and `periodic=true` when `LightOptions(toricity=true)` is required:
+level:
 
 ```julia
 add_ground!(scene; cells=(64, 64))
-add_ground!(scene; elevation=0.0, periodic=true)
+add_ground!(scene; elevation=0.0)
 ```
+
+`LightOptions.toricity` controls horizontal boundaries for the canopy and ground
+together. With `toricity=true`, the ground repeats with the voxel grid; with
+`toricity=false`, rays escape at the lateral grid boundary. Ground creation
+does not require a separate boundary setting.
 
 !!! note "A flat-ground assumption"
     The domain bottom is a convenient default, not an estimated terrain surface.
@@ -152,7 +157,7 @@ examples of both forms.
 
 ### Low-Level Terrain Objects
 
-For explicit geometry construction and ray diagnostics, a finite plane can
+For explicit geometry construction and ray diagnostics, a plane can
 choose its horizontal bounds and patch count:
 
 ```julia
@@ -161,9 +166,13 @@ PlanarTerrain(
     (xmin, xmax),
     (ymin, ymax);
     cells=(nx, ny),
-    periodic=false,
 )
 ```
+
+Standalone `intersect_terrain(terrain, origin, direction, maximum_distance)`
+queries use open boundaries by default. Pass `toricity=true` as a keyword to
+query repeating copies of a plane or height field. Simulation calls obtain this
+mode from `options.toricity`.
 
 ### Height Fields
 
@@ -208,8 +217,9 @@ deterministic without duplicating energy. Returned normals always point from
 soil toward air (positive global z component). Unreferenced vertices are
 validated and then removed without changing triangle order or soil assignments.
 
-Generic triangle meshes are non-periodic. Use a periodic height field when the
-same terrain tile must repeat horizontally.
+Generic triangle meshes require `LightOptions(toricity=false)`. Use a height
+field with matching opposite-edge elevations when the same terrain tile must
+repeat horizontally.
 
 ### PLY Terrain Meshes
 
@@ -243,7 +253,7 @@ terrain = read_ply_terrain(
 The default transform is identity. There is no inferred translation, unit
 conversion, CRS reprojection, or scaling to match the canopy. The affine
 matrix has the same contract as the AAIGrid transform described below.
-Generic PLY terrain is non-periodic; use `LightOptions(toricity=false)`.
+Generic PLY terrain requires `LightOptions(toricity=false)`.
 
 !!! note "Import and scene coverage are separate checks"
     The supplied `quadra1_mnt.ply` has 7,119 vertices and 14,184 triangles,
@@ -274,14 +284,16 @@ A larger terrain is accepted, while transport remains restricted to the voxel
 x/y domain. Soil reflection starts at the centroid of each patch's overlap
 with that domain; patches wholly outside it have no transport sources.
 
-For `options.toricity=true`, all conditions are mandatory:
+`options.toricity` controls both voxel and terrain boundaries. For
+`options.toricity=true`, the simulation validates these geometric requirements:
 
-1. construct the planar or height-field terrain with `periodic=true`;
+1. use planar or height-field terrain;
 2. make its x/y bounds exactly match the voxel x/y bounds;
 3. for a height field, match elevations on opposite edges, within floating-point
    tolerance, so that the repeated surface has no artificial vertical step.
 
-A periodic canopy with non-periodic terrain fails explicitly.
+Height fields with unmatched edges remain valid for open-boundary simulations.
+Generic triangle terrain cannot be tiled and is rejected when `toricity=true`.
 
 ## Soil Reflection On Slopes
 
@@ -457,7 +469,7 @@ input = VoxelTerrainSceneInput(
     dtm_used_by_amapvox=true,
 )
 
-imported = read_voxel_terrain_scene(input; periodic=false)
+imported = read_voxel_terrain_scene(input)
 scene = VoxelScene(imported.grid; terrain=imported.terrain)
 ```
 
@@ -484,9 +496,9 @@ reference plane as measured terrain.
 ## Cache Semantics
 
 First-order response and scattering-path caches include a terrain fingerprint.
-It contains elevations/vertices, topology, patch material assignment, bounds,
-and periodic tiling. Reusing a cache after any of those changes
-fails validation.
+It contains elevations/vertices, topology, patch material assignment, and bounds.
+The cache also records `options.toricity`. Reusing a cache after a geometry or
+boundary-mode change fails validation.
 
 PAR/NIR soil reflectance is deliberately excluded from the geometry
 fingerprint. Changing only a material's optical coefficients reuses the same

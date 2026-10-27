@@ -3,9 +3,9 @@
     grid = VoxelGrid((-1.2, 2.3, -0.5), (1.8, 5.3, 3.5),
         reshape([isodd(i) ? 0.4 : 0.0 for i in 1:12], 2, 2, 3))
     soil = translucent(par=0.2, nir=0.3)
-    planar = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2, periodic=true), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
+    planar = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     heightfield = ArchimedLight._with_terrain_materials(HeightFieldTerrain([-1.2, 0.3, 1.8], [2.3, 3.8, 5.3],
-        [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2]; periodic=true), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
+        [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     rounded = AL._normalise_voxel_transport_direction((7 / 17, -3 / 13, -(0.1 + 7 / 19)))
     @test AL._normalise_voxel_transport_direction(rounded) != rounded
     directions = [(0.0, 0.0, 1.0), (0.0, 0.0, -1.0), rounded,

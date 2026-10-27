@@ -5,9 +5,9 @@
     grid = VoxelGrid((-0.5, 1.25, 0), (1.5, 4.25, 3),
         reshape([0.1 + 0.02mod(i, 5) for i in 1:18], 2, 3, 3))
     soil = translucent(par=0.2, nir=0.4)
-    plane = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.25, periodic=true), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
+    plane = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.25), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     height = ArchimedLight._with_terrain_materials(HeightFieldTerrain([-0.5, 0.5, 1.5], [1.25, 2.75, 4.25],
-        [0.25 0.25 0.25; 0.25 0.6 0.25; 0.25 0.25 0.25]; periodic=true), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
+        [0.25 0.25 0.25; 0.25 0.6 0.25; 0.25 0.25 0.25]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     rounded = AL._normalise_voxel_transport_direction((7 / 17, -3 / 13, 0.1 + 7 / 19))
     turtle = AL.TurtleGrid([
         AL.TurtleSector(1, AL.StaticArrays.SVector(0.0, 0.0, 1.0), 1 / 3, :sky),

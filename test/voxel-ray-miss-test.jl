@@ -133,11 +133,11 @@ end
         end
     end
 
-    plane = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2, periodic=true), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
+    plane = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     height = ArchimedLight._with_terrain_materials(HeightFieldTerrain(
         collect(range(grid.minimum[1], grid.maximum[1]; length=3)),
         collect(range(grid.minimum[2], grid.maximum[2]; length=3)),
-        [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2]; periodic=true), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
+        [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     empty_grid = VoxelGrid(grid.minimum, grid.maximum, zeros(size(grid)))
     empty_bounds = AL._prepare_voxel_occupied_bounds(empty_grid, backend, plane, options)
     @test empty_bounds.empty

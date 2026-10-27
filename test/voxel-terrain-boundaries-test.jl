@@ -1,32 +1,95 @@
-@testitem "Periodic terrain rejects discontinuous height seams" tags=[:voxel, :terrain, :fast] begin
+@testitem "Periodic terrain validates height seams when the boundary mode is selected" tags=[:voxel, :terrain, :fast] begin
     soil = translucent(par=0.2, nir=0.4)
     coordinates = [0.0, 1.0, 2.0]
     continuous = [0.0 0.0 0.0; 0.0 0.5 0.0; 0.0 0.0 0.0]
-    terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain(coordinates, coordinates, continuous; periodic=true), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
-    @test terrain.periodic
+    terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain(coordinates, coordinates, continuous), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
+    @test !hasproperty(terrain, :periodic)
     @test terrain_elevation_at(terrain, 0.0, 0.75) ≈
           terrain_elevation_at(terrain, 2.0, 0.75)
     @test terrain_elevation_at(terrain, 0.75, 0.0) ≈
           terrain_elevation_at(terrain, 0.75, 2.0)
+    @test intersect_terrain(terrain, (2.75, 0.75, 2.0), (0, 0, -1), 3.0;
+        toricity=true) !== nothing
+    @test intersect_terrain(terrain, (2.75, 0.75, 2.0), (0, 0, -1), 3.0) === nothing
 
+    grid = VoxelGrid((0, 0, 0), (2, 2, 2), zeros(2, 2, 2))
     x_seam = [0.0 0.0 0.0; 0.25 0.25 0.25; 0.5 0.5 0.5]
     y_seam = permutedims(x_seam)
-    @test_throws ArgumentError ArchimedLight._with_terrain_materials(HeightFieldTerrain(
-        coordinates, coordinates, x_seam; periodic=true
-    ), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
-    @test_throws ArgumentError ArchimedLight._with_terrain_materials(HeightFieldTerrain(
-        coordinates, coordinates, y_seam; periodic=true
-    ), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
-    @test ArchimedLight._with_terrain_materials(HeightFieldTerrain(coordinates, coordinates, x_seam), models_for(; ground_materials=Dict(1 => soil)).ground_materials).periodic == false
+    for heights in (x_seam, y_seam)
+        uneven = ArchimedLight._with_terrain_materials(HeightFieldTerrain(
+            coordinates, coordinates, heights), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
+        @test trace_voxel_ray(grid, (0.75, 0.75, 2.0), (0, 0, -1);
+            terrain=uneven, options=LightOptions(toricity=false)).exit_reason == :terrain
+        @test_throws ArgumentError trace_voxel_ray(grid, (0.75, 0.75, 2.0), (0, 0, -1);
+            terrain=uneven, options=LightOptions(toricity=true))
+        @test_throws ArgumentError intersect_terrain(uneven, (0.75, 0.75, 2.0),
+            (0, 0, -1), 3.0; toricity=true)
+    end
 
     # Roundoff at a large absolute elevation is accepted, a genuine step is not.
     high = fill(1.0e6, 3, 3)
     high[end, 2] += 1.0e-9
-    @test ArchimedLight._with_terrain_materials(HeightFieldTerrain(coordinates, coordinates, high; periodic=true), models_for(; ground_materials=Dict(1 => soil)).ground_materials).periodic
+    rounded = HeightFieldTerrain(coordinates, coordinates, high)
+    @test intersect_terrain(rounded, (0.75, 0.75, 1.0e6 + 1), (0, 0, -1), 2.0;
+        toricity=true) !== nothing
     high[end, 2] += 1.0e-4
-    @test_throws ArgumentError ArchimedLight._with_terrain_materials(HeightFieldTerrain(
-        coordinates, coordinates, high; periodic=true
-    ), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
+    stepped = HeightFieldTerrain(coordinates, coordinates, high)
+    @test_throws ArgumentError intersect_terrain(stepped,
+        (0.75, 0.75, 1.0e6 + 1), (0, 0, -1), 2.0; toricity=true)
+end
+
+@testitem "Voxel run options select terrain boundaries without changing the scene" tags=[:voxel, :terrain, :scattering, :fast] begin
+    AL = ArchimedLight
+    grid = VoxelGrid((0, 0, 0), (2, 2, 3), fill(0.2, 2, 2, 3))
+    leaf = VoxelMaterial(par_reflectance=0.1, par_transmittance=0.1,
+        nir_reflectance=0.3, nir_transmittance=0.3)
+    soil = translucent(par=0.1, nir=0.2)
+    models = models_for(; leaf, ground=soil)
+    row = (step_duration=60.0, Ri_PAR_f=100.0, Ri_NIR_f=50.0,
+        direct_fraction=0.6, sun_azimuth=120.0, sun_elevation=40.0)
+    backend = VoxelCPUBackend(rays_per_voxel=1)
+    heights = [0.2 0.2 0.2; 0.2 0.6 0.2; 0.2 0.2 0.2]
+    for geometry in (PlanarTerrain(grid; elevation=0.2),
+                     HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.0, 2.0], heights)),
+        scattering in (false, true)
+        scene = VoxelScene(grid)
+        add_ground!(scene, geometry)
+        original_pad = copy(scene.grid.pad)
+        fingerprint = AL._terrain_geometry_fingerprint(geometry)
+        for modes in ((false, true, false), (true, false, true))
+            results = []
+            for toricity in modes
+                options = LightOptions(; toricity, scattering, turtle_sectors=6,
+                    all_in_turtle=true, scattering_max_iter=40, scattering_stop_ratio=1e-8)
+                result = run_light(scene, row; models, options, backend)
+                push!(results, result)
+                @test scene.terrain === geometry
+                @test scene.grid.pad == original_pad
+                @test AL._terrain_geometry_fingerprint(scene.terrain) == fingerprint
+                @test result.first_order.par_escaped_side_energy > 0 || toricity
+                @test !toricity || result.first_order.par_escaped_side_energy == 0
+                if scattering
+                    for (band, incoming) in ((result.scattering.par, result.first_order.par_incoming_energy),
+                                             (result.scattering.nir, result.first_order.nir_incoming_energy))
+                        accounted = sum(band.absorbed_energy) + band.ground_absorbed_energy +
+                            band.escaped_top_energy + band.escaped_side_energy +
+                            band.escaped_bottom_energy + band.unresolved_energy
+                        @test accounted ≈ incoming rtol=1e-11
+                    end
+                end
+            end
+            # An intervening run with other boundaries cannot affect either result.
+            for field in fieldnames(typeof(results[1].first_order))
+                @test isequal(getfield(results[1].first_order, field), getfield(results[3].first_order, field))
+            end
+            if scattering
+                for band in (:par, :nir), field in fieldnames(typeof(results[1].scattering.par))
+                    @test isequal(getfield(getproperty(results[1].scattering, band), field),
+                        getfield(getproperty(results[3].scattering, band), field))
+                end
+            end
+        end
+    end
 end
 
 @testitem "Cached terrain bounds and clipped soil emission points" tags=[:voxel, :terrain, :fast] begin
