@@ -67,7 +67,7 @@ Both incident radiation and scattering exchanges are described over a finite set
 
 ### Lambertian Redistribution
 
-The scattered power follows a discrete Lambertian distribution: outgoing
+For `Translucent` components, scattered power follows a discrete Lambertian distribution: outgoing
 radiance is independent of viewing angle, while power within a solid angle is
 proportional to the apparent source area. The division by two shares the scattered
 pool between the two directions along each ray path, retaining the additional
@@ -116,18 +116,45 @@ correction, used unweighted link and source-hit counts. Equal ray energies with
 horizontal rasterization overrepresented shallow directions, even with fine
 pixels. The correction implements the technical manual's stated Lambertian
 assumption and intentionally changes historical scattering results. It retains
-the simplified optical coefficients and equal two-sided split. Analytical plate
+the simplified optical coefficients and equal two-sided split for `Translucent`.
+Analytical plate
 tests verify the numerical weighting; they do not replace physical measurements
 of irradiance within a scene.
 
-Explore the [Evaluation](evaluation.md) page to compare the current algorithm
-with an independent surface-integral reference in four interactive 3D scenes.
+### Opaque Ground
+
+`opaque(par=..., nir=...)` supplies reflected fractions ``\rho_b``. For
+intercepted energy ``E_b``, reflection is ``\rho_b E_b``, absorption is
+``(1-\rho_b)E_b`` and transmission is zero. Reflected radiation leaves only
+into the outward hemisphere, with Lambertian weights proportional to
+``\max(0,n\cdot\omega)``. First-order illumination is also admitted only
+from each facet's exterior side. There is no equal two-sided division by two.
+
+The triangle path gates directions using each ground facet's upward normal
+before aggregating links. Per-node outputs retain the node-mean radiance
+approximation. Ground must be described by nonvertical terrain facets;
+input winding does not determine the upward orientation. Arbitrary closed or
+vertical opaque objects are not supported. Concave opaque ground patches may
+reflect radiation to one another through the scattering iterations. Triangle
+opaque facet-link preparation currently runs on the CPU; the prepared matrix
+can still use the existing GPU propagation backend.
+
+This differs from first-order `transparency`: setting that value to zero in
+`Translucent` does not remove its diffuse transmission. Its band scattering
+coefficient ``c_b`` still represents ``R_b=T_b=c_b/2`` of intercepted energy.
+Bundled historical preset/demo inputs remain `Translucent` intentionally,
+preserving this approximation and the meaning of their reference outputs.
+
+For the `Translucent` approximation, the [Evaluation](evaluation.md) page
+compares the algorithm with an independent surface-integral reference in four
+interactive 3D scenes.
 It also explains how the reference handles projected area, occlusion, diffuse
 transmission, and repeated exchanges.
 
 ## Optical Coefficients
 
-In model files, `optical_properties` store scattering factors by waveband:
+In model files, `optical_properties` stores total scattering fractions for
+`Translucent` and reflectances for `Opaque`, by waveband:
 
 ```yaml
 optical_properties:

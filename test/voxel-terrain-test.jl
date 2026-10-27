@@ -1,9 +1,9 @@
 @testitem "Voxel terrain geometry validates optics and exact intersections" tags=[:voxel, :terrain, :fast] begin
-    soil = translucent(par=0.2, nir=0.45)
+    soil = opaque(par=0.2, nir=0.45)
     @test soil.interception.optical_properties.par == 0.2
     @test soil.interception.optical_properties.nir == 0.45
-    @test_throws ArgumentError models_for(; ground=translucent(par=-0.1, nir=0.2))
-    @test_throws ArgumentError models_for(; ground=translucent(par=0.1, nir=Inf))
+    @test_throws ArgumentError models_for(; ground=opaque(par=-0.1, nir=0.2))
+    @test_throws ArgumentError models_for(; ground=opaque(par=0.1, nir=Inf))
     @test_throws ArgumentError TerrainHit(1.0, (0, 0, 0), (0, 0, 2), 1, 1)
     @test_throws ArgumentError TerrainHit(1.0, (0, 0, 0), (0, 0, -1), 1, 1)
 
@@ -18,7 +18,7 @@
     @test terrain_patch_count(plane) == 4
     @test terrain_patch_point(plane, 4) == (1.5, 1.5, 0.75)
     @test soil_optics(plane, hit).par_reflectance == 0.2
-    bright = translucent(par=0.7, nir=0.8)
+    bright = opaque(par=0.7, nir=0.8)
     heterogeneous = ArchimedLight._with_terrain_materials(PlanarTerrain(
         0.75,
         (0.0, 2.0),
@@ -86,8 +86,8 @@
 end
 
 @testitem "Terrain compacts orphan vertices without changing patches" tags=[:voxel, :terrain, :fast] begin
-    soil = translucent(par=0.2, nir=0.4)
-    bright = translucent(par=0.7, nir=0.8)
+    soil = opaque(par=0.2, nir=0.4)
+    bright = opaque(par=0.7, nir=0.8)
     points = [(99.0, 99.0, 99.0), (0.0, 0.0, 0.0), (1.0, 0.0, 0.1),
               (50.0, 50.0, 50.0), (1.0, 1.0, 0.2), (0.0, 1.0, 0.0)]
     faces = [(2, 5, 6), (2, 3, 5)]
@@ -122,7 +122,7 @@ end
 end
 
 @testitem "Terrain-aware DDA stops before subterranean voxels and classifies boundaries" tags=[:voxel, :terrain, :fast] begin
-    soil = translucent(par=0.0, nir=0.0)
+    soil = opaque(par=0.0, nir=0.0)
     pad = reshape([10.0, 0.0, 0.0], 1, 1, 3)
     grid = VoxelGrid((0, 0, 0), (1, 1, 3), pad)
     terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=1.2), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
@@ -278,8 +278,8 @@ end
         [0.5, 0.5],
     )
     emitted = reshape([0.0, 1.0, 0.0], 1, 1, 3)
-    black_optics = translucent(par=0.0, nir=0.0)
-    white_optics = translucent(par=1.0, nir=1.0)
+    black_optics = opaque(par=0.0, nir=0.0)
+    white_optics = opaque(par=1.0, nir=1.0)
     terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(
         0.75,
         (0.0, 1.0),
@@ -351,7 +351,7 @@ end
 @testitem "AAIGrid and AMAPVox ground_distance form a validated scene contract" tags=[:voxel, :terrain, :io, :fast] begin
     using LinearAlgebra: I
 
-    soil = translucent(par=0.15, nir=0.35)
+    soil = opaque(par=0.15, nir=0.35)
     mktempdir() do directory
         voxel_path = joinpath(directory, "scene.vox")
         open(voxel_path, "w") do io
@@ -486,8 +486,8 @@ end
 @testitem "Raster soil materials retain their original pixel footprints" tags=[:voxel, :terrain, :io, :fast] begin
     using LinearAlgebra: I
 
-    black = translucent(par=0.0, nir=0.0)
-    white = translucent(par=1.0, nir=1.0)
+    black = opaque(par=0.0, nir=0.0)
+    white = opaque(par=1.0, nir=1.0)
     materials = Dict(1 => black, 2 => white)
     quadrature = VoxelScatteringQuadrature([(0.0, 0.0, 1.0), (0.0, 0.0, -1.0)], [0.5, 0.5])
     backend = VoxelCPUBackend(rays_per_voxel=16)
@@ -577,7 +577,7 @@ end
 @testitem "Terrain pipeline closes complete PAR and NIR balances" tags=[:voxel, :terrain, :scattering, :fast] begin
     grid = VoxelGrid((0, 0, 0), (1, 1, 2), fill(0.5, 1, 1, 2))
     backend = VoxelCPUBackend(rays_per_voxel=4, g=0.5, traversal=:dda)
-    soil = translucent(par=0.2, nir=0.5)
+    soil = opaque(par=0.2, nir=0.5)
     terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.0), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     optics = VoxelOpticalProperties(
         grid;

@@ -4,7 +4,7 @@
         for name in fieldnames(typeof(expected)))
     grid = VoxelGrid((-0.5, 1.25, 0), (1.5, 4.25, 3),
         reshape([0.1 + 0.02mod(i, 5) for i in 1:18], 2, 3, 3))
-    soil = translucent(par=0.2, nir=0.4)
+    soil = opaque(par=0.2, nir=0.4)
     plane = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.25), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     height = ArchimedLight._with_terrain_materials(HeightFieldTerrain([-0.5, 0.5, 1.5], [1.25, 2.75, 4.25],
         [0.25 0.25 0.25; 0.25 0.6 0.25; 0.25 0.25 0.25]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
@@ -36,7 +36,7 @@ end
     same_fields(actual, expected) = all(isequal(getfield(actual, name), getfield(expected, name))
         for name in fieldnames(typeof(expected)))
     grid = VoxelGrid((0, 0, 0), (2, 3, 3), fill(0.2, 2, 3, 3))
-    soil = translucent(par=0.2, nir=0.4)
+    soil = opaque(par=0.2, nir=0.4)
     terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.5, 3.0],
         [0.2 0.2 0.2; 0.2 0.6 0.2; 0.2 0.2 0.2]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     backend = VoxelCPUBackend(rays_per_voxel=1)
@@ -81,8 +81,8 @@ end
 @testitem "All-hit terrain response caches reject stale built-in launch geometry" tags=[:voxel, :terrain, :fast] begin
     AL = ArchimedLight
     grid = VoxelGrid((0, 0, 0), (2, 3, 3), fill(0.2, 2, 3, 3))
-    soil = translucent(par=0.0, nir=0.0)
-    bright = translucent(par=0.4, nir=0.6)
+    soil = opaque(par=0.0, nir=0.0)
+    bright = opaque(par=0.4, nir=0.6)
     make_height() = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.5, 3.0],
         [0.2 0.2 0.2; 0.2 0.6 0.2; 0.2 0.2 0.2]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     terrains = (ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2), models_for(; ground_materials=Dict(1 => soil, 2 => bright)).ground_materials), make_height(), make_height().mesh)

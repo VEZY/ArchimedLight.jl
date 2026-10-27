@@ -97,7 +97,7 @@
         _, empty_path, _ = check_path(empty_grid, backend, origin, direction)
         @test isempty(empty_path.segments) && empty_path.exit_reason == reason
     end
-    soil = translucent(par=0.2, nir=0.3)
+    soil = opaque(par=0.2, nir=0.3)
     plane = ArchimedLight._with_terrain_materials(PlanarTerrain(empty_grid; elevation=0.25), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     _, compact, result = check_path(empty_grid, backend,
         (0.5, 0.5, 0.75), (0, 0, -1); terrain=plane)
@@ -111,7 +111,7 @@ end
         for name in fieldnames(typeof(expected)))
     pad = reshape([i % 4 == 0 ? 0.0 : 0.1 + 0.05mod(i, 5) for i in 1:18], 2, 3, 3)
     grid = VoxelGrid((0, 0, 0), (2, 3, 3), pad)
-    soil = translucent(par=0.2, nir=0.4)
+    soil = opaque(par=0.2, nir=0.4)
     height = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.5, 3.0],
         [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     plane = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.2), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
@@ -189,8 +189,8 @@ end
     same_fields(actual, expected) = all(isequal(getfield(actual, name), getfield(expected, name))
         for name in fieldnames(typeof(expected)))
     grid = VoxelGrid((0, 0, 0), (2, 3, 2), fill(0.7, 2, 3, 2))
-    black = translucent(par=0.0, nir=0.0)
-    bright = translucent(par=0.4, nir=0.6)
+    black = opaque(par=0.0, nir=0.0)
+    bright = opaque(par=0.4, nir=0.6)
     terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.1), models_for(; ground_materials=Dict(1 => black, 2 => bright)).ground_materials)
     turtle = AL.TurtleGrid([AL.TurtleSector(1,
         AL.StaticArrays.SVector(0.0, 0.0, 1.0), 1.0, :sky)])

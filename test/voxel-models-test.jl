@@ -9,14 +9,14 @@
         nir_reflectance=0.4, nir_transmittance=0.3)
     wood = VoxelMaterial(g=0.8, par_reflectance=0.12, nir_reflectance=0.3)
     unknown = VoxelMaterial(g=0.4, par_reflectance=0.05, nir_reflectance=0.1)
-    soil = translucent(par=0.12, nir=0.32)
+    soil = opaque(par=0.12, nir=0.32)
     models = models_for(; mode=:point_proxy, leaf, wood, unknown, ground=soil,
         individuals=Dict("17" => (leaf=(nir_reflectance=0.3,), wood=(par_reflectance=0.25,))),
         ground_materials=Dict(2 => (nir=0.5,)))
     reference = VoxelVegetation(input; mode=:point_proxy, leaf, wood, unknown,
         individuals=Dict("17" => (leaf=VoxelMaterial(leaf; nir_reflectance=0.3),
             wood=VoxelMaterial(wood; par_reflectance=0.25))))
-    reference_terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(input.grid; material_ids=ids), models_for(; ground_materials=Dict(1 => soil, 2 => translucent(par=0.12, nir=0.5))).ground_materials)
+    reference_terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(input.grid; material_ids=ids), models_for(; ground_materials=Dict(1 => soil, 2 => opaque(par=0.12, nir=0.5))).ground_materials)
     row = (step_duration=60., Ri_PAR_f=100., Ri_NIR_f=50., direct_fraction=0.6,
         sun_azimuth=130., sun_elevation=40.)
     rows = [row, merge(row, (Ri_PAR_f=80., sun_azimuth=180., sun_elevation=55.))]
@@ -66,7 +66,7 @@ end
         nir_reflectance=0.35, nir_transmittance=0.4)
     wood = VoxelMaterial(g=0.8, par_reflectance=0.1, nir_reflectance=0.3)
     unknown = VoxelMaterial(g=0.3)
-    soil = translucent(par=0.15, nir=0.35)
+    soil = opaque(par=0.15, nir=0.35)
     defaults = models_for(; mode=:point_proxy, leaf, wood, unknown, ground=soil)
     individuals = models_for(; mode=:point_proxy, leaf=nothing, wood=nothing, unknown,
         individuals=Dict(id => (leaf=leaf, wood=wood, unknown=unknown) for id in ("17", "204")),
@@ -112,7 +112,7 @@ end
     scene = VoxelScene(input)
     add_ground!(scene; material_ids=reshape([1, 1, 2, 2, 1, 2], 3, 2))
     leaf = VoxelMaterial(par_reflectance=0.1, par_transmittance=0.1)
-    soil = translucent(par=0.1, nir=0.3)
+    soil = opaque(par=0.1, nir=0.3)
     row = (step_duration=60., Ri_PAR_f=100., Ri_NIR_f=50., direct_fraction=0.6,
         sun_azimuth=130., sun_elevation=40.)
     backend = VoxelCPUBackend(rays_per_voxel=1)
@@ -158,7 +158,7 @@ end
     add_ground!(scene)
     leaf = VoxelMaterial(g=0.35, par_reflectance=0.1, par_transmittance=0.2,
         nir_reflectance=0.4, nir_transmittance=0.3)
-    soil = translucent(par=0.12, nir=0.32)
+    soil = opaque(par=0.12, nir=0.32)
     models = models_for(; leaf, ground=soil)
     backend = VoxelCPUBackend(g=0.8, rays_per_voxel=4)
     physical_backend = VoxelCPUBackend(g=leaf.g, rays_per_voxel=4)
@@ -192,7 +192,7 @@ end
     retained_absorption = copy(light_metric_values(retained, :Ra_PAR_q))
     changed_leaf = VoxelMaterial(leaf; par_reflectance=0.4)
     changed_models = models_for(; leaf=changed_leaf,
-        ground=translucent(par=0.6, nir=0.7))
+        ground=opaque(par=0.6, nir=0.7))
     update_models!(scene, changed_models)
     later = run_light(scene, row; options=first_options, backend)
     @test later.first_order.par_energy == retained.first_order.par_energy

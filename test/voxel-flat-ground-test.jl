@@ -1,6 +1,6 @@
 @testitem "Flat voxel ground uses the scene domain and configurable soil patches" tags=[:voxel, :terrain, :fast] begin
     grid = VoxelGrid((-12, 37, 8), (-6, 41, 14), zeros(3, 2, 3))
-    soil = translucent(par=0.12, nir=0.32)
+    soil = opaque(par=0.12, nir=0.32)
     ground = ArchimedLight._with_terrain_materials(PlanarTerrain(grid), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     @test terrain_bounds(ground) == ((-12.0, 37.0, 8.0), (-6.0, 41.0, 8.0))
     @test ground.cells == (3, 2)
@@ -13,7 +13,7 @@
     @test soil_optics(ground, hit, :par) == 0.12
     @test soil_optics(ground, hit, :nir) == 0.32
 
-    bright = translucent(par=0.4, nir=0.6)
+    bright = opaque(par=0.4, nir=0.6)
     ids = reshape([4, 7], 1, 2)
     materials = Dict(4 => soil, 7 => bright)
     customized = ArchimedLight._with_terrain_materials(
@@ -42,7 +42,7 @@ end
 
 @testitem "Dense finite voxel sampling keeps accurate directional energy totals" tags=[:voxel, :terrain, :fast] begin
     grid = VoxelGrid((0, 0, 0), (3, 2, 2), zeros(3, 2, 2))
-    soil = translucent(par=0, nir=0)
+    soil = opaque(par=0, nir=0)
     ground = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; cells=(24, 16)), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     direction = (-0.8506141304969788, -0.27638107538223267, -0.44729083776474)
     backend = VoxelCPUBackend(rays_per_voxel=65536)
@@ -67,7 +67,7 @@ end
         nir_reflectance=0.35, nir_transmittance=0.25)
     vegetation = VoxelVegetation(input; mode=:point_proxy, leaf)
     grid = input.grid
-    soil = translucent(par=0.12, nir=0.32)
+    soil = opaque(par=0.12, nir=0.32)
     explicit = ArchimedLight._with_terrain_materials(PlanarTerrain(grid.minimum[3],
         (grid.minimum[1], grid.maximum[1]),
         (grid.minimum[2], grid.maximum[2]); cells=(2, 2)), models_for(; ground_materials=Dict(1 => soil)).ground_materials)

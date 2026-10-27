@@ -1,7 +1,7 @@
 @testitem "Terrain transport diagnostics preserve heterogeneous patch allocation" tags=[:voxel, :terrain, :scattering, :fast] begin
     grid = VoxelGrid((0, 0, 0), (2, 1, 2), zeros(2, 1, 2))
-    dark = translucent(par=0.2, nir=0.3)
-    bright = translucent(par=0.6, nir=0.7)
+    dark = opaque(par=0.2, nir=0.3)
+    bright = opaque(par=0.6, nir=0.7)
     terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(0, (0, 2), (0, 1); cells=(2, 1),
         material_ids=reshape([1, 2], 2, 1)), models_for(; ground_materials=Dict(1 => dark, 2 => bright)).ground_materials)
     quadrature = VoxelScatteringQuadrature(
@@ -37,7 +37,7 @@ end
     options = LightOptions(toricity=false, scattering=true, scattering_max_iter=40,
         scattering_stop_ratio=1e-10, nir_interception=true, nir_scattering=false)
     for coefficient in (0.0, 0.4), omega in (0.0, 0.5)
-        soil = translucent(par=coefficient, nir=coefficient)
+        soil = opaque(par=coefficient, nir=coefficient)
         terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.0), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
         optics = VoxelOpticalProperties(grid; scattering_par=omega, scattering_nir=0.6)
         first = compute_voxel_first_order(grid, turtle, fluxes, backend;
@@ -69,7 +69,7 @@ end
 
 @testitem "Terrain diagnostics accumulate internal soil bounces before unresolved cutoff" tags=[:voxel, :terrain, :scattering, :fast] begin
     grid = VoxelGrid((0, 0, 0), (1, 1, 11), zeros(1, 1, 1))
-    soil = translucent(par=0.99, nir=0.99)
+    soil = opaque(par=0.99, nir=0.99)
     terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 0.5, 1.0], [0.0, 1.0],
         [10.0 10.0; 0.0 0.0; 10.0 10.0]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     optics = VoxelOpticalProperties(grid; scattering_par=0.0, scattering_nir=0.0)

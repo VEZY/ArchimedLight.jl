@@ -70,7 +70,7 @@ function load_fixture()
     @assert grid.pad == input.grid.pad && !any(input.missing_pad)
     leaf = VoxelMaterial(g=0.5, par_reflectance=0.08, par_transmittance=0.07)
     wood = VoxelMaterial(g=0.5)
-    soil = translucent(par=0.0, nir=0.0)
+    soil = opaque(par=0.0, nir=0.0)
     models = models_for(; mode=:point_proxy, leaf, wood, unknown=wood, ground=soil)
     add_ground!(scene, read_ply_terrain(joinpath(EXAMPLE, "terrain.ply")))
     # Resolve once for packing the existing transport ABI. The public oracle

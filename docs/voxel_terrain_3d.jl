@@ -1,12 +1,12 @@
-const _VOXEL_DOCS_SOIL_DRY = translucent(
+const _VOXEL_DOCS_SOIL_DRY = opaque(
     par=0.12,
     nir=0.32,
 )
-const _VOXEL_DOCS_SOIL_MOIST = translucent(
+const _VOXEL_DOCS_SOIL_MOIST = opaque(
     par=0.24,
     nir=0.42,
 )
-const _VOXEL_DOCS_SOIL_LITTER = translucent(
+const _VOXEL_DOCS_SOIL_LITTER = opaque(
     par=0.38,
     nir=0.52,
 )

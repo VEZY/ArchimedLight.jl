@@ -67,16 +67,16 @@ large offsets. The transport and raw ray diagnostics retain the input frame.
 
 ## Construct A Terrain
 
-Define soil with `translucent(par=..., nir=...)`, the same `TypeModel` helper
-used for triangle materials. For terrain, `par` and `nir` are band reflectances;
-absorptance is ``1-\rho``. The soil must be opaque (`transparency=0`, the
-helper's default); transmitting, sensor and emitting models are rejected.
+Define soil with `opaque(par=..., nir=...)`, the same `TypeModel` helper
+used for triangle ground. `par` and `nir` are band reflectances; absorptance is
+``1-\rho`` and transmission is zero. Both coefficients must be supplied.
+Translucent, sensor and emitting models are rejected for voxel ground.
 
 ```@example voxel_terrain
 using ArchimedLight
 
 grid = VoxelGrid((0, 0, 0), (2, 2, 3), fill(0.4, 2, 2, 3))
-soil = translucent(
+soil = opaque(
     par=0.15,
     nir=0.40,
 )
@@ -306,10 +306,10 @@ E_{soil,reflected} = \rho_b E.
 ```
 
 The reflected pool is Lambertian in the outward hemisphere around the patch's
-local unit normal ``n``. This one-sided soil boundary differs from the triangle
-solver's existing equal two-sided scattering, even when both use the same
-`translucent` material definition. ArchimedLight does not add or rotate
-transport directions. It reweights the existing full-sphere voxel quadrature:
+local unit normal ``n``. Triangle ground configured with `opaque` uses the same
+one-sided optical contract; triangle `translucent` components retain their
+separate equal reflection/transmission approximation. ArchimedLight does not
+add or rotate transport directions. It reweights the existing full-sphere voxel quadrature:
 
 ```math
 w_d =
@@ -512,7 +512,7 @@ height or mesh arrays.
 ```text
 AbstractVoxelTerrain, NoVoxelTerrain
 PlanarTerrain, HeightFieldTerrain, TriangulatedTerrain
-TerrainHit, TypeModel, translucent
+TerrainHit, TypeModel, opaque
 intersect_terrain, terrain_bounds
 terrain_patch_count, terrain_patch_point
 terrain_patch_normal, terrain_patch_material

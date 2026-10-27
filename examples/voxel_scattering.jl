@@ -43,7 +43,7 @@ leaf = VoxelMaterial(
 scene = VoxelScene(grid)
 add_ground!(scene)
 models = models_for(; leaf,
-    ground=translucent(par=0.10, nir=0.30))
+    ground=opaque(par=0.10, nir=0.30))
 
 first_only = run_light(scene, row; models, options=base_options, backend)
 one_order = run_light(

@@ -49,10 +49,10 @@ end
     wood = VoxelMaterial(g=0.8, par_reflectance=0.12, nir_reflectance=0.2)
     unknown = VoxelMaterial(par_reflectance=0.05, nir_reflectance=0.1)
     models_a = models_for(; mode=:point_proxy, leaf, wood, unknown,
-        ground=translucent(par=0.1, nir=0.25),
+        ground=opaque(par=0.1, nir=0.25),
         identified_area_fraction=assigned)
     models_b = models_for(; mode=:point_proxy, leaf, wood, unknown,
-        ground=translucent(par=0.6, nir=0.4),
+        ground=opaque(par=0.6, nir=0.4),
         individuals=Dict("17" => (leaf=(par_reflectance=0.3,),)))
     figures = Figure[]
     update_models!(scene, models_a)

@@ -41,9 +41,10 @@
 
 ### Changed
 
-- Use the existing `translucent`/`TypeModel` soil definition for voxel ground,
-  with opaque interception and `par`/`nir` partial material overrides. Keep
-  terrain's outward Lambertian reflection and triangle scattering laws distinct.
+- Define ground in triangle and voxel workflows with `opaque(par=..., nir=...)`,
+  returning a common `TypeModel` with zero transmission and outward Lambertian
+  reflection. Retain the existing two-sided approximation for `Translucent`
+  components, independently of their first-order `transparency` setting.
 - Derive voxel ground boundaries from `LightOptions.toricity`. Remove terrain
   `periodic` fields and constructor/importer keywords; validate terrain bounds
   and height-field seams when periodic transport is selected.

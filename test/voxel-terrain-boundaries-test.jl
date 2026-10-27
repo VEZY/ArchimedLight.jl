@@ -1,5 +1,5 @@
 @testitem "Periodic terrain validates height seams when the boundary mode is selected" tags=[:voxel, :terrain, :fast] begin
-    soil = translucent(par=0.2, nir=0.4)
+    soil = opaque(par=0.2, nir=0.4)
     coordinates = [0.0, 1.0, 2.0]
     continuous = [0.0 0.0 0.0; 0.0 0.5 0.0; 0.0 0.0 0.0]
     terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain(coordinates, coordinates, continuous), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
@@ -43,7 +43,7 @@ end
     grid = VoxelGrid((0, 0, 0), (2, 2, 3), fill(0.2, 2, 2, 3))
     leaf = VoxelMaterial(par_reflectance=0.1, par_transmittance=0.1,
         nir_reflectance=0.3, nir_transmittance=0.3)
-    soil = translucent(par=0.1, nir=0.2)
+    soil = opaque(par=0.1, nir=0.2)
     models = models_for(; leaf, ground=soil)
     row = (step_duration=60.0, Ri_PAR_f=100.0, Ri_NIR_f=50.0,
         direct_fraction=0.6, sun_azimuth=120.0, sun_elevation=40.0)
@@ -93,7 +93,7 @@ end
 end
 
 @testitem "Cached terrain bounds and clipped soil emission points" tags=[:voxel, :terrain, :fast] begin
-    soil = translucent(par=0.2, nir=0.4)
+    soil = opaque(par=0.2, nir=0.4)
     grid = VoxelGrid((0, 0, 0), (1, 1, 2), zeros(1, 1, 2))
     plane = ArchimedLight._with_terrain_materials(PlanarTerrain(0.25, (-2, 2), (-2, 2); cells=(2, 2)), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     @test ArchimedLight._terrain_patch_emission_point(grid, plane, 4) == (0.5, 0.5, 0.25)
@@ -144,7 +144,7 @@ end
 end
 
 @testitem "Cut voxel emission finds exposed air away from its centre" tags=[:voxel, :terrain, :fast] begin
-    soil = translucent(par=0.2, nir=0.4)
+    soil = opaque(par=0.2, nir=0.4)
     grid = VoxelGrid((0, 0, 0), (1, 1, 2), ones(1, 1, 2))
     index = CartesianIndex(1, 1, 1)
     # At the horizontal centre the terrain is above the bottom voxel's top.
@@ -169,7 +169,7 @@ end
 
 @testitem "Terrain-cut scattering is invariant to absolute elevation" tags=[:voxel, :terrain, :scattering, :fast] begin
     AL = ArchimedLight
-    soil = translucent(par=0.2, nir=0.4)
+    soil = opaque(par=0.2, nir=0.4)
     turtle = AL.TurtleGrid([
         AL.TurtleSector(1, AL.StaticArrays.SVector(0.0, 0.0, 1.0), 1.0, :sky),
     ])
@@ -223,7 +223,7 @@ end
 
 @testitem "Elevated sloping terrain retains exposed cut-cell sources" tags=[:voxel, :terrain, :scattering, :fast] begin
     AL = ArchimedLight
-    soil = translucent(par=0.2, nir=0.4)
+    soil = opaque(par=0.2, nir=0.4)
     quadrature = VoxelScatteringQuadrature(
         [(0.0, 0.0, 1.0), (0.0, 0.0, -1.0)], [0.5, 0.5],
     )

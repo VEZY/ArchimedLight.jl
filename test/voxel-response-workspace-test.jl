@@ -1,5 +1,5 @@
 @testitem "Terrain response workspaces preserve reference quadrature and returned ownership" tags=[:voxel, :terrain, :fast] begin
-    soil = translucent(par=0.0, nir=0.0)
+    soil = opaque(par=0.0, nir=0.0)
 
     function check_response(actual, expected)
         @test actual.direction == expected.direction
@@ -50,7 +50,7 @@ end
 
 @testitem "Launch geometry caches validate reuse while retaining independent results" tags=[:voxel, :terrain, :fast] begin
     AL = ArchimedLight
-    soil = translucent(par=0.0, nir=0.0)
+    soil = opaque(par=0.0, nir=0.0)
     grid = VoxelGrid((0, 0, 0), (2, 2, 3), fill(0.2, 2, 2, 3))
     terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.0, 2.0],
         [0.5 0.5 0.5; 0.5 0.8 0.5; 0.5 0.5 0.5]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
@@ -81,7 +81,7 @@ end
         terrain; options)
     @test signature(changed) == signature(fresh)
     @test changed.interception_fraction != initial.interception_fraction
-    bright = translucent(par=0.6, nir=0.8)
+    bright = opaque(par=0.6, nir=0.8)
     optical_terrain = ArchimedLight._with_terrain_materials(HeightFieldTerrain(terrain.x, terrain.y, terrain.elevation), models_for(; ground_materials=Dict(1 => bright)).ground_materials)
     @test signature(cached_response(grid, optical_terrain)) == saved
 
@@ -139,7 +139,7 @@ end
         return intersect_terrain(plane, origin, direction, maximum_distance)
     end
 
-    soil = translucent(par=0.0, nir=0.0)
+    soil = opaque(par=0.0, nir=0.0)
     grid = VoxelGrid((0, 0, 0), (1, 1, 3), fill(0.2, 1, 1, 3))
     backend = VoxelCPUBackend(rays_per_voxel=4)
     options = LightOptions(toricity=false)
@@ -166,7 +166,7 @@ end
 end
 
 @testitem "Independent terrain response calls do not share mutable scratch" tags=[:voxel, :terrain, :fast] begin
-    soil = translucent(par=0.0, nir=0.0)
+    soil = opaque(par=0.0, nir=0.0)
     grid = VoxelGrid((0, 0, 0), (2, 3, 4), fill(0.4, 2, 2, 4))
     low = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.5, 3.0],
         [0.2 0.2 0.2; 0.2 0.7 0.2; 0.2 0.2 0.2]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
@@ -192,7 +192,7 @@ end
 end
 
 @testitem "Terrain path ownership and origin errors survive side exits" tags=[:voxel, :terrain, :fast] begin
-    soil = translucent(par=0.0, nir=0.0)
+    soil = opaque(par=0.0, nir=0.0)
     grid = VoxelGrid((0, 0, 0), (1, 1, 3), ones(1, 1, 3))
     terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(grid; elevation=0.5), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     options = LightOptions(toricity=false)
