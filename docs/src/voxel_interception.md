@@ -167,9 +167,9 @@ Use an independent surface whenever the lower boundary represents real soil,
 especially when the terrain lies above the grid minimum or is sloped:
 
 ```@example voxel
-soil = SoilOpticalProperties(
-    par_reflectance=0.10,
-    nir_reflectance=0.30,
+soil = translucent(
+    par=0.10,
+    nir=0.30,
 )
 add_ground!(scene; periodic=options.toricity)
 models = models_for(; leaf, ground=soil)
@@ -416,7 +416,7 @@ options = LightOptions(
     toricity=false, scattering=false, turtle_sectors=16, all_in_turtle=true,
 )
 backend = VoxelCPUBackend(rays_per_voxel=16)
-soil = SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
+soil = translucent(par=0.0, nir=0.0)
 models = models_for(; leaf=VoxelMaterial(g=0.5), ground=soil)
 
 period_results = map(periods) do period
@@ -490,7 +490,6 @@ VoxelGrid(minimum, maximum, pad)
 VoxelCPUBackend(; rays_per_voxel, g, traversal, lidf)
 VoxelOpticalProperties(grid; par_reflectance, par_transmittance,
                        nir_reflectance, nir_transmittance)
-VoxelGroundOptics(grid; par_reflectance, nir_reflectance)
 read_voxel_grid(path)
 write_voxel_grid(path, grid, result=nothing)
 trace_voxel_ray(grid, origin, direction; options, algorithm)

@@ -176,7 +176,7 @@ function make_data(bounds::Vector{Float64}, dims::Vector{Int32}, pad::Vector{Flo
         end
         leaves[i] = leaf
     end
-    soil = AL.SoilOpticalProperties(par_reflectance=0.0, nir_reflectance=0.0)
+    soil = AL._SoilMaterial((0.0, 0.0))
     materials = AL._SoilMaterialTable()
     materials[1] = soil
     # Parsing, facet validation, and BVH construction happened in native Julia.

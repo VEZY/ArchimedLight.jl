@@ -1,7 +1,7 @@
 @testitem "Terrain traversal ignores stale reusable stack entries" tags=[:voxel, :terrain, :fast] begin
     AL = ArchimedLight
-    soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)
-    bright = SoilOpticalProperties(par_reflectance=0.7, nir_reflectance=0.8)
+    soil = translucent(par=0.2, nir=0.4)
+    bright = translucent(par=0.7, nir=0.8)
     vertices = NTuple{3,Float64}[]
     triangles = NTuple{3,Int}[]
     # Every node overlaps the central ray. The nearest tied patch with the
@@ -16,11 +16,11 @@
         push!(triangles, (first, first + 1, first + 2))
     end
     deep = ArchimedLight._with_terrain_materials(TriangulatedTerrain(vertices, triangles; leaf_size=1,
-        material_ids=[isodd(patch) ? 1 : 2 for patch in 1:patch_count]), Dict(1 => soil, 2 => bright))
+        material_ids=[isodd(patch) ? 1 : 2 for patch in 1:patch_count]), models_for(; ground_materials=Dict(1 => soil, 2 => bright)).ground_materials)
     shallow = ArchimedLight._with_terrain_materials(TriangulatedTerrain([(0.0, 0.0, 0.4), (1.0, 0.0, 0.4),
-                                  (0.0, 1.0, 0.4)], [(1, 2, 3)]), Dict(1 => soil))
+                                  (0.0, 1.0, 0.4)], [(1, 2, 3)]), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     periodic = ArchimedLight._with_terrain_materials(HeightFieldTerrain([0.0, 1.0, 2.0], [0.0, 1.0, 2.0],
-        [0.3 0.3 0.3; 0.3 0.7 0.3; 0.3 0.3 0.3]; periodic=true), Dict(1 => soil))
+        [0.3 0.3 0.3; 0.3 0.7 0.3; 0.3 0.3 0.3]; periodic=true), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
     function compare_query(stack, terrain, origin, direction, limit)
         # Scratch contents are not traversal state between independent queries.
         fill!(stack, typemax(Int))

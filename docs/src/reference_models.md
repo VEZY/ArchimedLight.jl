@@ -126,6 +126,13 @@ models = prepare_models([
 
 This is the direct equivalent of the YAML file above.
 
+Voxel soil reuses this `TypeModel`, normally created with
+`translucent(par=..., nir=...)` and its default `transparency=0`. The voxel-only
+`ground_materials` keyword maps terrain material IDs to full soil models or
+partial `(par=..., nir=...)` overrides. Triangle scenes instead use their
+ordinary group/type mappings; they do not use `ground_materials`. See the
+[Ground Materials example](voxel_tree_tutorial.md#Ground-Materials).
+
 The dynamic correspondences are:
 
 - `Group: coffee` -> `GroupModel("coffee"; ...)`

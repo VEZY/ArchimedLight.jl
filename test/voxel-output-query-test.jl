@@ -6,7 +6,7 @@
     models = models_for(; mode=:point_proxy,
         leaf=VoxelMaterial(g=0.4, par_reflectance=0.1, par_transmittance=0.2),
         wood=VoxelMaterial(g=0.8, par_reflectance=0.3),
-        ground=SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4))
+        ground=translucent(par=0.2, nir=0.4))
     row = (step_duration=60., Ri_PAR_f=100., Ri_NIR_f=50., direct_fraction=0.7,
         sun_azimuth=120., sun_elevation=60.)
     backend = VoxelCPUBackend(rays_per_voxel=4)
@@ -71,8 +71,8 @@ end
     mesh = TriangulatedTerrain(vertices, [(1, 2, 3), (1, 3, 4)]; material_ids=[1, 2])
     height = HeightFieldTerrain([0., 2.], [0., 2.], [0. 0.; 1. 1.]; material_ids=[1, 2])
     plane = PlanarTerrain(grid; cells=(2, 1), material_ids=reshape([1, 2], 2, 1))
-    soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)
-    bright = SoilOpticalProperties(par_reflectance=0.7, nir_reflectance=0.8)
+    soil = translucent(par=0.2, nir=0.4)
+    bright = translucent(par=0.7, nir=0.8)
     models = models_for(; leaf=VoxelMaterial(), ground=soil, ground_materials=Dict(2 => bright))
     row = (step_duration=60., Ri_PAR_f=100., Ri_NIR_f=50., direct_fraction=1.,
         sun_azimuth=0., sun_elevation=90.)
@@ -131,7 +131,7 @@ end
     grid = VoxelGrid((0, 0, 0), (1, 1, 2), fill(0.5, 1, 1, 2))
     scene = VoxelScene(grid)
     models = models_for(; leaf=VoxelMaterial(par_reflectance=0.1),
-        ground=SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4))
+        ground=translucent(par=0.2, nir=0.4))
     row = (step_duration=60., Ri_PAR_f=100., Ri_NIR_f=50., direct_fraction=1.,
         sun_azimuth=0., sun_elevation=90.)
     options = LightOptions(toricity=false, scattering=false, turtle_sectors=6)

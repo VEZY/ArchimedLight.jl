@@ -17,7 +17,7 @@
     )
     grid = VoxelGrid((0, 0, 0), (2, 3, 4), pad)
     original_pad = copy(grid.pad)
-    soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)
+    soil = translucent(par=0.2, nir=0.4)
     terrain = HeightFieldTerrain(
         [0.0, 1.0, 2.0],
         [0.0, 1.5, 3.0],
@@ -182,7 +182,7 @@ end
     scene = VoxelScene(input)
     update_models!(scene, models_for(; mode=:point_proxy, leaf=VoxelMaterial(g=0.4),
         wood=VoxelMaterial(g=0.8), identified_area_fraction=assigned,
-        ground=SoilOpticalProperties(par_reflectance=0.25, nir_reflectance=0.35)))
+        ground=translucent(par=0.25, nir=0.35)))
     add_ground!(scene; cells=(3, 2))
     geometry = makeplot(scene)
     @test geometry[:voxel_color_values][][1] == 3 # residual PAD is retained, not assigned to leaves
@@ -273,7 +273,7 @@ end
     scene = VoxelScene(grid)
     add_ground!(scene; cells=(1, 2), periodic=true)
     update_models!(scene, models_for(; leaf=VoxelMaterial(),
-        ground=SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)))
+        ground=translucent(par=0.2, nir=0.4)))
     options = LightOptions(toricity=false, scattering=false, turtle_sectors=6, all_in_turtle=true)
     row = (step_duration=60.0, Ri_PAR_f=100.0, Ri_NIR_f=50.0,
         sun_azimuth=0.0, sun_elevation=90.0, direct_fraction=1.0)
@@ -348,7 +348,7 @@ end
     origin = (600000.01, 6600000.01, 100.005)
     maximum = (origin[1] + 0.02, origin[2] + 0.02, origin[3] + 1.0)
     grid = VoxelGrid(origin, maximum, ones(2, 2, 2))
-    soil = SoilOpticalProperties(par_reflectance=0.2, nir_reflectance=0.4)
+    soil = translucent(par=0.2, nir=0.4)
     elevation = origin[3] + 0.01
     vertices = [(x, y, elevation) for (x, y) in
                 ((origin[1], origin[2]), (maximum[1], origin[2]),

@@ -82,7 +82,6 @@ export VoxelMaterial, VoxelVegetation, VoxelVegetationStepResult, VoxelComponent
 export AbstractVoxelTerrain
 export NoVoxelTerrain
 export TerrainHit
-export SoilOpticalProperties
 export PlanarTerrain
 export HeightFieldTerrain
 export TriangulatedTerrain

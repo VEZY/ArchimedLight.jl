@@ -286,7 +286,7 @@ Keep models separate from the imported observations. Pass them with
 ## Run With A Separate Terrain
 
 ```julia
-soil = SoilOpticalProperties(par_reflectance=0.10, nir_reflectance=0.30)
+soil = translucent(par=0.10, nir=0.30)
 terrain = read_ply_terrain("terrain_covering_the_voxel_grid.ply")
 add_ground!(scene, terrain)
 models = models_for(;

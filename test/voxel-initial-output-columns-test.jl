@@ -11,7 +11,7 @@
     unknown = VoxelMaterial(g=0.3, par_reflectance=0.05, par_transmittance=0.05,
         nir_reflectance=0.15, nir_transmittance=0.1)
     individual_leaf = VoxelMaterial(leaf; par_reflectance=0.25, nir_reflectance=0.2)
-    soil = SoilOpticalProperties(par_reflectance=0.4, nir_reflectance=0.4)
+    soil = translucent(par=0.4, nir=0.4)
     models = models_for(; mode=:point_proxy, leaf, wood, unknown, ground=soil,
         individuals=Dict("17" => (leaf=individual_leaf,)))
     row = (step_duration=90., Ri_PAR_f=100., Ri_NIR_f=70., direct_fraction=0.6,

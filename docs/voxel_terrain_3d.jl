@@ -1,14 +1,14 @@
-const _VOXEL_DOCS_SOIL_DRY = SoilOpticalProperties(
-    par_reflectance=0.12,
-    nir_reflectance=0.32,
+const _VOXEL_DOCS_SOIL_DRY = translucent(
+    par=0.12,
+    nir=0.32,
 )
-const _VOXEL_DOCS_SOIL_MOIST = SoilOpticalProperties(
-    par_reflectance=0.24,
-    nir_reflectance=0.42,
+const _VOXEL_DOCS_SOIL_MOIST = translucent(
+    par=0.24,
+    nir=0.42,
 )
-const _VOXEL_DOCS_SOIL_LITTER = SoilOpticalProperties(
-    par_reflectance=0.38,
-    nir_reflectance=0.52,
+const _VOXEL_DOCS_SOIL_LITTER = translucent(
+    par=0.38,
+    nir=0.52,
 )
 
 include(joinpath(@__DIR__, "..", "examples", "voxel_tree", "scene.jl"))
@@ -23,13 +23,12 @@ function _voxel_docs_scene()
         xi + yi < 7 ? 1 : (xi > 10 && yi > 8 ? 3 : 2) for
         xi in 1:(length(x) - 1), yi in 1:(length(y) - 1)
     ]
-    terrain = ArchimedLight._with_terrain_materials(
+    terrain = ArchimedLight._resolve_voxel_ground(
         HeightFieldTerrain(x, y, elevation; material_ids),
-        Dict(
-            1 => _VOXEL_DOCS_SOIL_DRY,
+        models_for(; ground=_VOXEL_DOCS_SOIL_DRY, ground_materials=Dict(
             2 => _VOXEL_DOCS_SOIL_MOIST,
             3 => _VOXEL_DOCS_SOIL_LITTER,
-        ),
+        )),
     )
 
     upward = [

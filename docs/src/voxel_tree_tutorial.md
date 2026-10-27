@@ -60,7 +60,7 @@ readers do not print during file loading.
 Read the independent terrain in the same coordinate frame:
 
 ```@example voxel_tree
-soil = SoilOpticalProperties(par_reflectance=0.12, nir_reflectance=0.32)
+soil = translucent(par=0.12, nir=0.32)
 terrain = read_ply_terrain(joinpath(example_dir, "terrain.ply"))
 add_ground!(plain_scene, terrain)
 add_ground!(mixed_scene, terrain)
@@ -182,24 +182,39 @@ from; it cannot fill missing coefficients on its own. Wood and unknown defaults
 remain black unless supplied or explicitly set to `nothing`. Missing materials
 for positive components produce a validation error.
 
-### Different Soil Regions
+### Ground Materials
 
-Ground material IDs belong to geometry. Assign their optical parameters in
-`models_for`, using the global `ground` as the fallback:
+`ground_materials` assigns soil models to the terrain's material IDs. These IDs
+belong to geometry and are independent of tree IDs. Define the default soil
+with the same `translucent` helper used for triangle materials, then override
+selected regions in the voxel model configuration:
 
 ```@example voxel_tree
 regional_scene = VoxelScene(grid)
 add_ground!(regional_scene; cells=(2, 1), material_ids=reshape([1, 2], 2, 1))
 regional_models = models_for(;
     leaf, ground=soil,
-    ground_materials=Dict(2 => (par_reflectance=0.20,)),
+    ground_materials=Dict(2 => (par=0.20,)),
 )
 isempty(check_models(regional_scene, regional_models).errors)
 ```
 
-Region 1 uses `soil`; region 2 changes only PAR reflectance and inherits the
-global soil NIR reflectance. A complete `SoilOpticalProperties` can replace a
-region's whole material. These are soil material IDs, independently of tree IDs.
+Region 1 uses `soil`; region 2 changes only `par` and inherits `nir` from that
+global default. A complete `translucent(par=..., nir=...)` model can replace a
+region's whole material. Terrain models must have `transparency=0` (the
+helper's default): the soil is an opaque boundary, not a transmitting layer.
+The configuration copies the band coefficients; later edits to the original
+`TypeModel` do not change these voxel models.
+
+Run this regional scene and query absorbed PAR for each soil material:
+
+```@example voxel_tree
+regional_result = run_light(regional_scene, row; models=regional_models,
+    options=first_options, backend)
+light_metric_values(regional_scene, regional_result, :Ra_PAR_0_q;
+    domain=:ground, reduce=sum, by=:material_id)
+```
+
 To omit a global ground default, provide a complete soil model for every
 material ID used by the terrain:
 
@@ -208,11 +223,24 @@ regional_only_models = models_for(;
     leaf,
     ground_materials=Dict(
         1 => soil,
-        2 => SoilOpticalProperties(par_reflectance=0.20, nir_reflectance=0.32),
+        2 => translucent(par=0.20, nir=0.32),
     ),
 )
 isempty(check_models(regional_scene, regional_only_models).errors)
 ```
+
+`ground_materials` is specific to voxel terrain. In a triangle scene, assign
+that same soil model through its geometry's group and type instead. For ground
+labelled `group="soil"`, `type="ground"`:
+
+```@example voxel_tree
+triangle_ground_models = models_for("soil" => ("ground" => soil,))
+typeof(triangle_ground_models)
+```
+
+Reusing the material definition does not change the directional laws: voxel
+terrain reflects into the outward hemisphere; triangle scattering retains its
+existing two-sided redistribution.
 
 The example changes only band optics. To change extinction, set a component's
 `VoxelMaterial.g`; this changes the projection hypothesis as well as the

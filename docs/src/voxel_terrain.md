@@ -67,16 +67,18 @@ large offsets. The transport and raw ray diagnostics retain the input frame.
 
 ## Construct A Terrain
 
-Soil is opaque in the initial model. Define its band reflectance explicitly;
-absorptance is ``1-\rho`` and transmittance is zero.
+Define soil with `translucent(par=..., nir=...)`, the same `TypeModel` helper
+used for triangle materials. For terrain, `par` and `nir` are band reflectances;
+absorptance is ``1-\rho``. The soil must be opaque (`transparency=0`, the
+helper's default); transmitting, sensor and emitting models are rejected.
 
 ```@example voxel_terrain
 using ArchimedLight
 
 grid = VoxelGrid((0, 0, 0), (2, 2, 3), fill(0.4, 2, 2, 3))
-soil = SoilOpticalProperties(
-    par_reflectance=0.15,
-    nir_reflectance=0.40,
+soil = translucent(
+    par=0.15,
+    nir=0.40,
 )
 
 scene = VoxelScene(grid)
@@ -145,7 +147,7 @@ Per-patch `material_ids` identify soil regions. Set their material parameters
 with `models_for(; leaf, ground=soil, ground_materials=...)`. A partial override
 inherits omitted coefficients from `ground`; complete soil models can instead
 cover every used ID without a global ground default. The
-[tree tutorial](voxel_tree_tutorial.md#Different-Soil-Regions) gives runnable
+[tree tutorial](voxel_tree_tutorial.md#Ground-Materials) gives runnable
 examples of both forms.
 
 ### Low-Level Terrain Objects
@@ -291,9 +293,11 @@ E_{soil,absorbed} = (1-\rho_b)E,
 E_{soil,reflected} = \rho_b E.
 ```
 
-The reflected pool is Lambertian around the patch's local unit normal ``n``.
-ArchimedLight does not add or rotate transport directions. It reweights the
-existing full-sphere voxel quadrature:
+The reflected pool is Lambertian in the outward hemisphere around the patch's
+local unit normal ``n``. This one-sided soil boundary differs from the triangle
+solver's existing equal two-sided scattering, even when both use the same
+`translucent` material definition. ArchimedLight does not add or rotate
+transport directions. It reweights the existing full-sphere voxel quadrature:
 
 ```math
 w_d =
@@ -496,7 +500,7 @@ height or mesh arrays.
 ```text
 AbstractVoxelTerrain, NoVoxelTerrain
 PlanarTerrain, HeightFieldTerrain, TriangulatedTerrain
-TerrainHit, SoilOpticalProperties
+TerrainHit, TypeModel, translucent
 intersect_terrain, terrain_bounds
 terrain_patch_count, terrain_patch_point
 terrain_patch_normal, terrain_patch_material

@@ -1,4 +1,7 @@
-const _SoilMaterialTable = Dict{Int,SoilOpticalProperties{Float64}}
+# Ground models resolve once into immutable opaque-soil reflectances. The
+# transport kernels use these scalars without interpreting public model objects.
+const _SoilMaterial = NamedTuple{(:par_reflectance, :nir_reflectance),Tuple{Float64,Float64}}
+const _SoilMaterialTable = Dict{Int,_SoilMaterial}
 
 function _normalise_terrain_vector(value, name::AbstractString)
     length(value) == 3 || throw(ArgumentError("$name must contain three coordinates"))
@@ -15,12 +18,11 @@ function _soil_material_table(materials)
     for (identifier, optics) in pairs(materials)
         id = Int(identifier)
         id > 0 || throw(ArgumentError("soil material identifiers must be positive"))
-        optics isa SoilOpticalProperties ||
-            throw(ArgumentError("soil material $id is not a SoilOpticalProperties value"))
-        result[id] = SoilOpticalProperties(
-            par_reflectance=optics.par_reflectance,
-            nir_reflectance=optics.nir_reflectance,
-        )
+        optics isa _SoilMaterial ||
+            throw(ArgumentError("soil material $id must contain resolved ground reflectances"))
+        all(value -> isfinite(value) && 0 <= value <= 1, values(optics)) ||
+            throw(ArgumentError("soil material $id reflectances must be finite and lie in [0, 1]"))
+        result[id] = optics
     end
     return result
 end
@@ -466,6 +468,14 @@ soil_optics(::NoVoxelTerrain, ::Integer) = _no_terrain_soil_optics_error()
 soil_optics(::NoVoxelTerrain, ::TerrainHit) = _no_terrain_soil_optics_error()
 soil_optics(::NoVoxelTerrain, ::TerrainHit, ::Symbol) = _no_terrain_soil_optics_error()
 
+"""
+    soil_optics(terrain, material_id)
+    soil_optics(terrain, hit)
+
+Inspect the resolved opaque ground reflectances as an immutable named tuple
+with `par_reflectance` and `nir_reflectance` fields. Configure terrain optics
+through [`models_for`](@ref) before inspecting or simulating the terrain.
+"""
 function soil_optics(terrain::AbstractVoxelTerrain, material_id::Integer)
     materials = _terrain_materials(terrain)
     isempty(materials) && throw(ArgumentError(
@@ -478,7 +488,7 @@ end
 soil_optics(terrain::AbstractVoxelTerrain, hit::TerrainHit) =
     soil_optics(terrain, hit.material_id)
 
-function _soil_band_reflectance(optics::SoilOpticalProperties, band::Symbol)
+function _soil_band_reflectance(optics::_SoilMaterial, band::Symbol)
     band == :par && return optics.par_reflectance
     band == :nir && return optics.nir_reflectance
     throw(ArgumentError("band must be :par or :nir"))

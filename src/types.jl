@@ -535,6 +535,9 @@ default, supply complete materials for every participating individual/organ
 or soil material ID. JSONL inputs require `mode=:point_proxy` explicitly.
 Pass the configuration to `run_light(scene, meteo; models, options, backend)`;
 ground geometry is added separately with `add_ground!`.
+Voxel `ground` accepts an opaque `translucent(par=..., nir=...)` model;
+`ground_materials` assigns complete models or partial `(par=..., nir=...)`
+overrides by terrain material ID. Triangle soils use the usual group/type pairs.
 
 An empty call retains the triangle meaning `LightModels()`. Positional
 group/type pairs and voxel keywords cannot be combined.

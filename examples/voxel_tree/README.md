@@ -25,14 +25,18 @@ organ allocation, and any example optical parameters are pedagogical. The
 same PAD does not imply the same absorption when organ optics differ.
 
 The files contain no optical parameters. Assign `VoxelMaterial` values to
-leaf, wood, unknown, and ground defaults with
+leaf, wood and unknown vegetation; define soil as
+`soil = translucent(par=0.12, nir=0.32)` with zero transparency. Combine them with
 `models_for(; mode=:point_proxy, leaf, wood, unknown, ground=soil)`. Use
 `individuals=Dict("1" => (leaf=(nir_reflectance=0.40,),))` for a partial
 individual override that inherits all remaining default parameters. To omit a
 global leaf default, provide complete leaf materials for every relevant
 individual; partial overrides require the matching default. Supplying
 a complete `VoxelMaterial` replaces the whole organ material. Ground material
-IDs can similarly override `ground` through `ground_materials`.
+IDs can override the default with `ground_materials=Dict(2 => (par=0.20,))`,
+inheriting `nir`, or with a complete `translucent` model. The tutorial's
+[Ground Materials section](../../docs/src/voxel_tree_tutorial.md#Ground-Materials)
+runs this regional example and compares the triangle group/type mapping.
 Select `mode=:point_proxy` explicitly to interpret point fractions as PAD
 fractions. The input retains one individual even if its materials change.
 

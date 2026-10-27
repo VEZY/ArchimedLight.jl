@@ -52,7 +52,7 @@ example_dir = joinpath(pkgdir(ArchimedLight), "examples", "voxel_tree")
 scene = read_scene(joinpath(example_dir, "tree.vox"))
 leaf = VoxelMaterial(g=0.5, par_reflectance=0.08, par_transmittance=0.07,
     nir_reflectance=0.45, nir_transmittance=0.40)
-soil = SoilOpticalProperties(par_reflectance=0.12, nir_reflectance=0.32)
+soil = translucent(par=0.12, nir=0.32)
 add_ground!(scene)
 models = models_for(; leaf, ground=soil)
 backend = VoxelCPUBackend(rays_per_voxel=4)
@@ -69,7 +69,11 @@ creates geometry without choosing soil reflectance. On a plain `.vox` grid,
 `LightOptions` holds calculation settings, independently of these materials.
 
 `scene.grid` exposes the `VoxelGrid`; `scene.terrain` holds the attached ground.
-The ground defaults to the full horizontal domain, at `scene.grid.minimum[3]`.
+The soil definition uses the same `translucent` helper as a triangle model.
+For voxel terrain its `transparency` must be zero, and `par`/`nir` specify
+outward reflected fractions. Triangle scattering retains its existing
+split between the two sides. The ground defaults to the full horizontal domain,
+at `scene.grid.minimum[3]`.
 Use `elevation=` and `cells=(nx, ny)` when a different level or patch resolution
 is appropriate. This is a flat-ground assumption, not an inferred MNT. An
 imported terrain can instead be supplied when constructing
