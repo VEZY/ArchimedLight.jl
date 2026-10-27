@@ -100,6 +100,53 @@ when reporting results; the simulation does not reconstruct the missing PAD.
 Infinite or negative PAD, duplicate indices, and missing grid rows remain
 errors.
 
+## [Coordinates, Grid North And Scene Rotation](@id voxel-scene-orientation)
+
+AMAPVox indices follow the voxelization coordinate frame: `i` increases with
+`x`, `j` with `y`, and `k` with `z`. The file uses zero-based indices, with
+voxel centres at `xmin + (i + 0.5)Δx`, and likewise for `y` and `z`.
+ArchimedLight preserves these axes when importing `.vox` or merged JSONL files;
+it converts the indices to Julia's one-based indexing.
+
+For a point cloud in **easting / northing / elevation** coordinates, with no
+additional rotation applied in AMAPVox, increasing `j` follows **grid north**.
+AMAPVox can apply SOP, POP and VOP transformations before voxelization, so a
+rotated local frame may have a different orientation. Its standard `.vox`
+header records the grid bounds and resolution, but does not record geographic
+north, the coordinate reference system, or those transformation matrices.
+Recover the final frame's orientation from the source data and voxelization
+configuration.
+
+Grid north can differ from **geographic north**, which is the reference for
+solar azimuths. This difference, called grid convergence, depends on the
+projection and location. A small plot does not by itself make the angular
+offset small. See the [USGS explanation of grid and geographic north](https://www.usgs.gov/faqs/what-do-different-north-arrows-a-usgs-topographic-map-mean).
+
+Use `LightOptions(scene_rotation_deg=0.0)` when the scene's positive `y` axis
+points toward geographic north, or when deliberately accepting grid north as
+an approximation. Use a nonzero value for a rotated local scene or to account
+for grid convergence. The option expresses the geographic sun direction in
+the existing scene frame before computing directional radiation weights;
+the local turtle remains fixed. Voxel coordinates, PAD, and terrain geometry
+stay in that frame. Terrain and canopy must therefore already share coordinates.
+
+To choose the sign, let `θ` be the geographic bearing of the scene's positive
+`y` axis, measured clockwise from geographic north. Set
+`scene_rotation_deg = -θ`: the implemented convention is
+`local_azimuth = mod(geographic_azimuth + scene_rotation_deg, 360)`.
+For example, if positive `y` points 30° east of geographic north:
+
+```julia
+using ArchimedLight
+
+options = LightOptions(scene_rotation_deg=-30.0)
+```
+
+A sun at geographic azimuth 30° then lies along the scene's positive `y`
+axis. Choose `θ` for the final frame, including any grid convergence, so that
+the same rotation is accounted for once. The [configuration reference](@ref scene_rotation)
+also describes how the fixed local turtle uses this setting.
+
 ## The Existing File Structure
 
 The metadata record uses `record_type="metadata"` and
@@ -242,15 +289,25 @@ and scientific limits.
 ### Parameters Per Individual
 
 The model accepts optical/projection overrides by individual ID, independently
-of species. IDs read from numeric `tree_id` values are represented by strings
-for parameter lookup:
+of species. Positive integer `tree_id` values remain `Int` values for model
+lookup and output queries:
 
 ```julia
 models = models_for(;
     mode=:point_proxy, leaf, wood, unknown,
-    individuals=Dict("132" => (leaf=(par_reflectance=0.10,),)),
+    individuals=Dict(132 => (leaf=(par_reflectance=0.10,),)),
 )
 ```
+
+Each input and scene uses one concrete individual ID type: `Int` for positive
+integer IDs, or `String` for nonempty text IDs. Mixed integer and text IDs are
+rejected. Text IDs such as `"oak-A"` or `"001"` remain unchanged; `"001"` is a
+label, not integer `1`. Model override keys and `individual_id` query filters
+must match the scene's ID type. These IDs identify individuals; they are not
+voxel indices or positions in an array.
+For a scene whose file contains `"oak-A"`, use
+`individuals=Dict("oak-A" => (leaf=(par_reflectance=0.10,),))` and query with
+`individual_id="oak-A"`.
 
 A partial named tuple changes only its named coefficients; omitted parameters
 inherit the global organ default. An omitted organ also keeps its default.
@@ -268,8 +325,8 @@ and give each relevant individual a complete material:
 models = models_for(;
     mode=:point_proxy,
     individuals=Dict(
-        "132" => (leaf=leaf, wood=wood),
-        "204" => (leaf=VoxelMaterial(leaf; par_reflectance=0.10), wood=wood),
+        132 => (leaf=leaf, wood=wood),
+        204 => (leaf=VoxelMaterial(leaf; par_reflectance=0.10), wood=wood),
     ),
 )
 ```
@@ -291,7 +348,7 @@ terrain = read_ply_terrain("terrain_covering_the_voxel_grid.ply")
 add_ground!(scene, terrain)
 models = models_for(;
     mode=:point_proxy, leaf, wood, unknown, ground=soil,
-    individuals=Dict("132" => (leaf=(par_reflectance=0.10,),)),
+    individuals=Dict(132 => (leaf=(par_reflectance=0.10,),)),
 )
 options = LightOptions(toricity=false, scattering=true)
 
@@ -320,7 +377,7 @@ absorbed energy for PAR and NIR. The missing-PAD mask remains available as
 energies by individual and organ, including unattributed vegetation.
 
 For leaf APAR, query `light_metric_values(scene, result, :Ra_PAR_q;
-individual_id="132", organ=:leaf, reduce=sum)`. Omit the individual filter for
+individual_id=132, organ=:leaf, reduce=sum)`. Omit the individual filter for
 all leaves, or use `individual_id=(nothing,)` for unattributed vegetation.
 Wood and unknown-organ absorption belongs to the scene energy balance but is
 not leaf APAR. `domain=:ground` queries the soil separately. The

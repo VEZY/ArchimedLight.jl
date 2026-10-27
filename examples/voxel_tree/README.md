@@ -28,7 +28,7 @@ The files contain no optical parameters. Assign `VoxelMaterial` values to
 leaf, wood and unknown vegetation; define soil as
 `soil = opaque(par=0.12, nir=0.32)` with zero transmission. Combine them with
 `models_for(; mode=:point_proxy, leaf, wood, unknown, ground=soil)`. Use
-`individuals=Dict("1" => (leaf=(nir_reflectance=0.40,),))` for a partial
+`individuals=Dict(1 => (leaf=(nir_reflectance=0.40,),))` for a partial
 individual override that inherits all remaining default parameters. To omit a
 global leaf default, provide complete leaf materials for every relevant
 individual; partial overrides require the matching default. Supplying
@@ -39,6 +39,7 @@ inheriting `nir`, or with a complete `opaque` model. The tutorial's
 runs this regional example and compares the triangle group/type mapping.
 Select `mode=:point_proxy` explicitly to interpret point fractions as PAD
 fractions. The input retains one individual even if its materials change.
+Its numeric `tree_id=1` remains an `Int` in model keys and output queries.
 
 `scene.jl` is the shared source of the synthetic PAD, trunk classification,
 and terrain elevation used by the documentation. To regenerate the paired

@@ -15,15 +15,15 @@
             all_in_turtle=true, scattering_max_iter=40, scattering_stop_ratio=1e-10)
         series = run_light(scene, [row, merge(row, (step_duration=120.,))]; models, options, backend)
         step = first(series)
-        expected = filter(c -> c.individual_id == "17", step.components)
-        tree = light_metric_values(scene, step, :Ra_PAR_q; individual_id="17")
+        expected = filter(c -> c.individual_id == 17, step.components)
+        tree = light_metric_values(scene, step, :Ra_PAR_q; individual_id=17)
         @test length(tree.value) == length(expected) == 2
-        @test all(==("17"), tree.individual_id)
+        @test all(==(17), tree.individual_id)
         @test tree.organ == getproperty.(expected, :organ)
         @test tree.value == getproperty.(expected, :absorbed_par_energy)
         @test Set(zip(tree.voxel_i, tree.voxel_j, tree.voxel_k)) == Set([(1, 1, 1)])
         leaves = light_metric_values(scene, step, :absorbed_par_energy;
-            individual_id=("17",), organ=:leaf, voxel_i=1:1, voxel_j=[1], voxel_k=1)
+            individual_id=(17,), organ=:leaf, voxel_i=1:1, voxel_j=[1], voxel_k=1)
         @test leaves.value == [first(expected).absorbed_par_energy]
         @test leaves.organ == [:leaf]
         whole = light_metric_values(scene, step, :Ra_PAR_q; voxel_i=1, voxel_j=1, voxel_k=1)
@@ -33,11 +33,11 @@
         @test all(isnothing, unknown.individual_id)
         @test all(==(:unknown), unknown.organ)
         filtered = light_metric_values(scene, step, :Ra_PAR_q; organ=(:leaf, :wood),
-            where=r -> r.individual_id == "17", sink=Tables.rowtable)
+            where=r -> r.individual_id == 17, sink=Tables.rowtable)
         @test getproperty.(filtered, :value) == tree.value
-        @test light_metric_values(scene, step, :Ra_PAR_q; individual_id="missing", reduce=sum) == 0
-        @test isempty(light_metric_values(scene, step, :Ra_PAR_q; individual_id="missing").value)
-        totals = light_metric_values(scene, series, :Ra_PAR_q; individual_id="17", reduce=sum)
+        @test light_metric_values(scene, step, :Ra_PAR_q; individual_id=999, reduce=sum) == 0
+        @test isempty(light_metric_values(scene, step, :Ra_PAR_q; individual_id=999).value)
+        totals = light_metric_values(scene, series, :Ra_PAR_q; individual_id=17, reduce=sum)
         @test totals ≈ [sum(tree.value), 2sum(tree.value)]
         grouped = light_metric_values(scene, series, :Ra_PAR_q;
             reduce=sum, by=(:individual_id, :organ), sink=Tables.rowtable)
@@ -50,17 +50,17 @@
             light_metric_values(scene, step, :Ra_PAR_q; reduce=sum)
         @test length(grouped) == 2length(component_values(step; level=:individual).organ)
         table = component_values(step)
-        selected = findall(==("17"), table.individual_id)
+        selected = findall(==(17), table.individual_id)
         for (metric, column) in ArchimedLight._DEFAULT_BUDGET_ATTRS
             metric == :sky_fraction && continue
-            queried = light_metric_values(scene, step, metric; individual_id="17")
+            queried = light_metric_values(scene, step, metric; individual_id=17)
             @test queried.value ≈ getproperty(table, column)[selected]
-            @test queried.value == light_metric_values(scene, step, column; individual_id="17").value
+            @test queried.value == light_metric_values(scene, step, column; individual_id=17).value
         end
         @test_throws ArgumentError light_metric_values(scene, step, :sky_fraction; organ=:leaf)
         @test_throws ArgumentError light_metric_values(scene, step, :Ra_PAR_q; by=:individual_id)
         @test_throws ArgumentError light_metric_values(scene, step, :Ra_PAR_q;
-            individual_id="17", reduce=sum, sink=Tables.rowtable)
+            individual_id=17, reduce=sum, sink=Tables.rowtable)
     end
 end
 
@@ -118,7 +118,7 @@ end
         add_ground!(scene; cells=(1, 1))
         update_models!(scene, models_for(; leaf=VoxelMaterial(), ground=bright))
         @test light_metric_values(scene, step, :Ra_PAR_q; domain=:ground).value == saved
-        @test_throws ArgumentError light_metric_values(scene, step, :Ra_PAR_q; domain=:ground, individual_id="17")
+        @test_throws ArgumentError light_metric_values(scene, step, :Ra_PAR_q; domain=:ground, individual_id=17)
         @test_throws ArgumentError light_metric_values(scene, step, :Ra_PAR_q; domain=:ground, organ=:leaf)
         @test_throws ArgumentError light_metric_values(scene, step, :Ra_PAR_q; domain=:ground, voxel_i=1)
         @test_throws ArgumentError light_metric_values(scene, step, :Ra_PAR_q; material_id=1)
@@ -139,7 +139,7 @@ end
     step = run_light(scene, row; models, options, backend)
     @test isempty(light_metric_values(scene, step, :Ra_PAR_q; domain=:ground).value)
     @test light_metric_values(scene, step, :Ra_PAR_q; domain=:ground, reduce=sum) == 0
-    @test_throws ArgumentError light_metric_values(scene, step, :Ra_PAR_q; individual_id="17")
+    @test_throws ArgumentError light_metric_values(scene, step, :Ra_PAR_q; individual_id=17)
     @test_throws ArgumentError light_metric_values(scene, step, :Ra_PAR_q; organ=:leaf)
     @test_throws ArgumentError light_metric_values(scene, step, :Ra_PAR_q; reduce=sum, by=:individual_id)
     @test isempty(light_metric_values(scene, VoxelLightStepResult[], :Ra_PAR_q; domain=:ground).value)

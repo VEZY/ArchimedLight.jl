@@ -111,14 +111,14 @@ mixed_scene = read_scene(joinpath(example_dir, "tree.jsonl.gz"))
 add_ground!(mixed_scene)
 mixed_models = models_for(;
     mode=:point_proxy, leaf, wood, unknown=VoxelMaterial(g=0.5), ground=soil,
-    individuals=Dict("1" => (leaf=(nir_reflectance=0.40,),)),
+    individuals=Dict(1 => (leaf=(nir_reflectance=0.40,),)),
 )
 mixed_step = run_light(mixed_scene, row; models=mixed_models, options, backend)
 component_values(mixed_step; level=:individual)
 ```
 
 The defaults apply to every individual. The partial override changes only tree
-`"1"`'s leaf NIR reflectance; all other parameters retain their defaults. Supply
+`1`'s leaf NIR reflectance; all other parameters retain their defaults. Supply
 a complete `VoxelMaterial` instead to replace that organ's whole material.
 Use `update_models!(scene, models)` when a scene should retain the configuration
 for subsequent calls without a `models` keyword. Neither form rewrites the input file.
@@ -133,7 +133,7 @@ joules per step; flux is in watts per square metre of participating plant area.
 A source-aware series query returns a table containing all timesteps in
 `step_number`; plotting selects one with `timestep=`. Both representations use
 `reduce=sum`, `by=...` and `sink=...` to reduce, group and materialize queries.
-For attributed voxels, select `individual_id="1"` and `organ=:leaf` in place
+For attributed voxels, select `individual_id=1` and `organ=:leaf` in place
 of triangle object and organ metadata. These retain the input identity and
 component allocation. Ground is ordinary geometry in the triangle query;
 voxel queries select it with `domain=:ground`. The default voxel domain is

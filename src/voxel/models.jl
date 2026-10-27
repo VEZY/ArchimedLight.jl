@@ -7,6 +7,8 @@
 Material configuration supplied as models to a voxel run. Component defaults
 apply throughout the scene. An individual may supply complete VoxelMaterial
 values or named tuples of parameters inherited from an organ's default.
+Individual override keys must all be `Int` or all be `String`, matching the
+scene's IDs. Empty overrides can be used with either scene type.
 Without a global default, supply a complete material for each participating
 individual/organ. Ground uses the same [`opaque`](@ref) models as triangle
 scenes. Its PAR/NIR reflected fractions are distributed
@@ -18,15 +20,24 @@ Merged JSONL inputs require mode=:point_proxy explicitly. This records the
 assumption that point proportions allocate exported PAD; unassigned vegetation
 retains the unknown model. The input density and terrain geometry are unchanged.
 """
-struct VoxelModels{F}
+struct VoxelModels{ID<:Union{Int,String},F}
     leaf::Union{Nothing,VoxelMaterial}
     wood::Union{Nothing,VoxelMaterial}
     unknown::Union{Nothing,VoxelMaterial}
     ground::Union{Nothing,_SoilMaterial}
-    individuals::Dict{String,NamedTuple}
+    individuals::Dict{ID,NamedTuple}
     ground_materials::_SoilMaterialTable
     mode::Union{Nothing,Symbol}
     identified_area_fraction::F
+end
+
+function _voxel_models_for_id(models::VoxelModels, ::Type{ID}) where {ID}
+    keytype(models.individuals) === ID && return models
+    isempty(models.individuals) || throw(ArgumentError(
+        "individual material overrides must match the scene's $ID IDs"))
+    VoxelModels(models.leaf, models.wood, models.unknown, models.ground,
+        Dict{ID,NamedTuple}(), models.ground_materials, models.mode,
+        models.identified_area_fraction)
 end
 
 function _voxel_soil_material(model::TypeModel)

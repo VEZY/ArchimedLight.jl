@@ -26,6 +26,10 @@ function _check_voxel_result_source(source::_VoxelMetricSource, step::_VoxelLigh
     ))
     volume = voxel_volume(grid)
     if step isa VoxelVegetationStepResult
+        if source isa VoxelVegetation || (source isa VoxelScene && source.input !== nothing)
+            _voxel_id_type(source) === _voxel_id_type(step) || throw(ArgumentError(
+                "The voxel source and result have different individual ID types."))
+        end
         retained_area = _voxel_component_areas(step)
         all(i -> isapprox(retained_area[i], grid.pad[i] * volume; rtol=1e-12, atol=0),
             eachindex(retained_area)) || throw(ArgumentError(
@@ -206,6 +210,34 @@ end
 _voxel_query_selected(value, filter) = filter === nothing ||
     (filter isa Union{AbstractArray,Tuple,AbstractSet,AbstractRange} ? value in filter : value == filter)
 
+_voxel_query_id_type(source, data) = _voxel_id_type(source)
+_voxel_query_id_type(source, data::VoxelVegetationStepResult) = _voxel_id_type(data)
+function _voxel_query_id_type(source, data::AbstractVector{<:_VoxelLightResult})
+    result_type = eltype(data)
+    if result_type <: VoxelVegetationStepResult && isconcretetype(result_type)
+        return _voxel_id_type(result_type)
+    end
+    return isempty(data) ? _voxel_id_type(source) : _voxel_query_id_type(source, first(data))
+end
+
+function _check_voxel_individual_filter(::Type{ID}, filter) where {ID}
+    filter === nothing && return
+    values = if filter isa AbstractRange
+        isempty(filter) ? () : (first(filter), last(filter))
+    elseif filter isa Union{AbstractArray,Tuple,AbstractSet}
+        filter
+    else
+        (filter,)
+    end
+    for id in values
+        id === nothing && continue
+        identifier = _voxel_point_id(id, "individual query filter")
+        typeof(identifier) === ID || throw(ArgumentError(
+            "individual_id filter $(repr(id)) must match the scene's $ID IDs"))
+    end
+    return nothing
+end
+
 function _voxel_component_metric_energy(step::VoxelVegetationStepResult, index, metric)
     component = step.components[index]
     metric == :incident_par_initial_energy && return component.first_order_par_energy
@@ -270,7 +302,8 @@ including empty cells. Use the original source PAD and cell volume.
 Filtering by `individual_id` or `organ`, or grouping by either, selects
 voxel × individual × organ contributions from an identified JSONL result.
 These rows also carry `individual_id`, `organ`, and proxy `plant_area` (m²).
-IDs are strings; `individual_id=(nothing,)` selects unattributed vegetation.
+IDs retain the scene's `Int` or `String` type; filters must match that type.
+`individual_id=(nothing,)` selects unattributed vegetation.
 A shared voxel contributes only the selected individual's share of radiation.
 
 `domain=:ground` returns `step_number`, one-based `patch_id`, `material_id`,
@@ -310,15 +343,25 @@ function light_metric_values(source::_VoxelMetricSource,
     component_metric = component_flux ? Symbol(chop(String(selector); tail=5), "_energy") : selector
     single = data isa _VoxelLightResult
     steps = single ? (data,) : data
+    ID = _voxel_query_id_type(source, data)
+    if source isa VoxelVegetation || (source isa VoxelScene && source.input !== nothing)
+        _voxel_id_type(source) === ID || throw(ArgumentError(
+            "The voxel source and result have different individual ID types."))
+    end
+    attributed && _check_voxel_individual_filter(ID, individual_id)
     spatial = (step_number=Int[], voxel_i=Int[], voxel_j=Int[], voxel_k=Int[])
     table = if domain == :ground
         (step_number=Int[], patch_id=Int[], material_id=Int[], surface_area=Float64[], value=Float64[])
     elseif attributed
-        merge(spatial, (individual_id=Union{Nothing,String}[], organ=Symbol[], plant_area=Float64[], value=Float64[]))
+        merge(spatial, (individual_id=Union{Nothing,ID}[], organ=Symbol[], plant_area=Float64[], value=Float64[]))
     else
         merge(spatial, (value=Float64[],))
     end
     for (number, step) in enumerate(steps)
+        if step isa VoxelVegetationStepResult
+            _voxel_id_type(step) === ID || throw(ArgumentError(
+                "a voxel result series must use one individual ID type"))
+        end
         _check_voxel_result_source(source, step)
         if domain == :ground
             field = _voxel_ground_metric(step, selector)
@@ -363,8 +406,8 @@ function light_metric_values(source::_VoxelMetricSource,
     _light_query_finish(table, reduce, by, sink, single, length(steps))
 end
 
-function _voxel_component_columns(rows, duration, conversion;
-    voxel_indices=nothing, initial_absorbed)
+function _voxel_component_columns(::Type{ID}, rows, duration, conversion;
+    voxel_indices=nothing, initial_absorbed) where {ID}
     area = Float64[row.plant_area for row in rows]
     energy(field) = Float64[getproperty(row, field) for row in rows]
     flux(values) = Float64[area[i] == 0 || duration == 0 ? 0.0 :
@@ -373,7 +416,7 @@ function _voxel_component_columns(rows, duration, conversion;
     p, n = energy(:total_intercepted_par_energy), energy(:total_intercepted_nir_energy)
     ap, an = energy(:absorbed_par_energy), energy(:absorbed_nir_energy)
     apf, anf = flux(ap), flux(an)
-    identities = (individual_id=Union{Nothing,String}[row.individual_id for row in rows],
+    identities = (individual_id=Union{Nothing,ID}[row.individual_id for row in rows],
         organ=Symbol[row.organ for row in rows], plant_area=area)
     if voxel_indices !== nothing
         identities = merge((voxel_i=Int[index[1] for index in voxel_indices],
@@ -422,12 +465,12 @@ materials of this result, independently of later model changes.
 `level=:individual` combines each
 individual/organ across voxels, summing energies and area-weighting fluxes.
 """
-function component_values(step::VoxelVegetationStepResult; level::Symbol=:component,
-                          par_energy_to_photon::Real=4.57)
+function component_values(step::VoxelVegetationStepResult{ID}; level::Symbol=:component,
+                          par_energy_to_photon::Real=4.57) where {ID}
     conversion = _validated_par_energy_to_photon(par_energy_to_photon)
     initial_absorbed = _voxel_initial_component_absorption(step)
     if level == :component
-        return _voxel_component_columns(step.components, step.light.duration_seconds, conversion;
+        return _voxel_component_columns(ID, step.components, step.light.duration_seconds, conversion;
             voxel_indices=[component.voxel for component in step.components], initial_absorbed)
     elseif level == :individual
         rows = voxel_component_values(step)
@@ -438,7 +481,7 @@ function component_values(step::VoxelVegetationStepResult; level::Symbol=:compon
             par[position] += initial_absorbed.par[index]
             nir[position] += initial_absorbed.nir[index]
         end
-        return _voxel_component_columns(rows, step.light.duration_seconds, conversion;
+        return _voxel_component_columns(ID, rows, step.light.duration_seconds, conversion;
             initial_absorbed=(; par, nir))
     end
     throw(ArgumentError("Voxel component level must be :component or :individual."))

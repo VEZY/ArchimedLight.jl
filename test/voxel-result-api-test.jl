@@ -117,7 +117,7 @@ end
         vec(result.scattering.par.total_intercepted_energy ./ (60 .* area))
 
     input = VoxelPointInput(grid, falses(size(grid)), Dict{String,Any}(), [1, 2, 3],
-        [VoxelPointComponent("17", :leaf, 1), VoxelPointComponent("17", :leaf, 1)],
+        [VoxelPointComponent(17, :leaf, 1), VoxelPointComponent(17, :leaf, 1)],
         ones(Int, size(grid)))
     material = VoxelMaterial(g=0.3, par_reflectance=0.2, nir_reflectance=0.5)
     vegetation = VoxelVegetation(input; mode=:point_proxy, leaf=material)

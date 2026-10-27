@@ -8,7 +8,7 @@
     @test occursin("Bounds: (10.0, -2.0, 0.0) → (13.0, 2.0, 3.0) m", summary)
     @test occursin("PAD: 4 positive, 1 known empty, 1 unknown", summary)
     @test occursin("zero-imputed; not observed empty", summary)
-    @test occursin("Observed individuals: 2 (IDs: \"17\", \"204\")", summary)
+    @test occursin("Observed individuals: 2 (IDs: 17, 204)", summary)
     # Includes two wood observations in the observed zero-PAD voxel.
     @test occursin("Identified points: 15 (leaf 7, wood 4, unknown organ 4)", summary)
     @test occursin("Filtered raw point counts, not surface areas", summary)

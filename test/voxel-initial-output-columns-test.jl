@@ -13,7 +13,7 @@
     individual_leaf = VoxelMaterial(leaf; par_reflectance=0.25, nir_reflectance=0.2)
     soil = opaque(par=0.4, nir=0.4)
     models = models_for(; mode=:point_proxy, leaf, wood, unknown, ground=soil,
-        individuals=Dict("17" => (leaf=individual_leaf,)))
+        individuals=Dict(17 => (leaf=individual_leaf,)))
     row = (step_duration=90., Ri_PAR_f=100., Ri_NIR_f=70., direct_fraction=0.6,
         sun_azimuth=130., sun_elevation=40.)
     backend = VoxelCPUBackend(rays_per_voxel=4)
@@ -29,7 +29,7 @@
         expected_par = zeros(size(scene.grid))
         expected_nir = zeros(size(scene.grid))
         for part in parts
-            material = part.individual_id == "17" && part.organ == :leaf ?
+            material = part.individual_id == 17 && part.organ == :leaf ?
                 individual_leaf : (leaf=leaf, wood=wood, unknown=unknown)[part.organ]
             par = part.Ri_PAR_0_q * (1 - material.par_reflectance - material.par_transmittance)
             nir = part.Ri_NIR_0_q * (1 - material.nir_reflectance - material.nir_transmittance)

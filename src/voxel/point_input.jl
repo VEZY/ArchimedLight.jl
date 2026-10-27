@@ -1,8 +1,18 @@
 """One observed individual/organ point count, not a measured surface area."""
-struct VoxelPointComponent
-    individual_id::String
+struct VoxelPointComponent{ID<:Union{Int,String}}
+    individual_id::ID
     organ::Symbol
     count::Int
+    function VoxelPointComponent{ID}(individual_id::ID, organ::Symbol, count::Int) where {ID<:Union{Int,String}}
+        ID === Int || ID === String ||
+            throw(ArgumentError("voxel individual IDs must use one concrete type, Int or String"))
+        new{ID}(individual_id, organ, count)
+    end
+end
+
+function VoxelPointComponent(individual_id, organ::Symbol, count::Int)
+    identifier = _voxel_point_id(individual_id, "voxel point component")
+    return VoxelPointComponent{typeof(identifier)}(identifier, organ, count)
 end
 
 """
@@ -17,15 +27,48 @@ voxel index `v`, its components are `components[offsets[v]:offsets[v+1]-1]`.
 `point_count` is the number of filtered, identified points in each voxel.
 Individuals absent from that filtered population remain unassigned vegetation;
 their area must not be inferred from zero point counts.
+
+One input uses either positive `Int` IDs or nonempty `String` IDs throughout;
+integer IDs are retained as integers. Mixed ID types are rejected.
 """
-struct VoxelPointInput
+struct VoxelPointInput{ID<:Union{Int,String}}
     grid::VoxelGrid{Float64}
     missing_pad::BitArray{3}
     metadata::Dict{String,Any}
     offsets::Vector{Int}
-    components::Vector{VoxelPointComponent}
+    components::Vector{VoxelPointComponent{ID}}
     point_count::Array{Int,3}
+    function VoxelPointInput{ID}(grid, missing_pad, metadata, offsets,
+        components::Vector{VoxelPointComponent{ID}}, point_count) where {ID<:Union{Int,String}}
+        ID === Int || ID === String ||
+            throw(ArgumentError("voxel individual IDs must use one concrete type, Int or String"))
+        new{ID}(grid, missing_pad, metadata, offsets, components, point_count)
+    end
 end
+
+VoxelPointInput(grid, missing_pad, metadata, offsets,
+    components::Vector{VoxelPointComponent{ID}}, point_count) where {ID<:Union{Int,String}} =
+    VoxelPointInput{ID}(grid, missing_pad, metadata, offsets, components, point_count)
+
+# Manual construction may provide an abstract component vector. Infer its
+# homogeneous ID type once, then retain only a concretely typed vector.
+function VoxelPointInput(grid, missing_pad, metadata, offsets,
+    components::AbstractVector{<:VoxelPointComponent}, point_count)
+    ID = if isempty(components)
+        eltype(components) <: VoxelPointComponent{String} ? String : Int
+    else
+        typeof(first(components).individual_id)
+    end
+    all(component -> component.individual_id isa ID, components) ||
+        throw(ArgumentError("voxel input cannot mix integer and string individual IDs"))
+    typed = VoxelPointComponent{ID}[
+        VoxelPointComponent(component.individual_id, component.organ, component.count)
+        for component in components
+    ]
+    return VoxelPointInput(grid, missing_pad, metadata, offsets, typed, point_count)
+end
+
+_voxel_id_type(::VoxelPointInput{ID}) where {ID} = ID
 
 PlanarTerrain(input::VoxelPointInput; kwargs...) = PlanarTerrain(input.grid; kwargs...)
 
@@ -77,7 +120,7 @@ function _voxel_point_id(value, label)
         isempty(value) && throw(ArgumentError("$label tree_id cannot be empty"))
         return String(value)
     end
-    return string(_voxel_point_integer(value, "$label tree_id"; positive=true))
+    return _voxel_point_integer(value, "$label tree_id"; positive=true)
 end
 
 function _voxel_point_record(line, line_number)
@@ -114,7 +157,8 @@ function _read_voxel_point_input(io::IO, missing_pad_policy::Symbol)
     missing_mask = trues(dimensions)
     seen = falses(dimensions)
     point_count = zeros(Int, dimensions)
-    components = VoxelPointComponent[]
+    components = VoxelPointComponent{Int}[]
+    identifier_type = nothing
     owners = Int[]
     component_counts = zeros(Int, cell_count)
     linear_indices = LinearIndices(pad)
@@ -147,12 +191,23 @@ function _read_voxel_point_input(io::IO, missing_pad_policy::Symbol)
         point_count[index...] = total
         trees = _voxel_point_field(record, "trees", label)
         trees isa AbstractVector || throw(ArgumentError("$label trees must be an array"))
-        identifiers = Set{String}()
+        identifiers = identifier_type === String ? Set{String}() : Set{Int}()
         counted = 0
         voxel_id = linear_indices[index...]
         for tree in trees
             tree isa AbstractDict || throw(ArgumentError("$label tree must be an object"))
             identifier = _voxel_point_id(_voxel_point_field(tree, "tree_id", label), label)
+            if identifier_type === nothing
+                identifier_type = typeof(identifier)
+                if identifier_type === String
+                    components = VoxelPointComponent{String}[]
+                    identifiers = Set{String}()
+                end
+            elseif typeof(identifier) !== identifier_type
+                throw(ArgumentError(
+                    "$label mixes integer and string tree_id values; use one ID type throughout the scene",
+                ))
+            end
             identifier in identifiers && throw(ArgumentError("$label repeats tree_id $identifier"))
             push!(identifiers, identifier)
             number = _voxel_point_integer(
@@ -212,7 +267,10 @@ Stream the existing PointCloud2Model `schema_version="1.0"` `.jsonl` or
 converted explicitly to Julia indices; record order is unrestricted.
 
 Tree and organ ratios describe filtered LiDAR **point counts**, not measured
-area fractions. Positive PAD without identified points is retained. Null or
+area fractions. Positive integer `tree_id` values remain `Int`; nonempty string
+IDs remain `String`. Every tree record in one file must use the same ID type,
+including records in zero-PAD voxels. An input without identities uses `Int`.
+Positive PAD without identified points is retained. Null or
 omitted PAD is rejected by default. With `missing_pad=:zero_with_diagnostics`,
 it is explicitly imputed as zero in `grid.pad`, with every such cell retained
 in the returned `missing_pad` mask. This does not establish empty vegetation.

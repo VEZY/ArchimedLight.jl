@@ -53,7 +53,7 @@ end
         identified_area_fraction=assigned)
     models_b = models_for(; mode=:point_proxy, leaf, wood, unknown,
         ground=opaque(par=0.6, nir=0.4),
-        individuals=Dict("17" => (leaf=(par_reflectance=0.3,),)))
+        individuals=Dict(17 => (leaf=(par_reflectance=0.3,),)))
     figures = Figure[]
     update_models!(scene, models_a)
     figure, _, geometry = lightplot(scene; color=:unknown_fraction)

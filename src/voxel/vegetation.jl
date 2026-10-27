@@ -40,8 +40,8 @@ function VoxelMaterial(base::VoxelMaterial;
                          nir_reflectance, nir_transmittance)
 end
 
-struct VoxelVegetationComponent
-    individual_id::Union{Nothing,String}
+struct VoxelVegetationComponent{ID<:Union{Int,String}}
+    individual_id::Union{Nothing,ID}
     organ::Symbol
     density::Float64
     material::VoxelMaterial
@@ -58,20 +58,22 @@ By default all PAD is assigned to identified individuals where points exist;
 otherwise it remains `(nothing, :unknown)`. An explicit scalar or grid-aligned
 `identified_area_fraction` retains the remaining PAD as unattributed vegetation.
 
-`individuals` maps string IDs to named tuples containing optional `leaf`,
-`wood`, and `unknown` overrides. Complete VoxelMaterial values replace that
+`individuals` maps IDs of the input's type (`Int` or `String`) to named tuples
+containing optional `leaf`, `wood`, and `unknown` overrides. Complete VoxelMaterial values replace that
 organ's material; parameter named tuples inherit the organ default. A missing
 default is allowed when every participating individual/organ supplies a full
 material. Wood must have zero transmittance. Unattributed vegetation uses the
 default `unknown` material. For scene workflows, declare these defaults with
 [`models_for`](@ref) and pass the returned configuration to [`run_light`](@ref).
 """
-struct VoxelVegetation
-    input::VoxelPointInput
+struct VoxelVegetation{ID<:Union{Int,String}}
+    input::VoxelPointInput{ID}
     offsets::Vector{Int}
-    components::Vector{VoxelVegetationComponent}
+    components::Vector{VoxelVegetationComponent{ID}}
     mode::Symbol
 end
+
+_voxel_id_type(::VoxelVegetation{ID}) where {ID} = ID
 
 PlanarTerrain(vegetation::VoxelVegetation; kwargs...) = PlanarTerrain(vegetation.input; kwargs...)
 
@@ -97,12 +99,26 @@ function _voxel_material_override(base, value)
     VoxelMaterial(base; value...)
 end
 
-function _resolve_voxel_individual_materials(defaults, individuals, available=nothing)
-    resolved = Dict{String,NamedTuple}()
+function _resolve_voxel_individual_materials(defaults, individuals)
+    id_type = individuals isa AbstractDict && keytype(individuals) <: AbstractString ? String : nothing
+    for (raw_id, _) in pairs(individuals)
+        id = _voxel_point_id(raw_id, "individual material override")
+        id_type === nothing && (id_type = typeof(id))
+        typeof(id) === id_type || throw(ArgumentError(
+            "individual material overrides must use one ID type: Int or String"))
+    end
+    return _resolve_voxel_individual_materials(defaults, individuals, something(id_type, Int))
+end
+
+function _resolve_voxel_individual_materials(defaults, individuals, ::Type{ID},
+    available=nothing) where {ID<:Union{Int,String}}
+    resolved = Dict{ID,NamedTuple}()
     for (id, materials) in pairs(individuals)
-        id isa AbstractString || throw(ArgumentError("individual IDs must be strings"))
-        available === nothing || String(id) in available || throw(ArgumentError(
-            "material override must reference an existing string individual ID: $id"))
+        identifier = _voxel_point_id(id, "individual material override")
+        typeof(identifier) === ID || throw(ArgumentError(
+            "individual material override ID $(repr(id)) must match the scene's $ID IDs"))
+        available === nothing || identifier in available || throw(ArgumentError(
+            "material override must reference an existing individual ID: $(repr(id))"))
         materials isa NamedTuple || throw(ArgumentError("individual materials must be a named tuple"))
         all(key -> key in (:leaf, :wood, :unknown), keys(materials)) ||
             throw(ArgumentError("individual materials may only override leaf, wood, unknown"))
@@ -111,7 +127,7 @@ function _resolve_voxel_individual_materials(defaults, individuals, available=no
         end
         model = NamedTuple{(:leaf, :wood, :unknown)}(parts)
         _check_voxel_wood(model.wood)
-        resolved[String(id)] = model
+        resolved[identifier] = model
     end
     resolved
 end
@@ -122,16 +138,16 @@ function _required_voxel_material(value, id, organ)
         "no $organ material for individual $(repr(id)); supply an organ default or a full individual material"))
 end
 
-function VoxelVegetation(input::VoxelPointInput; mode::Symbol,
+function VoxelVegetation(input::VoxelPointInput{ID}; mode::Symbol,
                          leaf::Union{Nothing,VoxelMaterial}=nothing,
                          wood::Union{Nothing,VoxelMaterial}=VoxelMaterial(),
                          unknown::Union{Nothing,VoxelMaterial}=VoxelMaterial(), individuals=Dict(),
-                         identified_area_fraction=nothing)
+                         identified_area_fraction=nothing) where {ID}
     mode == :point_proxy || throw(ArgumentError("only mode=:point_proxy is supported"))
     _check_voxel_wood(wood)
     defaults = (leaf=leaf, wood=wood, unknown=unknown)
-    available = Set(component.individual_id for component in input.components)
-    overrides = _resolve_voxel_individual_materials(defaults, individuals, available)
+    available = Set{ID}(component.individual_id for component in input.components)
+    overrides = _resolve_voxel_individual_materials(defaults, individuals, ID, available)
     fraction = identified_area_fraction
     fraction === nothing || fraction isa Real ||
         (fraction isa AbstractArray && size(fraction) == size(input.grid)) ||
@@ -141,7 +157,7 @@ function VoxelVegetation(input::VoxelPointInput; mode::Symbol,
             fraction isa Real ? (fraction,) : fraction) ||
             throw(ArgumentError("identified_area_fraction must be finite and lie in [0, 1]"))
     end
-    components = VoxelVegetationComponent[]
+    components = VoxelVegetationComponent{ID}[]
     offsets = Int[1]
     for index in eachindex(input.grid.pad)
         density = input.grid.pad[index]
@@ -160,13 +176,13 @@ function VoxelVegetation(input::VoxelPointInput; mode::Symbol,
                 material = _required_voxel_material(
                     get(overrides, point.individual_id, defaults)[point.organ],
                     point.individual_id, point.organ)
-                push!(components, VoxelVegetationComponent(
+                push!(components, VoxelVegetationComponent{ID}(
                     point.individual_id, point.organ, part, material,
                 ))
             end
             remainder = density * (1 - gamma)
             if remainder > 0
-                push!(components, VoxelVegetationComponent(nothing, :unknown, remainder,
+                push!(components, VoxelVegetationComponent{ID}(nothing, :unknown, remainder,
                     _required_voxel_material(unknown, nothing, :unknown)))
             end
         end
@@ -215,9 +231,9 @@ end
 """One voxel × individual × organ light diagnostic; energies are joules per step.
 `plant_area` is equivalent proxy area in m², not a measured botanical surface.
 """
-struct VoxelComponentLight
+struct VoxelComponentLight{ID<:Union{Int,String}}
     voxel::NTuple{3,Int}
-    individual_id::Union{Nothing,String}
+    individual_id::Union{Nothing,ID}
     organ::Symbol
     plant_area::Float64
     first_order_par_energy::Float64
@@ -233,14 +249,17 @@ and the original missing-PAD mask (including explicitly imputed cells).
 The resolved vegetation model is retained so later model changes do not alter
 material-dependent diagnostics of this result.
 """
-struct VoxelVegetationStepResult
+struct VoxelVegetationStepResult{ID<:Union{Int,String}}
     light::VoxelLightStepResult{Float64}
-    components::Vector{VoxelComponentLight}
+    components::Vector{VoxelComponentLight{ID}}
     missing_pad::BitArray{3}
-    vegetation::VoxelVegetation
+    vegetation::VoxelVegetation{ID}
 end
 
-function _voxel_vegetation_result(model::VoxelVegetation, light::VoxelLightStepResult)
+_voxel_id_type(::VoxelVegetationStepResult{ID}) where {ID} = ID
+_voxel_id_type(::Type{VoxelVegetationStepResult{ID}}) where {ID} = ID
+
+function _voxel_vegetation_result(model::VoxelVegetation{ID}, light::VoxelLightStepResult) where {ID}
     grid = model.input.grid
     first = light.first_order
     _voxel_flux_from_energy!(first.par_flux, first.par_energy, grid, light.duration_seconds)
@@ -252,7 +271,7 @@ function _voxel_vegetation_result(model::VoxelVegetation, light::VoxelLightStepR
         _voxel_flux_from_energy!(scatter.nir.absorbed_flux, scatter.nir.absorbed_energy,
                                 grid, light.duration_seconds)
     end
-    components = VoxelComponentLight[]
+    components = VoxelComponentLight{ID}[]
     sizehint!(components, length(model.components))
     indices = CartesianIndices(grid.pad)
     for v in eachindex(grid.pad)
@@ -280,7 +299,7 @@ function _voxel_vegetation_result(model::VoxelVegetation, light::VoxelLightStepR
                 (alpha_par == 0 ? 0.0 : ap / alpha_par * scatter.par.absorbed_energy[v])
             absorbed_nir = scatter === nothing ? an / kappa * first.nir_energy[v] :
                 (alpha_nir == 0 ? 0.0 : an / alpha_nir * scatter.nir.absorbed_energy[v])
-            push!(components, VoxelComponentLight(Tuple(indices[v]), part.individual_id,
+            push!(components, VoxelComponentLight{ID}(Tuple(indices[v]), part.individual_id,
                 part.organ, part.density * voxel_volume(grid),
                 share * first.par_energy[v], share * first.nir_energy[v],
                 share * total_par, share * total_nir, absorbed_par, absorbed_nir))
@@ -323,9 +342,9 @@ Sum sparse light diagnostics by `(individual_id, organ)` across voxels.
 Unattributed vegetation retains `individual_id=nothing`. Only `organ=:leaf`
 absorbed PAR represents leaf APAR. Returned energies are J per step.
 """
-function voxel_component_values(result::VoxelVegetationStepResult)
-    totals = Dict{Tuple{Union{Nothing,String},Symbol},Vector{Float64}}()
-    order = Tuple{Union{Nothing,String},Symbol}[]
+function voxel_component_values(result::VoxelVegetationStepResult{ID}) where {ID}
+    totals = Dict{Tuple{Union{Nothing,ID},Symbol},Vector{Float64}}()
+    order = Tuple{Union{Nothing,ID},Symbol}[]
     for component in result.components
         key = (component.individual_id, component.organ)
         if !haskey(totals, key)

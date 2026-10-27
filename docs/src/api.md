@@ -161,7 +161,7 @@ models = models_for(;
     mode=:point_proxy, leaf,
     wood=VoxelMaterial(), unknown=VoxelMaterial(),
     ground=opaque(par=0.12, nir=0.32),
-    individuals=Dict("12" => (leaf=(nir_reflectance=0.40,),)),
+    individuals=Dict(12 => (leaf=(nir_reflectance=0.40,),)),
 )
 result = run_light(scene, meteo_row; models, options, backend=VoxelCPUBackend())
 series = run_light(scene, meteo; models, options, backend=VoxelCPUBackend())
@@ -560,8 +560,12 @@ The default vegetation table contains `step_number`, `voxel_i`, `voxel_j`,
 `voxel_k` and `value`. Individual/organ filters, or `by` containing
 `:individual_id`, `:organ` or `:plant_area`, select attributed component rows
 with those extra identity and proxy-area columns. This requires a mixed JSONL
-result. Individual IDs are strings; `individual_id=(nothing,)` selects
-unattributed vegetation. Organ values are `:leaf`, `:wood` and `:unknown`.
+result. Positive integer individual IDs remain `Int`; nonempty text IDs remain
+`String`. Each input and scene uses one concrete ID type, and model override
+keys and query filters must match that type. Mixed integer/text IDs are rejected.
+IDs are labels rather than array indices; text `"001"` is preserved.
+`individual_id=(nothing,)` selects unattributed vegetation. Organ values are
+`:leaf`, `:wood` and `:unknown`.
 
 `domain=:ground` returns `step_number`, `patch_id`, `material_id`,
 `surface_area` and `value`. Ground queries accept patch/material filters;

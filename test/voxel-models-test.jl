@@ -11,10 +11,10 @@
     unknown = VoxelMaterial(g=0.4, par_reflectance=0.05, nir_reflectance=0.1)
     soil = opaque(par=0.12, nir=0.32)
     models = models_for(; mode=:point_proxy, leaf, wood, unknown, ground=soil,
-        individuals=Dict("17" => (leaf=(nir_reflectance=0.3,), wood=(par_reflectance=0.25,))),
+        individuals=Dict(17 => (leaf=(nir_reflectance=0.3,), wood=(par_reflectance=0.25,))),
         ground_materials=Dict(2 => (nir=0.5,)))
     reference = VoxelVegetation(input; mode=:point_proxy, leaf, wood, unknown,
-        individuals=Dict("17" => (leaf=VoxelMaterial(leaf; nir_reflectance=0.3),
+        individuals=Dict(17 => (leaf=VoxelMaterial(leaf; nir_reflectance=0.3),
             wood=VoxelMaterial(wood; par_reflectance=0.25))))
     reference_terrain = ArchimedLight._with_terrain_materials(PlanarTerrain(input.grid; material_ids=ids), models_for(; ground_materials=Dict(1 => soil, 2 => opaque(par=0.12, nir=0.5))).ground_materials)
     row = (step_duration=60., Ri_PAR_f=100., Ri_NIR_f=50., direct_fraction=0.6,
@@ -69,7 +69,7 @@ end
     soil = opaque(par=0.15, nir=0.35)
     defaults = models_for(; mode=:point_proxy, leaf, wood, unknown, ground=soil)
     individuals = models_for(; mode=:point_proxy, leaf=nothing, wood=nothing, unknown,
-        individuals=Dict(id => (leaf=leaf, wood=wood, unknown=unknown) for id in ("17", "204")),
+        individuals=Dict(id => (leaf=leaf, wood=wood, unknown=unknown) for id in (17, 204)),
         ground_materials=Dict(1 => soil))
     row = (step_duration=60., Ri_PAR_f=100., Ri_NIR_f=50., direct_fraction=0.6,
         sun_azimuth=130., sun_elevation=40.)
@@ -82,13 +82,13 @@ end
     @test actual.light.scattering.nir.absorbed_energy == expected.light.scattering.nir.absorbed_energy
     @test actual.light.scattering.par.terrain_absorbed_energy == expected.light.scattering.par.terrain_absorbed_energy
     partial = models_for(; mode=:point_proxy, leaf, wood, unknown, ground=soil,
-        individuals=Dict("17" => (leaf=(nir_reflectance=0.3,),)))
+        individuals=Dict(17 => (leaf=(nir_reflectance=0.3,),)))
     changed = run_light(scene, row; models=partial, options, backend)
     @test changed.light.first_order.par_energy == expected.light.first_order.par_energy
     @test changed.light.scattering.par.absorbed_energy == expected.light.scattering.par.absorbed_energy
     @test changed.light.scattering.nir.absorbed_energy != expected.light.scattering.nir.absorbed_energy
     @test changed.vegetation.components == VoxelVegetation(input; mode=:point_proxy, leaf, wood, unknown,
-        individuals=Dict("17" => (leaf=VoxelMaterial(leaf; nir_reflectance=0.3),))).components
+        individuals=Dict(17 => (leaf=VoxelMaterial(leaf; nir_reflectance=0.3),))).components
     # Source-free initial absorption stays tied to the material model used for
     # this result, even after a later run uses different point allocations.
     initial = copy(light_metric_values(changed, :Ra_PAR_0_q))
@@ -120,21 +120,21 @@ end
     @test models_for() isa LightModels
     @test_throws ArgumentError models_for("plant" => ("Leaf" => translucent(par=0.1, nir=0.4),); leaf)
     @test_throws ArgumentError models_for(; mode=:other, leaf)
-    @test_throws ArgumentError models_for(; leaf, individuals=Dict(17 => (leaf=leaf,)))
-    @test_throws ArgumentError models_for(; leaf, individuals=Dict("17" => (bark=leaf,)))
-    @test_throws ArgumentError models_for(; leaf, individuals=Dict("17" => (leaf=(colour=0.2,),)))
-    @test_throws ArgumentError models_for(; leaf, individuals=Dict("17" => (leaf=(par_reflectance="0.2",),)))
-    @test_throws ArgumentError models_for(; leaf, individuals=Dict("17" => (leaf=(par_transmittance=1.,),)))
-    @test_throws ArgumentError models_for(; individuals=Dict("17" => (leaf=(nir_reflectance=0.3,),)))
+    @test haskey(models_for(; leaf, individuals=Dict(17 => (leaf=leaf,))).individuals, 17)
+    @test_throws ArgumentError models_for(; leaf, individuals=Dict(17 => (bark=leaf,)))
+    @test_throws ArgumentError models_for(; leaf, individuals=Dict(17 => (leaf=(colour=0.2,),)))
+    @test_throws ArgumentError models_for(; leaf, individuals=Dict(17 => (leaf=(par_reflectance="0.2",),)))
+    @test_throws ArgumentError models_for(; leaf, individuals=Dict(17 => (leaf=(par_transmittance=1.,),)))
+    @test_throws ArgumentError models_for(; individuals=Dict(17 => (leaf=(nir_reflectance=0.3,),)))
     @test_throws ArgumentError models_for(; leaf, wood=VoxelMaterial(par_transmittance=0.1))
-    @test_throws ArgumentError models_for(; leaf, individuals=Dict("17" => (wood=(nir_transmittance=0.1,),)))
+    @test_throws ArgumentError models_for(; leaf, individuals=Dict(17 => (wood=(nir_transmittance=0.1,),)))
     @test_throws ArgumentError models_for(; leaf, ground_materials=Dict(1 => (par=0.2,)))
     @test_throws ArgumentError models_for(; leaf, ground=soil, ground_materials=Dict(0 => soil))
     @test_throws ArgumentError models_for(; leaf, ground=soil, ground_materials=Dict("1" => soil))
     @test_throws ArgumentError models_for(; leaf, ground=soil, ground_materials=Dict(2 => (par_transmittance=0.1,)))
     for invalid in (
         models_for(; leaf, ground=soil),
-        models_for(; mode=:point_proxy, leaf, ground=soil, individuals=Dict("missing" => (leaf=leaf,))),
+        models_for(; mode=:point_proxy, leaf, ground=soil, individuals=Dict(999 => (leaf=leaf,))),
         models_for(; mode=:point_proxy, leaf, ground_materials=Dict(1 => soil)),
         models_for(; mode=:point_proxy, leaf, ground=soil, ground_materials=Dict(3 => soil)),
         models_for(; mode=:point_proxy, leaf=nothing, ground=soil),
@@ -202,7 +202,7 @@ end
     @test isempty(ArchimedLight._terrain_materials(scene.terrain))
     @test_throws ArgumentError run_light(scene, row; models=models_for(; ground=soil), backend)
     @test_throws ArgumentError run_light(scene, row; models=models_for(; leaf, ground=soil,
-        individuals=Dict("1" => (leaf=leaf,))), backend)
+        individuals=Dict(1 => (leaf=leaf,))), backend)
     input = read_voxel_point_input(joinpath(@__DIR__, "fixtures", "voxel", "point_input", "mixed.jsonl");
         missing_pad=:zero_with_diagnostics)
     absorber = VoxelMaterial()

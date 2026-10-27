@@ -38,23 +38,23 @@
     @test_throws ArgumentError VoxelVegetation(input; mode=:point_proxy, leaf=black,
         wood=VoxelMaterial(par_transmittance=0.01))
     @test_throws ArgumentError VoxelVegetation(input; mode=:point_proxy, leaf=black,
-        individuals=Dict("not-present" => (leaf=black,)))
+        individuals=Dict(999 => (leaf=black,)))
     @test_throws ArgumentError VoxelVegetation(input; mode=:point_proxy, leaf=black,
-        individuals=Dict("17" => (wood=VoxelMaterial(nir_transmittance=0.1),)))
+        individuals=Dict(17 => (wood=VoxelMaterial(nir_transmittance=0.1),)))
 end
 
 @testitem "Mixed voxel analytic extinction and per-individual optics" tags=[:voxel, :fast] begin
     grid = VoxelGrid((0, 0, 0), (1, 1, 1), fill(2.0, 1, 1, 1))
     # 30% individual 17, of which 20% is wood; 70% individual 204 leaf.
     input = VoxelPointInput(grid, falses(1,1,1), Dict{String,Any}(), [1,4],
-        [VoxelPointComponent("17", :leaf, 24), VoxelPointComponent("17", :wood, 6),
-         VoxelPointComponent("204", :leaf, 70)], fill(100,1,1,1))
+        [VoxelPointComponent(17, :leaf, 24), VoxelPointComponent(17, :wood, 6),
+         VoxelPointComponent(204, :leaf, 70)], fill(100,1,1,1))
     leaf = VoxelMaterial(g=0.4, par_reflectance=0.1, par_transmittance=0.05,
                          nir_reflectance=0.4, nir_transmittance=0.3)
     wood = VoxelMaterial(g=0.8, par_reflectance=0.2, nir_reflectance=0.3)
     special = VoxelMaterial(g=0.6)
     model = VoxelVegetation(input; mode=:point_proxy, leaf, wood,
-        individuals=Dict("204" => (leaf=special,)))
+        individuals=Dict(204 => (leaf=special,)))
     kappas = [0.48*0.4, 0.12*0.8, 1.4*0.6]
     kappa = sum(kappas)
     transport, optics = ArchimedLight._voxel_vegetation_transport(model, VoxelCPUBackend())

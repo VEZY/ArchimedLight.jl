@@ -27,12 +27,12 @@
     observations(index) = input.components[input.offsets[index]:input.offsets[index + 1]-1]
     # CSR storage is explicitly Julia order, independent of the export's row order.
     @test tuples(observations(1)) == [
-        ("17", :leaf, 3), ("17", :wood, 1), ("204", :leaf, 3), ("204", :unknown, 3),
+        (17, :leaf, 3), (17, :wood, 1), (204, :leaf, 3), (204, :unknown, 3),
     ]
     @test isempty(observations(2))  # Positive PAD without identified points survives.
     @test input.grid.pad[2, 1, 1] == 1.2
-    @test tuples(observations(3)) == [("17", :wood, 2)]  # Preserve zero-PAD diagnostics.
-    @test tuples(observations(5)) == [("204", :leaf, 1), ("204", :wood, 1), ("204", :unknown, 1)]
+    @test tuples(observations(3)) == [(17, :wood, 2)]  # Preserve zero-PAD diagnostics.
+    @test tuples(observations(5)) == [(204, :leaf, 1), (204, :wood, 1), (204, :unknown, 1)]
     @test sum(x.count for x in input.components) == sum(input.point_count)
 end
 

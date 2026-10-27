@@ -172,7 +172,7 @@ individual/organ contributions instead:
 
 ```julia
 leaf_apar = light_metric_values(voxel_scene, voxel_result, :Ra_PAR_q;
-    individual_id="12", organ=:leaf, reduce=sum)
+    individual_id=12, organ=:leaf, reduce=sum)
 individual_budget = light_metric_values(voxel_scene, voxel_series, :Ra_PAR_q;
     reduce=sum, by=(:individual_id, :organ))
 soil_budget = light_metric_values(voxel_scene, voxel_series, :Ra_PAR_q;
@@ -180,8 +180,10 @@ soil_budget = light_metric_values(voxel_scene, voxel_series, :Ra_PAR_q;
 ```
 
 These call shapes require an attributed JSONL result for individual/organ
-queries. IDs retain their input strings; `individual_id=(nothing,)` selects
-unattributed vegetation. Spatial voxel filters can further restrict these rows.
+queries. IDs retain their input type: positive integers are stored as `Int`,
+and text IDs as `String`. Each scene uses one ID type; filters must match it.
+`individual_id=(nothing,)` selects unattributed vegetation. Spatial voxel
+filters can further restrict these rows.
 Ground rows instead expose `patch_id`, `material_id` and `surface_area`.
 
 Triangle queries include every geometric component, including ground. A voxel

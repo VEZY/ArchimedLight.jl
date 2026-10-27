@@ -154,19 +154,32 @@ physical sun sector to receive that component. ArchimedLight then distributes
 the otherwise unrepresentable direct share over the available turtle sectors;
 this conservative fallback preserves the supplied full-step energy.
 
-### `scene_rotation`
+### [`scene_rotation`](@id scene_rotation)
 
-Rotation in degrees between geographic north and the scene's local coordinate
-system. Positive values rotate the geographic sun clockwise into local plot
-coordinates, matching ARCHIMED's compass-angle convention.
+Clockwise rotation, in degrees, applied to the geographic sun direction to
+express it in scene coordinates, matching ARCHIMED's compass-angle convention.
+The equivalent Julia constructor keyword is `LightOptions(scene_rotation_deg=...)`.
+The convention is `local_azimuth = mod(geographic_azimuth + scene_rotation, 360)`.
+
+If the scene's positive `y` axis has geographic bearing `θ`, measured clockwise
+from geographic north, use `scene_rotation = -θ`. For example, positive `y`
+pointing 30° east of north requires `scene_rotation_deg=-30.0`. Zero assumes
+positive `y` points toward geographic north, or accepts its alignment as an
+explicit approximation. This setting changes illumination alignment while
+retaining the scene geometry and its coordinate frame.
+
+For an east/north/elevation point cloud with no additional AMAPVox rotation,
+voxel index `j` follows grid north. Grid north can differ from geographic
+north, and AMAPVox's standard `.vox` header does not encode that difference.
+See [Coordinates, Grid North And Scene Rotation](@ref voxel-scene-orientation)
+for input assumptions and when to account for grid convergence.
 
 The diffuse turtle sectors themselves remain fixed in the scene-local basis.
 Only the geographic sun is transformed; clear-sky brightness and direct-beam
 weights are then evaluated against that transformed sun. This keeps the
 projection directions and local artificial-emitter quadrature stable while
 correctly changing which local directions receive anisotropic sky and direct
-radiation. The equivalent Julia constructor keyword is
-`LightOptions(scene_rotation_deg=...)`.
+radiation.
 
 ### `pixel_size`
 

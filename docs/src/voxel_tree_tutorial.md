@@ -78,6 +78,11 @@ assumption rather than an estimated MNT.
 
 ## Check That The File Format Alone Changes Nothing
 
+This synthetic example takes positive `y` as geographic north and uses
+`scene_rotation_deg=0.0`. For measured AMAPVox inputs, check the final scene
+frame and the distinction between grid and geographic north before choosing
+the rotation; see [Coordinates, Grid North And Scene Rotation](@ref voxel-scene-orientation).
+
 First give every component the same black material and the same projection
 coefficient. The plain PAD calculation and the individual/organ calculation
 must then intercept the same amount of radiation in every voxel.
@@ -99,6 +104,7 @@ row = (
 )
 first_options = LightOptions(
     toricity=false, scattering=false, turtle_sectors=6, all_in_turtle=true,
+    scene_rotation_deg=0.0,
 )
 backend = VoxelCPUBackend(g=0.5, rays_per_voxel=4)
 
@@ -146,19 +152,19 @@ models = models_for(; mode=:point_proxy, leaf, wood, unknown, ground=soil)
 models
 ```
 
-The example has one individual: numeric `tree_id=1` in the file becomes
-string ID `"1"` for model lookup. To modify only this tree's leaf NIR
-reflectance, supply a partial override:
+The example has one individual: numeric `tree_id=1` in the file remains
+integer ID `1` for model lookup and output queries. To modify only this tree's
+leaf NIR reflectance, supply a partial override:
 
 ```@example voxel_tree
 individual_models = models_for(;
     mode=:point_proxy, leaf, wood, unknown, ground=soil,
-    individuals=Dict("1" => (leaf=(nir_reflectance=0.40,),)),
+    individuals=Dict(1 => (leaf=(nir_reflectance=0.40,),)),
 )
 ```
 
 A partial named tuple inherits every omitted parameter from the global organ
-material. Here tree `"1"` keeps the default leaf PAR coefficients, NIR
+material. Here tree `1` keeps the default leaf PAR coefficients, NIR
 transmittance and `g`; its wood and unknown material also stay unchanged. A
 complete `VoxelMaterial` instead replaces that organ's whole material. Use the
 same pattern for several IDs in a multi-tree file. IDs absent from the input
@@ -172,7 +178,7 @@ individual:
 ```@example voxel_tree
 individual_only_models = models_for(;
     mode=:point_proxy, ground=soil,
-    individuals=Dict("1" => (leaf=leaf, wood=wood)),
+    individuals=Dict(1 => (leaf=leaf, wood=wood)),
 )
 isempty(check_models(mixed_scene, individual_only_models).errors)
 ```
@@ -299,9 +305,9 @@ shared voxels rather than attributing the whole voxel to every tree:
 
 ```@example voxel_tree
 leaf_apar = light_metric_values(mixed_scene, mixed_result, :Ra_PAR_q;
-    individual_id="1", organ=:leaf, reduce=sum)
+    individual_id=1, organ=:leaf, reduce=sum)
 wood_absorbed = light_metric_values(mixed_scene, mixed_result, :Ra_PAR_q;
-    individual_id="1", organ=:wood, reduce=sum)
+    individual_id=1, organ=:wood, reduce=sum)
 individual_budget = light_metric_values(mixed_scene, mixed_result, :Ra_PAR_q;
     reduce=sum, by=(:individual_id, :organ))
 individual_budget
@@ -331,7 +337,10 @@ plant area. Sum energies for a scene budget; use
 individual/organ fluxes. The wide component table includes initial and total
 PAR/NIR incident and absorbed energy/flux, plus `Ra_SW_f` and `aPPFD`.
 
-IDs are strings from the input. `individual_id=(nothing,)` selects unattributed
+IDs retain their input type: this scene uses `Int`, so filter with
+`individual_id=1`. A separate scene may use text IDs such as `"oak-A"`; mixed
+integer and text IDs are rejected, and model keys and query filters must match
+the scene's ID type. `individual_id=(nothing,)` selects unattributed
 vegetation; this synthetic example has none. Organs are `:leaf`, `:wood` or
 `:unknown`. Voxel coordinate filters and a `where` row predicate can further
 restrict a vegetation selection.

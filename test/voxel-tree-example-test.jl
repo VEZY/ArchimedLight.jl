@@ -9,7 +9,7 @@
     @test grid.pad == input.grid.pad
     @test count(>(0), grid.pad) == 65
     @test !any(input.missing_pad)
-    @test Set(c.individual_id for c in input.components) == Set(["1"])
+    @test Set(c.individual_id for c in input.components) == Set([1])
     @test sum(input.point_count) == 6500
     @test sum(c.count for c in input.components) == sum(input.point_count)
     @test count(c -> c.organ == :wood && c.count == 100, input.components) == 4
@@ -17,7 +17,7 @@
     @test count(c -> c.organ == :leaf && c.count == 90, input.components) == 61
     @test all(c -> c.organ in (:leaf, :wood), input.components)
     @test occursin("synthetic", input.metadata["point_filter"])
-    @test occursin("1 (IDs: \"1\")", sprint(show, MIME"text/plain"(), input))
+    @test occursin("1 (IDs: 1)", sprint(show, MIME"text/plain"(), input))
 
     soil = opaque(par=0.12, nir=0.32)
     terrain = ArchimedLight._with_terrain_materials(read_ply_terrain(joinpath(directory, "terrain.ply")), models_for(; ground_materials=Dict(1 => soil)).ground_materials)
@@ -57,7 +57,7 @@ end
     @test generic.first_order.nir_energy ≈ mixed.light.first_order.nir_energy
     components = voxel_component_values(mixed)
     @test Set(c.organ for c in components) == Set([:leaf, :wood])
-    @test all(c -> c.individual_id == "1", components)
+    @test all(c -> c.individual_id == 1, components)
     @test all(c -> c.absorbed_par_energy > 0, components)
     for band in (:par, :nir)
         spectral = getproperty(mixed.light.scattering, band)
@@ -69,7 +69,7 @@ end
     # Changing only tree 1's leaf NIR reflectance retains its PAR coefficients,
     # leaves the source observations untouched, and changes NIR absorption.
     changed = models_for(; mode=:point_proxy, leaf, wood, ground=soil,
-        individuals=Dict("1" => (leaf=(nir_reflectance=0.4,),)))
+        individuals=Dict(1 => (leaf=(nir_reflectance=0.4,),)))
     updated = run_light(scene, row; models=changed, options, backend)
     @test updated.light.first_order.par_energy == mixed.light.first_order.par_energy
     @test updated.light.scattering.par.absorbed_energy == mixed.light.scattering.par.absorbed_energy

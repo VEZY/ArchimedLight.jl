@@ -14,23 +14,32 @@ to [`run_light`](@ref) overrides it for that call without mutating the scene.
 Use [`add_ground!`](@ref) for ground geometry; supply its soil optics through
 the model configuration.
 """
-mutable struct VoxelScene
+mutable struct VoxelScene{ID<:Union{Int,String}}
     grid::VoxelGrid{Float64}
-    input::Union{Nothing,VoxelPointInput}
-    models::Union{Nothing,VoxelModels}
+    input::Union{Nothing,VoxelPointInput{ID}}
+    models::Union{Nothing,VoxelModels{ID}}
     terrain::AbstractVoxelTerrain
     missing_pad::BitArray{3}
     metadata::Dict{String,Any}
+    function VoxelScene{ID}(grid, input, models, terrain, missing_pad,
+        metadata) where {ID<:Union{Int,String}}
+        ID === Int || ID === String || throw(ArgumentError(
+            "voxel scenes must use one concrete individual ID type, Int or String"))
+        new{ID}(grid, input, models, terrain, missing_pad, metadata)
+    end
 end
+
+_voxel_id_type(::VoxelScene{ID}) where {ID} = ID
+_voxel_id_type(::VoxelGrid) = Int
 
 function VoxelScene(grid::VoxelGrid{Float64}; terrain::AbstractVoxelTerrain=NoVoxelTerrain())
     _validate_terrain_for_grid(grid, terrain, false)
-    VoxelScene(grid, nothing, nothing, terrain, falses(size(grid)), Dict{String,Any}())
+    VoxelScene{Int}(grid, nothing, nothing, terrain, falses(size(grid)), Dict{String,Any}())
 end
 
-function VoxelScene(input::VoxelPointInput; terrain::AbstractVoxelTerrain=NoVoxelTerrain())
+function VoxelScene(input::VoxelPointInput{ID}; terrain::AbstractVoxelTerrain=NoVoxelTerrain()) where {ID}
     _validate_terrain_for_grid(input.grid, terrain, false)
-    VoxelScene(input.grid, input, nothing, terrain, input.missing_pad, input.metadata)
+    VoxelScene{ID}(input.grid, input, nothing, terrain, input.missing_pad, input.metadata)
 end
 
 function _read_voxel_scene(path; missing_pad::Symbol=:error, pad_column=:auto,
@@ -73,8 +82,8 @@ end
 Set the model configuration used by subsequent runs. Geometry and observed PAD
 are unchanged; the models are resolved against the current scene at run time.
 """
-function update_models!(scene::VoxelScene, models::VoxelModels)
-    scene.models = models
+function update_models!(scene::VoxelScene{ID}, models::VoxelModels) where {ID}
+    scene.models = _voxel_models_for_id(models, ID)
     scene
 end
 
