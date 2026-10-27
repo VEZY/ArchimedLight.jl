@@ -1,8 +1,7 @@
 # Voxel Interception And Working Assumptions
 
 The voxel solver resolves radiation paths between cells and treats vegetation
-inside each cell as a spatially homogeneous mixture. It does not reconstruct
-leaf triangles or explicit branches from the point cloud. This page explains
+inside each cell as a spatially homogeneous mixture. This page explains
 which quantities are observed, which are assumptions, and how the resulting
 calculation conserves energy.
 
@@ -31,24 +30,18 @@ T_v=\exp(-\kappa_v\ell).
 
 No additional division by solar elevation or ``\cos\theta`` belongs in this
 formula: obliquity is already represented by the traversed length. The
-standard spherical leaf-angle assumption gives ``G=0.5``. A constant
-component-specific ``G`` is an effective projection assumption; it does not
-constitute a general non-spherical leaf-angle distribution.
+standard spherical leaf-angle assumption gives ``G=0.5``, and we use that value for all components by default. A different constant ``G`` can be supplied per
+component.
 
-PAD estimated by inverting LiDAR attenuation already depends on the inversion
+PAD estimated by inverting lidar attenuation already depends on the inversion
 projection model, sampling, and any density cap. The
 [AMAPVox PAD estimator documentation](https://search.r-project.org/CRAN/refmans/AMAPVox/html/plantAreaDensity.html)
 describes those dependencies. Using another projection coefficient in a
-simulation changes the effective extinction; it does not recover an independently
-measured geometric surface area. Record the inversion assumptions where known
-and examine sensitivity when they are uncertain.
+simulation changes the effective extinction; so you should also consider updating the value for computing PAD.
 
 ## Point Proportions As An Area Proxy
 
-The merged JSONL input supplies fractions of **retained LiDAR points**, not
-measured fractions of plant surface area. Its Belinga example filters on
-`treeID > 0`, `UserData == 0` when available, and a non-missing foliage class.
-These filters exclude some returns before the proportions are computed.
+The JSONL input supplies fractions of **lidar points** within each voxel that are associated to individual plants, and what proportion of these points are wood, leaf or unknown.
 
 For an identified individual ``i`` with point fraction ``p_{v,i}``, let
 ``f_{v,i,o}`` be its fraction of points in organ class ``o``:
@@ -178,9 +171,12 @@ identity creates output components; it does not require a separate set of
 rays for each tree.
 
 The terminal budget includes **all** vegetation absorption, soil absorption,
-boundary escapes, and unresolved scattering energy. Total intercepted energy
-can exceed external incoming energy because radiation may be intercepted
-several times. Only absorbed PAR of the `leaf` components contributes to leaf
+boundary escapes, and unresolved scattering energy. Cumulative interception
+over all scattering orders can exceed external incoming energy, because
+reflected or transmitted radiation can encounter vegetation again. This is because it counts
+repeated interactions. The budget is **conservative** in the end: the sum of all absorbed, scattered, and escaped
+energy equals the total incoming energy (there is a difference between intercepted and absorbed energy).
+Only absorbed PAR of the `leaf` components contributes to leaf
 APAR. Whole-plant PAR absorption also includes wood and unknown organs and is
 a different quantity.
 

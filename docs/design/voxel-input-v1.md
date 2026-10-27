@@ -21,7 +21,7 @@ The scientific rationale is now part of the public manual:
   coordinates, bounds, and soil transport.
 
 The adopted model keeps observations separate from assumptions. Point ratios
-are raw filtered LiDAR point proportions, not measured area fractions.
+are raw filtered lidar point proportions, not measured area fractions.
 Unknown PAD is not empty space. Positive PAD without tree identities remains
 intercepting vegetation. Wood is optically opaque material inside a porous
 voxel, rather than an instruction to make the entire voxel opaque.

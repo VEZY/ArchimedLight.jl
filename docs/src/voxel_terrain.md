@@ -16,13 +16,9 @@ VoxelModels
   vegetation and soil optical properties
 ```
 
-A zero-PAD voxel is never used as a soil marker. A ray stops at the first exact
-terrain intersection, even when that intersection lies inside a voxel segment.
-The remaining part of that segment and every voxel below it receive no energy.
-No coarse subterranean voxel mask is maintained: exact nearest-hit truncation
-plus the terrain BVH already removes below-surface transport, while a second
-occupancy representation would duplicate geometry and risk inconsistent
-normals.
+The terrain is independent of the voxel grid. It may be a flat plane, a height field, or a triangulated mesh. The solver uses the terrain to stop rays and to reflect energy from soil patches. The terrain is used to define the boundary of the soil, and the solver uses this information to determine how light interacts with the soil.
+Rays stop at the first terrain intersection, even when that intersection lies inside a voxel segment.
+The remaining part of that segment and every voxel below it receive no energy. This means that the terrain can cut through the voxel grid, and all remaining voxels below the terrain are considered as belowground, so they are excluded from the computation.
 
 ```@contents
 Pages = ["voxel_terrain.md"]
@@ -32,10 +28,9 @@ Depth = 3
 ## Explore The Geometry In 3D
 
 The interactive view below shows the geometric contract used by the solver.
-Its deterministic voxel field is arranged as a stylized single tree: a narrow
-lower column makes the trunk visible and an irregular ellipsoidal crown carries
-the foliage PAD. Empty cells remain transparent air. The terrain is an
-independent triangulated surface that may cut through the lower voxel layers.
+The voxel field represents and example single tree with a narrow
+lower column for the trunk and an irregular ellipsoidal crown. Empty cells represent transparent air.
+The terrain is an independent triangulated surface that may cut through the lower voxel layers.
 Incoming rays stop at their first terrain intersection, and soil-reflected
 energy leaves along existing discrete transport directions weighted by the
 local surface normal.
@@ -48,27 +43,16 @@ voxel_terrain_app()
 ```
 
 !!! note
-    The tree and terrain are deterministic pedagogical inputs. This geometry
-    view loads the bundled PAD-only `tree.vox`. Its paired `tree.jsonl.gz`
-    adds the tree identity and leaf/wood proportions; the
-    [file-based tree tutorial](voxel_tree_tutorial.md) assigns separate wood
-    and leaf optics to this same scene. Every ray segment, soil hit, local normal, and reflected
+    The tree and terrain are just examples. This geometry
+    view comes from the `tree.jsonl.gz` file. Every ray segment, soil hit, local normal, and reflected
     direction shown above is computed through `lightplot`, `trace_voxel_ray`,
     and `terrain_lambertian_weights`; only the displayed ray energies are
     illustrative.
 
-`lightplot` keeps terrain, ray, and lattice coordinates in double precision.
-Voxel rendering uses local bounds with a shared placement in the original
-coordinate frame, so small cells remain distinct at large projected GIS
-coordinates. The default `Axis3` preserves this placement through WebGL's
-single-precision rendering. For an explicit `LScene` or `Scene`, use local
-coordinates: their camera/model conversion can still lose small features at
-large offsets. The transport and raw ray diagnostics retain the input frame.
-
 ## Construct A Terrain
 
-Soil is opaque in the initial model. Define its band reflectance explicitly;
-absorptance is ``1-\rho`` and transmittance is zero.
+Soil is opaque by default, but you can define its band reflectance explicitly, with
+absorptance equal to ``1-\rho`` and transmittance equal to zero.
 
 ```@example voxel_terrain
 using ArchimedLight
@@ -243,15 +227,6 @@ conversion, CRS reprojection, or scaling to match the canopy. The affine
 matrix has the same contract as the AAIGrid transform described below.
 Generic PLY terrain is non-periodic; use `LightOptions(toricity=false)`.
 
-!!! note "Import and scene coverage are separate checks"
-    The supplied `quadra1_mnt.ply` has 7,119 vertices and 14,184 triangles,
-    with bounds approximately X=17.03–43.93 m, Y=−36.52–−10.76 m, and
-    Z=−1.62–0.28 m. It covers a smaller area than the full Belinga JSONL grid
-    (X=0–60 m, Y=−53–7 m). Its mesh can be read, but running that full grid
-    with this terrain is rejected for incomplete horizontal coverage. Use
-    an authoritative terrain covering the grid, or prepare a deliberate
-    covered subset; the importer does not extrapolate missing topography.
-
 ## Boundaries And Domain Contract
 
 `NoVoxelTerrain()` is the default and preserves the historical open lower
@@ -292,7 +267,7 @@ E_{soil,reflected} = \rho_b E.
 ```
 
 The reflected pool is Lambertian around the patch's local unit normal ``n``.
-ArchimedLight does not add or rotate transport directions. It reweights the
+ArchimedLight does not add or rotate transport directions but reweights the
 existing full-sphere voxel quadrature:
 
 ```math
@@ -381,7 +356,7 @@ PAD does not identify the ground. Keep the bare-earth DTM used by AMAPVox next
 to the `.vox` file and its configuration:
 
 ```text
-classified LiDAR
+classified lidar
   vegetation returns -> AMAPVox -> PAD voxel table
   ground returns      -> DTM     -> AAIGrid terrain
 ```

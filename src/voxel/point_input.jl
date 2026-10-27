@@ -194,7 +194,7 @@ function _read_voxel_point_input(io::IO, missing_pad_policy::Symbol)
     offsets = Vector{Int}(undef, cell_count + 1)
     offsets[1] = 1
     for voxel_id in 1:cell_count
-        offsets[voxel_id + 1] = offsets[voxel_id] + component_counts[voxel_id]
+        offsets[voxel_id+1] = offsets[voxel_id] + component_counts[voxel_id]
     end
     ordered_components = components[sortperm(owners)]
     return VoxelPointInput(
@@ -211,7 +211,7 @@ Stream the existing PointCloud2Model `schema_version="1.0"` `.jsonl` or
 `amapvox.pad_attenuation_PPL_MLE`. The exported 0-based Cartesian indices are
 converted explicitly to Julia indices; record order is unrestricted.
 
-Tree and organ ratios describe filtered LiDAR **point counts**, not measured
+Tree and organ ratios describe filtered lidar **point counts**, not measured
 area fractions. Positive PAD without identified points is retained. Null or
 omitted PAD is rejected by default. With `missing_pad=:zero_with_diagnostics`,
 it is explicitly imputed as zero in `grid.pad`, with every such cell retained

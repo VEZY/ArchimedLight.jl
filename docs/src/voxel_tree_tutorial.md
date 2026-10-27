@@ -17,7 +17,7 @@ with the package. Together these three files occupy about 24 KiB.
 
 !!! note "Synthetic example"
     The tree silhouette, PAD, point counts, and optical values are pedagogical,
-    not LiDAR observations or a calibration. The lower column is entirely
+    not lidar observations or a calibration. The lower column is entirely
     wood; crown cells contain 90% leaf and 10% wood points. In `point_proxy`
     mode these point fractions are assumed to represent fractions of PAD.
     A wood-containing cell still has unresolved gaps: zero wood transmittance

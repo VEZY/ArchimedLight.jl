@@ -9,8 +9,7 @@ The voxel solver separates three processes that are easy to conflate:
 3. **absorption** is the remaining terminal fraction retained by vegetation.
 
 This distinction matters because intercepted energy can be intercepted again
-after scattering. Total intercepted energy is therefore a transfer diagnostic,
-not a terminal term in the energy budget.
+after scattering.
 
 ```@contents
 Pages = ["theory_voxel_scattering.md"]

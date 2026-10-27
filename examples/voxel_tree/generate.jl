@@ -13,7 +13,7 @@ function write_voxel_tree_example(directory=@__DIR__)
         record_type="metadata",
         schema_version="1.0",
         voxel_source="tree.vox",
-        las_source="synthetic (no LiDAR source)",
+        las_source="synthetic (no lidar source)",
         min_corner=collect(grid.minimum),
         resolution=collect(grid.voxel_size),
         split=collect(size(grid)),
@@ -23,7 +23,7 @@ function write_voxel_tree_example(directory=@__DIR__)
         foliage_classes=NamedTuple{(Symbol("0"), Symbol("1"), Symbol("2"))}((
             "wood", "foliage", "unknown",
         )),
-        synthetic_description="Documentation tree: 100% wood in trunk cells; 90% foliage and 10% wood in crown cells. Counts and PAD are pedagogical, not measured LiDAR observations.",
+        synthetic_description="Documentation tree: 100% wood in trunk cells; 90% foliage and 10% wood in crown cells. Counts and PAD are pedagogical, not measured lidar observations.",
     )
     io = IOBuffer()
     println(io, JSON.json(metadata))
