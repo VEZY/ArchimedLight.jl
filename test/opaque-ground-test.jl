@@ -115,6 +115,11 @@ end
     result = AL.compute_scattering_band(graph,first_order,opts;backend=scattering,
         initial_power_per_node=Dict(reference.source=>1.))
     @test result.added_power_per_node == reference.result.added_power_per_node
+    unused = AL.models_for("custom soil"=>("ground"=>AL.translucent(par=0.6,nir=0.8),),
+        "collector"=>("black"=>AL.translucent(par=0.,nir=0.),),
+        "unmatched"=>("ground"=>AL.opaque(par=0.2,nir=0.4),))
+    cache = AL.prepare_light_cache(scene,unused,opts;interception_backend=backend)
+    @test cache.resolved_interception_backend isa AL.RasterGPUBackend
     for invalid in (AL.TypeModel(interception=AL.InterceptionModel(model="Opaque")),
         AL.TypeModel(interception=AL.InterceptionModel(model="Opaque",sensor=true,
             optical_properties=AL.OpticalProperties(0.2,0.4))))

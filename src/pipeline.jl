@@ -2211,9 +2211,6 @@ function prepare_light_cache(
         "with `geometry_length_unit=...` and keep the target SceneUnits in metres.",
     ))
     ib = _resolve_interception_backend(interception_backend)
-    # Facet-side identifiers are currently prepared on the CPU for opaque
-    # ground; keep the ordinary translucent RasterGPU path unchanged.
-    ib isa RasterGPUBackend && _has_opaque_ground(models) && (ib = RasterCPUBackend())
     prepared =
         if ib isa RasterCPUBackend || ib isa RasterGPUBackend
             _prepare_interception_data(
@@ -2225,6 +2222,11 @@ function prepare_light_cache(
         else
             nothing
         end
+    # Only active opaque geometry needs facet-side preparation on the CPU.
+    # Unused model definitions must not disable the requested raster backend.
+    if ib isa RasterGPUBackend && any(_is_opaque_interception, prepared.node_interception_by_index)
+        ib = RasterCPUBackend()
+    end
     interception_geometry =
         prepared === nothing ? _scene_geometry_for_interception(scene, models, options) : prepared.geometry
     render_geometry = _light_render_geometry(interception_geometry)
