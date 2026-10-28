@@ -84,7 +84,6 @@ makedocs(;
             "Interception And Assumptions" => "theory_voxel_interception.md",
             "Terrain And Soil" => "voxel_terrain.md",
             "Scattering And Optical Parameters" => "theory_voxel_scattering.md",
-            "Future Directions" => "voxel_future_directions.md",
         ],
         "Reference" => [
             "Configuration And Options" => "reference_config.md",
