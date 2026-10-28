@@ -1,3 +1,11 @@
+[archimedlight-belinga]
+git-tree-sha1 = "aade36b9f050b820c641f305b24982e8c7fde06c"
+lazy = true
+
+    [[archimedlight-belinga.download]]
+    sha256 = "fa8b164321508afcf7124e33605b3d07e7945edf6b767cc3f82b54cfa8e6bfe5"
+    url = "https://zenodo.org/records/23695138/files/belinga-voxel-scene-v1.0.0.tar.gz?download=1"
+
 [archimedlight-benchmark-scenes]
 git-tree-sha1 = "0fe06e0ad6ecab2e7db5f97aff7d0ee11bb34555"
 lazy = true

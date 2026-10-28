@@ -468,10 +468,10 @@ function _triangle_area3d(p1, p2, p3)
 end
 
 """
-    read_scene(path)::PlantGeom.SceneGeometry
+    read_scene(path; kwargs...)
 
-Read a scene file (`.ops`, `.opf`, or `.gwa`) and return a prepared
-`PlantGeom.SceneGeometry`.
+Read a triangle scene (`.ops`, `.opf`, `.gwa`) as `PlantGeom.SceneGeometry`,
+or voxel input (`.vox`, `.jsonl`, `.jsonl.gz`) as [`VoxelScene`](@ref).
 
 The scene is relabelled into a dense node-id space and immediately converted to
 the merged-mesh representation expected by the interception pipeline.
@@ -484,8 +484,16 @@ Keywords:
 
 - `plantgeom_backend`: reserved PlantGeom backend selector. The current default
   is `:auto`.
+- Voxel inputs accept `missing_pad`, and `.vox` accepts `pad_column`.
+  Configure optical properties separately with [`models_for`](@ref), then pass
+  the models to [`run_light`](@ref).
 """
-function read_scene(path::AbstractString; plantgeom_backend=:auto)
+function read_scene(path::AbstractString; plantgeom_backend=:auto, kwargs...)
+    lower_path = lowercase(path)
+    if any(suffix -> endswith(lower_path, suffix), (".vox", ".jsonl", ".jsonl.gz"))
+        return _read_voxel_scene(path; kwargs...)
+    end
+    isempty(kwargs) || throw(ArgumentError("unsupported triangle scene keyword(s): $(keys(kwargs))"))
     ext = lowercase(splitext(path)[2])
     mtg = if ext == ".ops"
         PlantGeom.read_ops(path; relaxed=true, assume_scale_column=false, opf_scale=1.0, gwa_scale=0.01,)

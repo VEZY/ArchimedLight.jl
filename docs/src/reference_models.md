@@ -48,7 +48,7 @@ models = models_for(
         "Stem" => translucent(par=0.20, nir=0.50),
     ),
     "soil" => (
-        "ground" => translucent(par=0.10, nir=0.40),
+        "ground" => opaque(par=0.10, nir=0.40),
     ),
 )
 ```
@@ -126,6 +126,13 @@ models = prepare_models([
 
 This is the direct equivalent of the YAML file above.
 
+Ground in both workflows uses `opaque(par=..., nir=...)`, which returns the
+same `TypeModel` type with zero transmission and outward reflection. The
+voxel-only `ground_materials` keyword maps terrain material IDs to full soil models or
+partial `(par=..., nir=...)` overrides. Triangle scenes instead use their
+ordinary group/type mappings; they do not use `ground_materials`. See the
+[Ground Materials example](voxel_tree_tutorial.md#Ground-Materials).
+
 The dynamic correspondences are:
 
 - `Group: coffee` -> `GroupModel("coffee"; ...)`
@@ -152,14 +159,24 @@ and dynamically:
 InterceptionModel(model="Translucent")
 ```
 
-This is the ordinary case for plant organs, soil, paving, and many geometric
-objects.
+`Translucent` is the historical model for plant organs and other ordinary
+components. For terrain, select `Opaque` explicitly or use `opaque(par=..., nir=...)`;
+its PAR/NIR coefficients are reflectances, its transmission is zero and the
+absorbed fraction is `1 - reflectance`.
+
+`Opaque` currently supports terrain made of nonvertical facets, with normals
+oriented upward regardless of input winding. Geometry must represent terrain;
+it is not a general opaque model for vertical stems, arbitrary leaves or
+closed solids. Model matching still uses ordinary group/type labels.
 
 ### `transparency`
 
-`transparency` is the transmitted fraction. It reduces the fraction intercepted
-by the visible surface in both the fast upper-hit path and the full per-pixel
-stack path.
+`transparency` controls first-order pass-through in `Translucent`. It reduces
+the fraction intercepted by the visible surface in both the fast upper-hit
+path and the full per-pixel stack path. It is distinct from diffuse
+transmission during scattering: even with `transparency=0`, `Translucent`
+splits its scattering coefficient equally between reflection and transmission.
+`Opaque` instead has zero first-order and diffuse transmission.
 
 For first-order-only interception, ArchimedLight follows the historical
 ARCHIMED upper-hit rule: only the first visible surface is retained for that
@@ -187,7 +204,11 @@ Typical values are in `[0, 1]`:
 
 ### `optical_properties`
 
-`optical_properties` stores waveband-dependent scattering coefficients.
+`optical_properties` stores waveband-dependent coefficients. For
+`Translucent`, these are total diffuse scattering fractions, split equally
+between reflection and transmission. For `Opaque`, they are reflectances
+with zero transmission. In both cases, the remaining intercepted fraction
+is absorbed.
 
 File-based:
 
@@ -400,15 +421,17 @@ This is useful for:
 
 ## 9. Soil And Paving
 
-Soil and paving are not special cases from the model point of view. They are
-ordinary functional groups:
+Soil and paving use ordinary group/type matching. Choose `Opaque` to reflect
+all scattered energy outward from the terrain rather than splitting it between
+the two sides. Existing `Translucent` inputs keep their two-sided law; a group
+name such as `soil` or `pavement` does not select opacity automatically:
 
 ```yaml
 Group: pavement
 Type:
   Cobblestone:
     Interception:
-      model: Translucent
+      model: Opaque
       transparency: 0
       optical_properties:
         PAR: 0.15
@@ -422,13 +445,7 @@ Dynamic equivalent:
 GroupModel(
     "pavement";
     types=OrderedDict(
-        "Cobblestone" => TypeModel(
-            interception=InterceptionModel(
-                model="Translucent",
-                transparency=0.0,
-                optical_properties=OpticalProperties(0.15, 0.90),
-            ),
-        ),
+        "Cobblestone" => opaque(par=0.15, nir=0.90),
     ),
 )
 ```
@@ -439,11 +456,14 @@ interception model.
 
 ## 10. Missing Bands And Fallbacks
 
-When a model omits a waveband in `optical_properties`, the runtime falls back to
-the corresponding option in [`LightOptions`](@ref):
+When a `Translucent` model omits a waveband in `optical_properties`, the runtime
+falls back to the corresponding option in [`LightOptions`](@ref):
 
 - missing PAR -> `options.scattering_coeff_par`
 - missing NIR -> `options.scattering_coeff_nir`
+
+`Opaque` requires explicit PAR and NIR reflectances; missing coefficients are
+rejected rather than replaced with those fallbacks.
 
 That is why the global scattering coefficients still matter even when most
 groups are explicitly parameterized.

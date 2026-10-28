@@ -229,8 +229,9 @@ optional named variants from historical ARCHIMED model files.
 
 Main fields:
 
-- `model`: historical ARCHIMED interception model name. The common runtime case
-  is `"Translucent"`.
+- `model`: interception model name. `"Translucent"` uses the historical equal
+  reflection/transmission approximation; `"Opaque"` reflects toward the exterior
+  of an oriented ground surface.
 - `sensor`: marks the type as a virtual sensor. Virtual sensors receive light
   diagnostics but remain transparent in the transfer logic.
 - `transparency`: first-order transmitted fraction. Typical values are in
@@ -483,6 +484,54 @@ function translucent(; par::Real, nir::Real, transparency::Real=0.0)
 end
 
 """
+    opaque(; par, nir)
+
+Build a [`TypeModel`](@ref) for opaque Lambertian ground in triangle or voxel
+scenes. `par` and `nir` are reflected fractions in `[0, 1]`; transmission is
+zero and the absorbed fraction is `1 - reflectance`. Reflected radiation is
+distributed over the exterior hemisphere of the local ground facet normal.
+
+Triangle ground must consist of nonvertical terrain facets; normals are
+oriented upward independently of input winding. This is not a general opaque
+material for closed solids or vertical plant meshes. Both PAR and NIR
+reflectances are required. [`translucent`](@ref) retains the equal diffuse
+reflection/transmission approximation for ordinary plant components.
+
+```jldoctest
+julia> model = opaque(par=0.20, nir=0.40);
+
+julia> (model.interception.model, model.interception.transparency, model.interception.optical_properties.par)
+("Opaque", 0.0, 0.2)
+```
+"""
+function opaque(; par::Real, nir::Real)
+    model = TypeModel(interception=InterceptionModel(model="Opaque", transparency=0.0,
+        optical_properties=OpticalProperties(par, nir)))
+    _opaque_ground_coefficients(model)
+    return model
+end
+
+# Resolve mutable and parsed models to the same validated scalar snapshot in
+# both the triangle preparation and voxel ground setup paths.
+function _opaque_ground_coefficients(model::TypeModel)
+    model.light_emitter === nothing || throw(ArgumentError("opaque ground cannot be an emitter"))
+    interception = model.interception
+    interception === nothing && throw(ArgumentError("opaque ground requires an interception model"))
+    lowercase(strip(interception.model)) == "opaque" || throw(ArgumentError(
+        "ground requires opaque(par=..., nir=...)"))
+    interception.sensor && throw(ArgumentError("opaque ground cannot be a virtual sensor"))
+    isfinite(interception.transparency) && interception.transparency == 0 || throw(ArgumentError(
+        "opaque ground must have zero transparency"))
+    properties = interception.optical_properties
+    properties === nothing && throw(ArgumentError("opaque ground requires PAR and NIR optical properties"))
+    all(band -> get(properties.extras, band, true) === true, ("__has_par", "__has_nir")) ||
+        throw(ArgumentError("opaque ground requires both PAR and NIR coefficients"))
+    all(value -> isfinite(value) && 0 <= value <= 1, (properties.par, properties.nir)) ||
+        throw(ArgumentError("ground PAR and NIR reflectances must be finite and lie in [0, 1]"))
+    return (par=properties.par, nir=properties.nir)
+end
+
+"""
     virtual_sensor()
 
 Build a [`TypeModel`](@ref) for virtual sensors. Virtual sensors receive light
@@ -521,9 +570,26 @@ end
 
 """
     models_for(group_specs...)::LightModels
+    models_for(; leaf=nothing, wood=VoxelMaterial(), unknown=VoxelMaterial(),
+                 ground=nothing, individuals=Dict(), ground_materials=Dict(),
+                 mode=nothing, identified_area_fraction=nothing)::VoxelModels
 
-Create [`LightModels`](@ref) from compact `(group => (type => model, ...))`
-pairs. Group and type names are matched against geometric scene nodes.
+For triangle scenes, create [`LightModels`](@ref) from compact
+`(group => (type => model, ...))` pairs matched against geometric scene nodes.
+
+For voxel scenes, keyword defaults create [`VoxelModels`](@ref). Individual
+organ and soil-material overrides may be complete material objects or partial
+parameter named tuples inheriting from the corresponding default. Without a
+default, supply complete materials for every participating individual/organ
+or soil material ID. JSONL inputs require `mode=:point_proxy` explicitly.
+Pass the configuration to `run_light(scene, meteo; models, options, backend)`;
+ground geometry is added separately with `add_ground!`.
+Voxel `ground` accepts an `opaque(par=..., nir=...)` model;
+`ground_materials` assigns complete models or partial `(par=..., nir=...)`
+overrides by terrain material ID. Triangle soils use the usual group/type pairs.
+
+An empty call retains the triangle meaning `LightModels()`. Positional
+group/type pairs and voxel keywords cannot be combined.
 
 Arguments:
 
@@ -539,7 +605,7 @@ julia> models = models_for(
                "Stem" => translucent(par=0.20, nir=0.50),
            ),
            "soil" => (
-               "ground" => translucent(par=0.10, nir=0.40),
+               "ground" => opaque(par=0.10, nir=0.40),
            ),
        );
 
@@ -547,7 +613,12 @@ julia> (collect(keys(models)), models["coffee"].types["Leaf"].interception.model
 (["coffee", "soil"], "Translucent")
 ```
 """
-function models_for(group_specs::Pair...)
+function models_for(group_specs::Pair...; kwargs...)
+    if !isempty(kwargs)
+        isempty(group_specs) || throw(ArgumentError(
+            "use group/type pairs for triangle models or keyword defaults for voxel models, not both"))
+        return VoxelModels(; kwargs...)
+    end
     groups = OrderedDict{String,GroupModel}()
     for pair in group_specs
         group = String(pair.first)
@@ -754,11 +825,15 @@ Fields:
 - `cache_pixel_table`: cache raster pixel tables for repeated projections.
 - `pixel_hit_stack_mode`: typed [`PixelHitStackPolicy`](@ref) used for
   per-pixel hit stacks. The default is `AutoPixelHitStack`.
-- `toricity`: enable horizontal periodic wrapping of the simulated plot.
-  With `true`, projection uses the horizontal plot tile. With `false`, each
-  light direction uses a fitted perpendicular canvas covering the complete
-  scene geometry, so elevated objects are not clipped by the plot footprint.
-  This changes neither the physical ground geometry nor the units of `pixel_size`.
+- `toricity`: enable horizontal periodic wrapping of the simulated plot,
+  including voxel terrain. Periodic height fields must have matching elevations
+  on opposite edges; generic triangle terrain supports open boundaries only.
+  For triangle scenes, `true` projects onto the horizontal plot tile; with
+  `false`, each light direction uses a fitted perpendicular canvas covering the
+  complete scene geometry, so elevated objects are not clipped by the plot
+  footprint. This changes neither the physical ground geometry nor the units
+  of `pixel_size`. For voxel grids, `true` wraps rays horizontally and `false`
+  terminates them at the first lateral grid boundary.
 - `radiation_timestep_minutes`: internal radiative substep used when a meteo
   row covers a coarser interval.
 - `radiation_input_semantics`: interpretation of supplied irradiances.

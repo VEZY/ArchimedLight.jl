@@ -574,6 +574,19 @@ function _light_query_grouped_table(table, reducer, by_columns, is_single::Bool)
     _light_query_table(Symbol[group_columns; :value], columns)
 end
 
+function _light_query_finish(table, reducer, by, sink, single::Bool, nsteps::Integer)
+    reducer === nothing && return _light_query_materialize(table, sink)
+    groups = _light_query_by_columns(by)
+    if isempty(groups)
+        sink === nothing || throw(ArgumentError("`sink` requires a table result."))
+        single && return _light_query_reduce(reducer, table.value, "step 1")
+        return [_light_query_reduce(reducer,
+            table.value[findall(==(number), table.step_number)], "step $number")
+            for number in 1:nsteps]
+    end
+    _light_query_materialize(_light_query_grouped_table(table, reducer, groups, single), sink)
+end
+
 """
     light_metric_values(scene_or_sim, step_or_series, metric; filters..., reduce=nothing, by=nothing, sink=nothing)
 
@@ -683,23 +696,5 @@ function light_metric_values(
         )
     end
 
-    reduce === nothing && return _light_query_materialize(table, sink)
-    by_columns = _light_query_by_columns(by)
-    if isempty(by_columns)
-        sink === nothing || throw(
-            ArgumentError("`sink` is only supported when the query returns a table."),
-        )
-        if is_single
-            return _light_query_reduce(reduce, table.value, "step 1")
-        end
-        return [
-            _light_query_reduce(
-                reduce,
-                Float64[table.value[i] for i in eachindex(table.value) if table.step_number[i] == step_number],
-                "step $step_number",
-            ) for step_number in eachindex(steps)
-        ]
-    end
-    grouped = _light_query_grouped_table(table, reduce, by_columns, is_single)
-    _light_query_materialize(grouped, sink)
+    _light_query_finish(table, reduce, by, sink, is_single, length(steps))
 end

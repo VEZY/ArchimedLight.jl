@@ -1,7 +1,8 @@
 # API Reference
 
 This page is a compact guide to the public entry points of `ArchimedLight.jl`.
-For normal use, create a `LightSimulation` and call `run_light`.
+For normal use, create a triangle `LightSimulation` or import a `VoxelScene`,
+then call `run_light`.
 
 ## API Stability
 
@@ -60,7 +61,7 @@ end
 
 models = models_for(
     "coffee" => ("Leaf" => translucent(par=0.15, nir=0.90),),
-    "soil" => ("ground" => translucent(par=0.10, nir=0.40),),
+    "soil" => ("ground" => opaque(par=0.10, nir=0.40),),
 )
 
 sim = LightSimulation(scene, models; options=LightOptions())
@@ -104,6 +105,7 @@ PlantGeom.add_ground!(builder; z=0.0, nx=9, ny=9, group="pavement", type="Cobble
 PlantGeom.prepare_scene(mtg; source_path="interactive.opf", scene_xy_bounds=nothing, relabel_ids=false)
 models_for(group => (type => model, ...), ...)
 translucent(; par, nir, transparency=0.0)
+opaque(; par, nir)
 virtual_sensor()
 emitter(; radiance, par=0.48, nir=0.52)
 ```
@@ -143,6 +145,125 @@ snippet is schematic because it assumes an existing `scene` and output `path`:
 PlantGeom.add_ground!(scene; z=0.0, nx=9, ny=9, xy_bounds=nothing, group="pavement", type="Cobblestone")
 write_scene(path, scene)
 ```
+
+## Voxel Inputs And Individual/Organ Mixtures
+
+The [Belinga example](applications/belinga.md) provides a downloadable voxel
+dataset of a natural forest in Cameroon. `example_scene_path(:belinga)` returns
+its input filename in Julia's artifact cache. The first call downloads the
+approximately 17 MB, checksummed Zenodo
+archive; subsequent calls reuse it. Importing ArchimedLight does not download
+the dataset. Missing-PAD handling remains an explicit choice when reading:
+
+```julia
+scene = read_scene(example_scene_path(:belinga);
+    missing_pad=:zero_with_diagnostics)
+```
+
+Use the dedicated [Voxel Modelling](voxel_overview.md) section for workflows
+and model assumptions. Read observations first, then configure materials
+separately from geometry and numerical options:
+
+```julia
+scene = read_scene(path; missing_pad=:error)
+add_ground!(scene) # optional flat geometry, with the voxel domain extent
+leaf = VoxelMaterial(; g=0.5, par_reflectance=0.08, par_transmittance=0.07,
+                     nir_reflectance=0.45, nir_transmittance=0.40)
+models = models_for(;
+    mode=:point_proxy, leaf,
+    wood=VoxelMaterial(), unknown=VoxelMaterial(),
+    ground=opaque(par=0.12, nir=0.32),
+    individuals=Dict(12 => (leaf=(nir_reflectance=0.40,),)),
+)
+result = run_light(scene, meteo_row; models, options, backend=VoxelCPUBackend())
+series = run_light(scene, meteo; models, options, backend=VoxelCPUBackend())
+values = light_metric_values(scene, result, :incident_par_flux)
+totals = component_values(result; level=:individual)
+```
+
+This is a call-shape reference: `path`, forcing and options must be defined,
+and individual `12` must occur in the JSONL input. Global leaf, wood, unknown
+and ground defaults apply unless overridden. A partial named tuple changes
+only its supplied parameters, inheriting the rest from the matching default.
+A complete `VoxelMaterial` instead replaces that individual's whole organ
+material. Global `leaf` may be omitted when every relevant individual has a
+complete leaf material; a partial override requires its global default.
+Unknown IDs, missing material coverage and invalid coefficients are rejected.
+
+A plain `.vox` scene uses the global `leaf` material for all PAD, with no
+`mode` or individual overrides. JSONL inputs require explicit
+`mode=:point_proxy` to allocate PAD from point proportions. Wood transmittance
+must be zero. Unassigned vegetation retains its own `unknown` default and its
+`individual_id=nothing` in aggregated outputs.
+
+`update_models!(scene, models)` retains the configuration for later calls
+without a `models` keyword; supplying `models` directly does not mutate the
+scene. Use `check_models(scene, models)` or
+`check_simulation(scene, meteo; models, options, backend)` to validate it.
+`VoxelScene(grid; terrain)` and `VoxelScene(input; terrain)` wrap an existing
+PAD grid or imported `VoxelPointInput` without assigning materials. `missing_pad=:zero_with_diagnostics` is the opt-in alternative
+for unknown densities.
+
+`VoxelVegetationStepResult` keeps the native result in `.light`, sparse
+`VoxelComponentLight` records in `.components`, and the original `.missing_pad`
+mask. Energies are joules per step; component `plant_area` is proxy area in
+square metres.
+
+See [One Tree, Two Input Files](voxel_tree_tutorial.md) for runnable defaults,
+individual-only models and soil-region overrides, and
+[Input Files And Individuals](voxel_inputs.md) for coverage assumptions.
+
+## Voxel Terrain API
+
+`add_ground!(scene)` creates a horizontal plane covering the voxel domain at
+its minimum Z. Optional `elevation`, `cells=(nx, ny)` and `material_ids`
+control geometry and soil region identities. `LightOptions.toricity` controls
+horizontal wrapping for the canopy and ground together.
+Assign soil optics through `models_for(; ground=soil, ...)` at simulation setup.
+Use `ground=opaque(par=..., nir=...)` for soil: `par`/`nir` are reflectances,
+transmission is zero and absorption is `1 - reflectance`.
+`ground_materials=Dict(id => override)` accepts complete `TypeModel` values
+from `opaque`, or partial `(par=..., nir=...)` named tuples inheriting the
+global ground coefficients. Without a global
+ground default, complete soil models must cover every used material ID. Tree
+IDs and soil material IDs are independent. The validated band coefficients are
+copied when the voxel configuration is built. See the runnable
+[Ground Materials example](voxel_tree_tutorial.md#Ground-Materials).
+
+`ground_materials` is a voxel-only keyword. Triangle scenes assign the same
+soil `TypeModel` through their ordinary group/type mapping, for example
+`models_for("soil" => ("ground" => soil,))`. Both ground workflows reflect
+into the outward hemisphere. Triangle `Opaque` supports terrain made of
+nonvertical facets, orienting normals upward independently of input winding.
+Group/type names are arbitrary; the geometry must represent terrain, not an
+arbitrary closed or vertical opaque object. Both PAR/NIR coefficients must be
+explicit. `translucent(..., transparency=0)` still has diffuse transmission and
+is not an opaque ground model.
+
+Use `NoVoxelTerrain()` for an open bottom, or attach imported geometry:
+
+```julia
+terrain = read_ply_terrain(ply_path; transform=dtm_to_voxel)
+add_ground!(scene, terrain)
+```
+
+The transform defaults to identity. No CRS conversion, translation, or domain
+extension is inferred; triangulated PLY terrain requires `toricity=false`.
+
+All terrain constructors and readers create geometry and material IDs. Soil
+optics are supplied only through the voxel model configuration. AAIGrid and
+AMAPVox import/alignment workflows use:
+
+```julia
+aai = read_aai_grid(dtm_path; crs="EPSG:2154")
+terrain = height_field_terrain(aai; transform=dtm_to_voxel)
+input = VoxelTerrainSceneInput(voxel_path, dtm_path; dtm_to_voxel=dtm_to_voxel)
+imported = read_voxel_terrain_scene(input)
+scene = VoxelScene(imported.grid; terrain=imported.terrain)
+```
+
+See [Voxel Terrain And Soil](voxel_terrain.md) for coordinate, coverage,
+periodicity, `ground_distance`, cache, and energy-balance contracts.
 
 ## Validation
 
@@ -434,6 +555,44 @@ queried with their original live scene. A custom `where` predicate also needs a
 live MTG, so dynamic-series queries should capture its scalar inputs through
 `node_metadata_attributes` and use `attributes=(...)` instead.
 
+### Voxel Metric Queries
+
+```julia
+light_metric_values(
+    scene_or_grid, result_or_series, selector;
+    domain=:vegetation,
+    individual_id=nothing, organ=nothing,
+    voxel_i=nothing, voxel_j=nothing, voxel_k=nothing,
+    patch_id=nothing, material_id=nothing,
+    where=nothing, reduce=nothing, by=nothing, sink=nothing,
+)
+```
+
+The default vegetation table contains `step_number`, `voxel_i`, `voxel_j`,
+`voxel_k` and `value`. Individual/organ filters, or `by` containing
+`:individual_id`, `:organ` or `:plant_area`, select attributed component rows
+with those extra identity and proxy-area columns. This requires a mixed JSONL
+result. Positive integer individual IDs remain `Int`; nonempty text IDs remain
+`String`. Each input and scene uses one concrete ID type, and model override
+keys and query filters must match that type. Mixed integer/text IDs are rejected.
+IDs are labels rather than array indices; text `"001"` is preserved.
+`individual_id=(nothing,)` selects unattributed vegetation. Organ values are
+`:leaf`, `:wood` and `:unknown`.
+
+`domain=:ground` returns `step_number`, `patch_id`, `material_id`,
+`surface_area` and `value`. Ground queries accept patch/material filters;
+vegetation queries accept voxel/individual/organ filters. Combining filters
+from these two domains is an error. `where` receives a row of the selected
+table: use an individual/organ filter or grouping before accessing those
+component columns in a predicate. The reducer, grouping and sink rules above
+also apply to these tables.
+
+Ground flux is normalized by stored patch surface area (the full facet area,
+not its horizontal projection or its clipped overlap with the voxel domain)
+and step duration. Vegetation flux uses plant area. The default voxel query
+therefore excludes ground: obtain both energy totals explicitly for a
+whole-scene budget.
+
 ## Visualization Helpers
 
 These helpers expose direct mesh coloring and the Makie package extension. This
@@ -461,11 +620,35 @@ lightplot!(axis, step; color=:incident_par_flux, timestep=1, interpolate=false, 
 lightplot!(axis, steps; color=:incident_par_flux, timestep=1, interpolate=false, ...)
 lightplot(scene, models, options, data; color=:incident_par_flux, timestep=1, interpolate=false, ...)
 lightplot!(axis, scene, models, options, data; color=:incident_par_flux, timestep=1, interpolate=false, ...)
+lightplot(voxel_scene_or_grid_or_vegetation; ...)
+lightplot(voxel_scene_or_grid_or_vegetation, result; color=:incident_par_flux, timestep=1, ...)
+lightplot!(axis, voxel_scene_or_grid_or_vegetation, result; color=:incident_par_flux, timestep=1, ...)
+lightplot(grid, terrain; rays=(), quadrature=nothing, cutaway=:none, ...)
+lightplot!(axis, grid, terrain; rays=(), quadrature=nothing, cutaway=:none, ...)
+light_metric_values(voxel_scene_or_grid_or_vegetation, result_or_series, selector)
 ```
 
 For `lightplot(steps; colorrange=automatic)`, the Makie extension keeps a
 single color range across the whole series so animated timesteps remain
 comparable.
+
+`lightplot` without results renders nonzero PAD for a plain grid or organ
+composition for a point-input/vegetation scene. Supplying a voxel light result
+uses the same selector vocabulary as triangle plots, with fixed series colour
+ranges. Absorption selectors require an output that retains absorption;
+first-order scalar-grid results alone cannot reconstruct material absorption.
+Use the original PAD grid and terrain geometry for voxel queries and plots;
+results retain their resolved materials, but do not snapshot edits to geometry
+arrays. Voxel values remain constant within each cell, so the triangle
+`interpolate` option does not apply.
+
+For geometric diagnostics, `lightplot(grid, terrain; ...)` renders the terrain mesh
+and optional ray paths computed by [`trace_voxel_ray`](@ref). Supplying a
+[`VoxelScatteringQuadrature`](@ref) adds the fixed-direction Lambertian
+redistribution at each terrain hit. Use `cutaway=:front` to inspect the
+interior without changing the source [`VoxelGrid`](@ref).
+Pass the simulation's `options` to use the same `LightOptions.toricity` for
+displayed ray paths. Plotting defaults to `LightOptions(toricity=false)`.
 
 ## Backend Types
 
@@ -476,6 +659,7 @@ This block lists schematic constructor calls:
 ```julia
 RasterCPUBackend()
 RaycastScatteringBackend()
+VoxelCPUBackend(; rays_per_voxel=1000, g=0.5, traversal=:dda)
 ```
 
 They can be passed explicitly to the pipeline helpers when you want to control

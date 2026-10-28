@@ -45,17 +45,17 @@ ARCHIMED computes:
 - A pipeline for managing input scene, models and meteorology
 - A discretization of the sky with a turtle approach (directional fluxes)
 - The first-order light interception on the CPU using a rasterization approach
+- A separate CPU workflow for first-order interception and deterministic isotropic multiple scattering on regular voxel grids containing plant area density (`PAD`)
 - Iterative scattering between scene components making links from the projection of the first-order interception
 - A lot of helpers for reading/writing files, preparing scenes and models, exporting and visualizing the scene with Makie
 
-## GPU branch installation
+The triangle-scene and voxel workflows share meteorology, sky directions, and
+directional fluxes, but keep distinct result types and units. See the
+[voxel interception guide](https://VEZY.github.io/ArchimedLight.jl/dev/voxel_interception.html)
+for an in-memory example, historical `.vox` I/O, boundary semantics, and
+current limitations.
 
-Install this branch:
-
-```julia
-using Pkg
-Pkg.add(url="https://github.com/VEZY/ArchimedLight.jl", rev="gpu")
-```
+## Optional GPU setup
 
 Metal remains an optional dependency. On Apple Silicon, install Metal 1.10.3 or
 newer in the environment that runs the GPU backend. The active Metal toolchain
@@ -63,10 +63,11 @@ must also expose atomic support through KernelAbstractions (MSL 4.1 or newer):
 
 ```julia
 using Pkg
-
 Pkg.add("Metal")
-Pkg.add(url="https://github.com/VEZY/ArchimedLight.jl", rev="gpu")
 ```
+
+See the [GPU backend guide](https://VEZY.github.io/ArchimedLight.jl/dev/gpu_backends.html)
+for device configuration and validation.
 
 ## Core API
 
@@ -152,7 +153,7 @@ models = models_for(
         "Stem" => translucent(par=0.20, nir=0.50),
     ),
     "soil" => (
-        "ground" => translucent(par=0.10, nir=0.40),
+        "ground" => opaque(par=0.10, nir=0.40),
     ),
 )
 
@@ -225,7 +226,7 @@ julia --project=. example_1/full_featured_example.jl
 
 - `read_simulation("config.yml")` is the convenience entrypoint for file-driven workflows and returns `sim, meteo`.
 - You can call each stage independently through the module (`ArchimedLight.compute_sky`, `ArchimedLight.build_turtle`, `ArchimedLight.compute_first_order`, `ArchimedLight.compute_scattering`, `ArchimedLight.integrate_light`, ...).
-- File-based and in-memory workflows share the same runtime path: `read_scene(...)`, `PlantGeom.prepare_scene(...)`, and `PlantGeom.make_scene(...)` all produce `PlantGeom.SceneGeometry`, while `read_models(...)`, `prepare_models(...)`, and `models_for(...)` produce `LightModels`.
+- For triangle workflows, file-based and in-memory inputs share the same runtime path: `read_scene(...)`, `PlantGeom.prepare_scene(...)`, and `PlantGeom.make_scene(...)` all produce `PlantGeom.SceneGeometry`, while `read_models(...)`, `prepare_models(...)`, and `models_for(...)` produce `LightModels`.
 - `compute_sky` follows the ARCHIMED clearness/global conversion and DeJong hourly direct/diffuse partitioning.
 - `compute_sky` uses substep-weighted sun position (`radiation_timestep`) when sun angles are not provided.
 - Meteo `#' use: ...` consistency checks for `clearness`/`RI_SW_f`/`RI_PAR_f`/`RI_NIR_f` are enforced like Java.

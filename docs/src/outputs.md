@@ -1,12 +1,16 @@
 # Outputs
 
-The current Julia package exposes light results in three increasingly concrete forms:
+Triangle simulations expose light results in three increasingly concrete forms:
 
 1. in memory as `LightBudget`
 2. attached back onto MTG nodes as ARCHIMED-style attributes
 3. written to disk when you export the enriched scene
 
-This page documents those three layers and then explains the ARCHIMED-style CSV outputs used by the public writer and regression harness.
+This page documents those three layers and the ARCHIMED-style CSV outputs.
+Voxel results use the same metric selectors through
+`light_metric_values(scene, result, selector)`; see
+[From Triangles To Voxels](triangles_to_voxels.md) and the
+[voxel workflow](voxel_interception.md) for their array and table outputs.
 
 ## 1. In-Memory Outputs: `LightBudget`
 
@@ -158,6 +162,36 @@ can materialize detailed or grouped results when DataFrames.jl is loaded.
 Summing per-component energy (`*_energy` or historical `*_q`) gives an energy
 total. Flux values are normalized independently by each component's area, so
 their direct sum generally is not a meaningful scene-scale flux.
+
+### Voxel Individuals, Organs And Ground
+
+Voxel results use the same selectors, `reduce`, `by` and `sink` conventions.
+The default `domain=:vegetation` returns one row per voxel. Filtering by
+`individual_id` or `organ`, or grouping by either, selects the retained
+individual/organ contributions instead:
+
+```julia
+leaf_apar = light_metric_values(voxel_scene, voxel_result, :Ra_PAR_q;
+    individual_id=12, organ=:leaf, reduce=sum)
+individual_budget = light_metric_values(voxel_scene, voxel_series, :Ra_PAR_q;
+    reduce=sum, by=(:individual_id, :organ))
+soil_budget = light_metric_values(voxel_scene, voxel_series, :Ra_PAR_q;
+    domain=:ground, reduce=sum, by=:material_id)
+```
+
+These call shapes require an attributed JSONL result for individual/organ
+queries. IDs retain their input type: positive integers are stored as `Int`,
+and text IDs as `String`. Each scene uses one ID type; filters must match it.
+`individual_id=(nothing,)` selects unattributed vegetation. Spatial voxel
+filters can further restrict these rows.
+Ground rows instead expose `patch_id`, `material_id` and `surface_area`.
+
+Triangle queries include every geometric component, including ground. A voxel
+query includes only its selected domain: add vegetation and ground **energy**
+totals explicitly when a whole-scene absorption total is needed. Ground fluxes
+use soil surface area, while vegetation fluxes use plant area. The
+[tree tutorial](voxel_tree_tutorial.md#Query-Vegetation-And-Ground) gives a
+complete runnable example.
 
 ### Dynamic scenes
 

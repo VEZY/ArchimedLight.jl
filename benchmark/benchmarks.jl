@@ -317,6 +317,11 @@ SUITE["Synthetic"]["stacked plates with scattering"] =
         options = ArchimedLight.LightOptions(turtle_sectors=46, all_in_turtle=false, scattering=true, pixel_size=0.01)
     ) evals = 1
 
+# AirspeedVelocity also loads this script against base revisions without voxels.
+if isdefined(ArchimedLight, :VoxelGrid)
+    include(joinpath(@__DIR__, "voxel_benchmarks.jl"))
+end
+
 SUITE["Coffee"] = BenchmarkGroup()
 # Retain the figure's full scene and scattering workload at a CI-sized resolution.
 SUITE["Coffee"]["end-to-end 46 sectors scattering 5 mm"] =

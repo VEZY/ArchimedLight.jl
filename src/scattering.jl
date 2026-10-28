@@ -791,6 +791,14 @@ function _accumulate_scattering_counts!(
 end
 
 function _pair_counts_for_scattering(scene::PlantGeom.SceneGeometry, models::LightModels, turtle::TurtleGrid, options::LightOptions)
+    if _has_opaque_ground(models)
+        prepared = _prepare_interception_data(scene, models, options)
+        context = _opaque_ground_context(prepared.geometry, models)
+        if context !== nothing
+            counts, hits = _opaque_ground_pair_counts(prepared, models, turtle, options, context)
+            return counts, hits, prepared.geometry.node_ids, prepared.geometry.node_group
+        end
+    end
     geometry = _scene_geometry_for_interception(scene, models, options)
     virtual_nodes = _virtual_sensor_node_ids(geometry.node_group, geometry.node_type, models)
     cache_ctx = _projection_cache_context(geometry.vertices, geometry.faces, geometry.face2node, geometry.plotbox, options)
@@ -1223,6 +1231,8 @@ function _build_scattering_topology_cache(
     projections::AbstractVector{<:Union{DirectionProjectionResult,DenseDirectionProjectionResult}},
     stacks_sorted::Bool=false,
 )
+    _opaque_ground_context(prepared.geometry, models) === nothing || throw(ArgumentError(
+        "opaque ground topology needs facet-aware projections; build it with turtle and options"))
     pair_counts, weighted_hits = _pair_counts_from_projections(
         turtle,
         projections,
@@ -1244,6 +1254,8 @@ function _build_scattering_topology_cache(
     options::LightOptions;
     stacks_sorted::Bool=false,
 )
+    context = _opaque_ground_context(prepared.geometry, models)
+    context === nothing || return _opaque_ground_topology(scene, models, prepared, turtle, options, context)
     pair_counts, weighted_hits = _pair_counts_from_streamed_projections(
         prepared,
         turtle,
@@ -1674,6 +1686,11 @@ function build_scattering_transfer_graph(
     options::LightOptions,
     backend::RasterGPUScatteringBackend,
 )
+    context = _opaque_ground_context(data.prepared.geometry, models)
+    if context !== nothing
+        topology = _opaque_ground_topology(scene, models, data.prepared, turtle, options, context)
+        return _transfer_graph_from_topology(topology, first, options)
+    end
     pair_counts, weighted_hits_by_node = _pair_counts_from_rastergpu_projections(data, turtle, options)
     topology = _build_scattering_topology_cache(
         scene,

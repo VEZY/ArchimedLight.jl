@@ -125,8 +125,9 @@ counts overrepresent shallow directions relative to the technical manual's
 stated Lambertian assumption. Julia corrects this inherited discrepancy by
 weighting both links and total source hits by the direction's vertical component
 and sector solid angle before aggregation. Escaping source rays remain in the
-normalization. The equal two-sided split is retained, but scattering outputs
-intentionally differ from the historical Java reference. Finite angular and
+normalization. `Translucent` retains the equal two-sided split, but scattering
+outputs intentionally differ from the historical Java reference. The separate
+`Opaque` ground model instead reflects outward with zero diffuse transmission. Finite angular and
 pixel resolution still require convergence checks. See
 [Scattering And Optical Assumptions](theory_scattering.md) for the derivation.
 

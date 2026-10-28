@@ -75,7 +75,7 @@ read_simulation
   -> integrate_light
 ```
 
-What matters is that the options do not all act at the same stage. `meteo_range` is applied early, when the meteo table is filtered before the series is run. `check_meteo_boundaries` validates the selected forcing values, while `allow_overlapping_meteo_steps` decides whether overlapping intervals are rejected or kept. `radiation_timestep` comes into play when one meteo row is internally subdivided so that the sun path and the direct/diffuse split can be integrated more faithfully. `radiation_input_semantics` determines how supplied irradiance is converted to a full-step mean, while `scene_rotation` maps the geographic sun into the scene-local directional basis. `sky_sectors`, `all_in_turtle`, and `java_logged_turtle_dirs` define the directional representation of the sky itself. `pixel_size`, `toricity`, `area_ratio`, `cache_pixel_table`, `pixel_hit_stack_mode`, and `debug_drop_leading_hit` all belong to the raster projection machinery used for first-order interception. The scattering options act later, when intercepted light is propagated iteratively through the canopy. `cache_radiation` matters only in series mode when directional responses can be reused across many timesteps. `store_node_metadata` controls the lightweight per-scene metadata snapshot referenced by results, while `node_metadata_attributes` opts additional scalar MTG identifiers into that snapshot. Requesting `sky_fraction` in the output variables controls whether an extra per-node sky-view output is stored in each `LightStepResult`.
+What matters is that the options do not all act at the same stage. `meteo_range` is applied early, when the meteo table is filtered before the series is run. `check_meteo_boundaries` validates the selected forcing values, while `allow_overlapping_meteo_steps` decides whether overlapping intervals are rejected or kept. `radiation_timestep` comes into play when one meteo row is internally subdivided so that the sun path and the direct/diffuse split can be integrated more faithfully. `radiation_input_semantics` determines how supplied irradiance is converted to a full-step mean, while `scene_rotation` maps the geographic sun into the scene-local directional basis. `sky_sectors`, `all_in_turtle`, and `java_logged_turtle_dirs` define the directional representation of the sky itself. `toricity` controls horizontal wrapping for both triangle and voxel workflows. `pixel_size`, `area_ratio`, `cache_pixel_table`, `pixel_hit_stack_mode`, and `debug_drop_leading_hit` belong to the raster projection machinery used for triangle first-order interception. The scattering options act later, when intercepted light is propagated iteratively through the canopy. `cache_radiation` matters only in series mode when directional responses can be reused across many timesteps. `store_node_metadata` controls the lightweight per-scene metadata snapshot referenced by results, while `node_metadata_attributes` opts additional scalar MTG identifiers into that snapshot. Requesting `sky_fraction` in the output variables controls whether an extra per-node sky-view output is stored in each `LightStepResult`.
 
 This distinction is important for interpretation. Changing `pixel_size` or `sky_sectors` does not mean you have changed the plant or the atmosphere; it means you have changed the numerical approximation used to represent them. By contrast, changing `scattering`, `nir_interception`, or `nir_scattering` changes which physical processes are included in the simulation.
 
@@ -154,19 +154,32 @@ physical sun sector to receive that component. ArchimedLight then distributes
 the otherwise unrepresentable direct share over the available turtle sectors;
 this conservative fallback preserves the supplied full-step energy.
 
-### `scene_rotation`
+### [`scene_rotation`](@id scene_rotation)
 
-Rotation in degrees between geographic north and the scene's local coordinate
-system. Positive values rotate the geographic sun clockwise into local plot
-coordinates, matching ARCHIMED's compass-angle convention.
+Clockwise rotation, in degrees, applied to the geographic sun direction to
+express it in scene coordinates, matching ARCHIMED's compass-angle convention.
+The equivalent Julia constructor keyword is `LightOptions(scene_rotation_deg=...)`.
+The convention is `local_azimuth = mod(geographic_azimuth + scene_rotation, 360)`.
+
+If the scene's positive `y` axis has geographic bearing `θ`, measured clockwise
+from geographic north, use `scene_rotation = -θ`. For example, positive `y`
+pointing 30° east of north requires `scene_rotation_deg=-30.0`. Zero assumes
+positive `y` points toward geographic north, or accepts its alignment as an
+explicit approximation. This setting changes illumination alignment while
+retaining the scene geometry and its coordinate frame.
+
+For an east/north/elevation point cloud with no additional AMAPVox rotation,
+voxel index `j` follows grid north. Grid north can differ from geographic
+north, and AMAPVox's standard `.vox` header does not encode that difference.
+See [Coordinates, Grid North And Scene Rotation](@ref voxel-scene-orientation)
+for input assumptions and when to account for grid convergence.
 
 The diffuse turtle sectors themselves remain fixed in the scene-local basis.
 Only the geographic sun is transformed; clear-sky brightness and direct-beam
 weights are then evaluated against that transformed sun. This keeps the
 projection directions and local artificial-emitter quadrature stable while
 correctly changing which local directions receive anisotropic sky and direct
-radiation. The equivalent Julia constructor keyword is
-`LightOptions(scene_rotation_deg=...)`.
+radiation.
 
 ### `pixel_size`
 
@@ -322,8 +335,8 @@ This option should not change the physical result. Its role is purely practical:
 
 Enable the periodic wrapping of the plot in the horizontal plane.
 
-- `false`: a finite scene, with a fitted perpendicular projection canvas for each direction
-- `true`: projected pixels leaving one horizontal edge wrap to the opposite edge
+- `false`: a finite scene without horizontal repetition
+- `true`: rays leaving one horizontal edge wrap to the opposite edge
 
 This is how ARCHIMED represents repeated orchard or crop patterns with a finite representative tile.
 
@@ -332,10 +345,22 @@ When it is enabled, the plot is treated as one tile of an infinite periodic repe
 That can be appropriate for repeated crop rows or orchard motifs, because it
 represents neighboring copies of the same tile. An isolated plant or finite
 experimental plot instead needs `toricity=false` to remove those periodic
-neighbors. Its projection canvas is fitted to all scene geometry separately
+neighbors. For triangle scenes, the projection canvas is fitted to all geometry separately
 for each direction, so a tight XY domain no longer clips the illumination of
 upper plant parts. This automatic canvas changes the sampling bounds only: it
 does not enlarge the soil, add neighbors, or change component surface areas.
+
+The same `LightOptions.toricity` controls voxel transport. With `true`, rays
+wrap horizontally through repeating copies of the grid; with `false`, they
+terminate at the first lateral grid boundary. Voxel transport does not use a
+raster projection canvas.
+
+For voxel scenes with ground, the same option controls terrain repetition;
+ground constructors do not require a separate periodicity setting. Toric
+transport requires terrain bounds to match the grid, and height fields must
+also have matching elevations on opposite edges. Generic triangle terrain
+requires `toricity=false`.
+
 See [Scene Files And Semantics](reference_scene.md) for the physical plot-domain
 inputs.
 

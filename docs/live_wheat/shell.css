@@ -1,10 +1,16 @@
-/* Presentation shell only; numerical code and WGL geometry are untouched. */
+/* Shared presentation for both live demos; no numerical code or WGL geometry. */
 html, body { margin: 0; padding: 0; background: #fff; }
 body { overflow-x: hidden; }
 main { box-sizing: border-box; max-width: 1000px !important; padding: 8px !important; font-size: 15px !important; }
 main canvas { max-width: 100%; height: auto !important; }
+.live-demo-sliders { display: grid; grid-template-columns: 100px minmax(0, 1fr) 75px; align-items: center; column-gap: 18px; row-gap: 10px; }
+.live-demo-options { display: flex; flex-wrap: wrap; align-items: center; gap: 28px; margin: 14px 0 4px; }
+.live-demo-options select { font: inherit; padding: 3px 6px; }
+.live-demo-status { min-height: 1.5em; line-height: 1.5; color: #475569; margin: 10px 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.live-demo-caption, .live-demo-notes { color: #475569; font-size: 13px; margin: 8px 0; }
+.live-demo-notes summary { cursor: pointer; }
 #light-hour, #light-resolution { min-width: 0; }
 @media (max-width: 480px) {
-  main > div:first-child { grid-template-columns: 75px minmax(50px, 1fr) 55px !important; column-gap: 8px !important; }
-  main > div:nth-child(2) { gap: 12px !important; }
+  .live-demo-sliders { grid-template-columns: 75px minmax(0, 1fr) 55px; column-gap: 8px; }
+  .live-demo-options { gap: 12px; }
 }

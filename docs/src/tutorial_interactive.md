@@ -9,7 +9,7 @@ The key bridge is:
 
 ```@setup interactive_workflow
 using CairoMakie
-CairoMakie.activate!(type = "png")
+CairoMakie.activate!(type = "image/png")
 ```
 
 ## When To Use This Workflow
@@ -121,9 +121,11 @@ scene = PlantGeom.prepare_scene(scene_mtg;scene_xy_bounds=(-0.8, -0.8, 0.8, 0.8)
 
 ## Add Models
 
-ArchimedLight.jl needs optical models to compute light interception. We can define them directly in Julia as `GroupModel` and `TypeModel` objects, then prepare them with `prepare_models`. The example below defines two group models: one for the plant and one for the pavement. Each group model has one type model with `Translucent` interception and specific optical properties.
+ArchimedLight.jl needs optical models to compute light interception. We can define them directly in Julia as `GroupModel` and `TypeModel` objects, then prepare them with `prepare_models`. The example below defines two group models: one for the plant and one for the pavement. The plant uses `Translucent` models; the ground uses `Opaque` outward reflection.
 
-The pavement model is included here because we will add an explicit ground later on, and we want it to have different optical properties from the plant. Optical properties are defined as `(scattering_coeff_par, scattering_coeff_nir)`, where the absorbed fraction is `1 - scattering_coeff`.
+The ground reflectances are defined with `opaque(par=..., nir=...)`; its
+transmission is zero. Plant `Translucent` coefficients instead describe total
+diffuse scattering, split equally between reflection and transmission.
 
 ```@example interactive_workflow
 models = prepare_models([
@@ -149,13 +151,7 @@ models = prepare_models([
     GroupModel(
         "pavement";
         types=OrderedDict(
-            "Cobblestone" => TypeModel(
-                interception=InterceptionModel(
-                    model="Translucent",
-                    transparency=0.0,
-                    optical_properties=OpticalProperties(0.12, 0.60),
-                ),
-            ),
+            "Cobblestone" => opaque(par=0.12, nir=0.60),
         ),
     ),
 ])
