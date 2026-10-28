@@ -15,6 +15,20 @@ function _dda_first_boundary_time(origin, component, minimum, spacing, delta)
     return time
 end
 
+# A small forward probe can round back onto a wall, especially for a nearly
+# vertical ray or translated coordinates. Resolve that exact wall by direction;
+# retain the probe for tiny positive crossings skipped by the traversal tolerance.
+@inline function _dda_start_index(probe, origin, component, minimum, spacing, count, periodic)
+    if probe == origin && component != 0
+        wall = round(Int, (origin - minimum) / spacing)
+        if origin == minimum + wall * spacing
+            index = component < 0 ? wall : wall + 1
+            return periodic ? mod1(index, count) : clamp(index, 1, count)
+        end
+    end
+    return _voxel_axis_index(probe, minimum, spacing, count)
+end
+
 # One incident direction traces many rays through the same grid. Keep these
 # direction-only quantities outside that loop without changing their arithmetic.
 function _voxel_dda_setup(grid::VoxelGrid, ray_direction)
@@ -72,9 +86,12 @@ function _trace_voxel_ray_dda_prepared!(
     probe_time = max(probe_time, min(t_end / 2, tolerance))
     probe = _path_point(grid, ray_origin, ray_direction, probe_time, toricity)
     dimensions = setup.dimensions
-    i = _voxel_axis_index(probe[1], grid.minimum[1], grid.voxel_size[1], dimensions[1])
-    j = _voxel_axis_index(probe[2], grid.minimum[2], grid.voxel_size[2], dimensions[2])
-    k = _voxel_axis_index(probe[3], grid.minimum[3], grid.voxel_size[3], dimensions[3])
+    i = _dda_start_index(probe[1], ray_origin[1], ray_direction[1],
+        grid.minimum[1], grid.voxel_size[1], dimensions[1], toricity)
+    j = _dda_start_index(probe[2], ray_origin[2], ray_direction[2],
+        grid.minimum[2], grid.voxel_size[2], dimensions[2], toricity)
+    k = _dda_start_index(probe[3], ray_origin[3], ray_direction[3],
+        grid.minimum[3], grid.voxel_size[3], dimensions[3], false)
 
     step_x, step_y, step_z = setup.steps
     delta_x, delta_y, delta_z = setup.deltas

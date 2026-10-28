@@ -90,6 +90,65 @@ end
     end
 end
 
+@testitem "Voxel DDA resolves rounded probes on internal walls" tags=[:voxel, :fast] begin
+    transmission(grid, path) = exp(-0.5 * sum(grid.pad[segment.index...] * segment.length for segment in path))
+    # A near-vertical ray starting on a wall used to retain the column on the
+    # wrong side for its entire path. Check geometry and attenuation, including
+    # fractional cell widths and georeferenced origins.
+    for offset in ((0.0, 0.0, 0.0), (600_000.0, 4_100_000.0, 1_800.0)),
+        spacing in (1.0, 0.1), axis in 1:2, sign in (-1.0, 1.0), toricity in (false, true)
+        lower = offset
+        upper = ntuple(d -> offset[d] + (d == 3 ? 3 : 5) * spacing, 3)
+        column = sign < 0 ? 3 : 4
+        pad = zeros(5, 5, 3)
+        if axis == 1
+            pad[column, :, :] .= 1.0
+        else
+            pad[:, column, :] .= 1.0
+        end
+        grid = VoxelGrid(lower, upper, pad)
+        origin = ntuple(d -> d == 3 ? upper[d] :
+            lower[d] + (d == axis ? 3 : 0.5) * grid.voxel_size[d], 3)
+        direction = ntuple(d -> d == 3 ? -1.0 : d == axis ? sign * 1e-4 : 0.0, 3)
+        options = LightOptions(; toricity)
+        dda = trace_voxel_ray(grid, origin, direction; options, algorithm=:dda)
+        reference = trace_voxel_ray(grid, origin, direction; options, algorithm=:reference)
+        expected = [ntuple(d -> d == 3 ? k : d == axis ? column : 1, 3) for k in 3:-1:1]
+        @test [segment.index for segment in dda] == expected
+        @test [segment.index for segment in dda] == [segment.index for segment in reference]
+        @test [segment.length for segment in dda] ≈ [segment.length for segment in reference]
+        @test dda.exit_reason == reference.exit_reason == :bottom
+        @test transmission(grid, dda) ≈ exp(-0.5 * (upper[3] - lower[3]) * sqrt(1 + 1e-8))
+        @test transmission(grid, dda) ≈ transmission(grid, reference)
+    end
+
+    # At a translated periodic edge, a rounded negative probe must wrap into
+    # the final column rather than remain in the first column.
+    grid = VoxelGrid((1e6, 1e6, 1e6), (1e6 + 5, 1e6 + 1, 1e6 + 3), ones(5, 1, 3))
+    periodic_options = LightOptions(toricity=true)
+    for x in (grid.minimum[1], grid.maximum[1])
+        origin = (x, grid.minimum[2] + 0.5, grid.maximum[3])
+        dda = trace_voxel_ray(grid, origin, (-1e-4, 0, -1); options=periodic_options, algorithm=:dda)
+        reference = trace_voxel_ray(grid, origin, (-1e-4, 0, -1); options=periodic_options, algorithm=:reference)
+        @test [segment.index for segment in dda] == [(5, 1, 3), (5, 1, 2), (5, 1, 1)]
+        @test [segment.index for segment in dda] == [segment.index for segment in reference]
+        @test [segment.length for segment in dda] ≈ [segment.length for segment in reference]
+    end
+
+    # Preserve the probe's handling of a positive first crossing so close to
+    # the origin that both tracers omit its sub-tolerance segment.
+    grid = VoxelGrid((0, 0, 0), (1, 1, 1), ones(10, 10, 10))
+    origin = (prevfloat(3 * grid.voxel_size[1]), 0.05, 1.0)
+    for toricity in (false, true)
+        options = LightOptions(; toricity)
+        dda = trace_voxel_ray(grid, origin, (0.5, 0.0, -1.0); options, algorithm=:dda)
+        reference = trace_voxel_ray(grid, origin, (0.5, 0.0, -1.0); options, algorithm=:reference)
+        @test first(dda.segments).index == (4, 1, 10)
+        @test [segment.index for segment in dda] == [segment.index for segment in reference]
+        @test [segment.length for segment in dda] ≈ [segment.length for segment in reference]
+    end
+end
+
 @testitem "Voxel DDA matches the reference on seeded rays" tags=[:voxel, :fast] begin
     using Random
 

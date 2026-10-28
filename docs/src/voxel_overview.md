@@ -80,5 +80,3 @@ terrain import provide geometry; `LightOptions` provides calculation settings.
   exact surface intersections, and soil reflection.
 - [Scattering And Optical Parameters](theory_voxel_scattering.md): PAR/NIR
   coefficients, repeated interception, convergence, and energy conservation.
-- [Future Directions](voxel_future_directions.md): angular detail, alternative
-  spatial representations, and GPU execution beyond the current CPU model.
