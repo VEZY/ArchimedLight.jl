@@ -11,6 +11,7 @@ on:
       - "docs/**"
       - "src/**"
       - "ext/**"
+      - "scripts/build_evaluation_asset.jl"
       - "*.toml"
     tags: ["*"]
   pull_request:
@@ -22,6 +23,7 @@ on:
       - "docs/**"
       - "src/**"
       - "ext/**"
+      - "scripts/build_evaluation_asset.jl"
       - "*.toml"
     types: [opened, synchronize, reopened]
 
@@ -85,6 +87,10 @@ jobs:
             Pkg.develop(PackageSpec(path=pwd()))
             Pkg.instantiate()'
       - uses: julia-actions/julia-buildpkg@v1
+      - name: Check evaluation viewer data freshness
+        run: |
+          julia --project -e 'using Pkg; Pkg.instantiate()'
+          julia --project scripts/build_evaluation_asset.jl --check
       # makedocs runs the package and manual doctests together with the examples.
       - name: Build and deploy documentation
         uses: julia-actions/julia-docdeploy@v1

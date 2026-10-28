@@ -237,7 +237,7 @@ are computed offline; documentation builds only load the saved results.
 Then regenerate the documentation data from the repository root:
 
 ```sh
-python3 scripts/build_evaluation_asset.py
+julia --project scripts/build_evaluation_asset.jl
 ```
 
 The documentation export selects only the current algorithm and Lambertian
