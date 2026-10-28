@@ -21,7 +21,7 @@ tree_example_assets = joinpath(@__DIR__, "src", "assets", "voxel-tree")
 mkpath(tree_example_assets)
 for name in ("tree.vox", "tree.jsonl.gz", "terrain.ply")
     cp(joinpath(@__DIR__, "..", "examples", "voxel_tree", name),
-       joinpath(tree_example_assets, name); force=true)
+        joinpath(tree_example_assets, name); force=true)
 end
 
 # Update the videos:
@@ -70,6 +70,11 @@ makedocs(;
             "Interactive Workflow" => "tutorial_interactive.md",
             "Copy-Paste Templates" => "onboarding_templates.md",
         ],
+        "3D Mesh Modelling" => [
+            "Pipeline Overview" => "theory_pipeline.md",
+            "First-Order Interception" => "theory_interception.md",
+            "Scattering And Assumptions" => "theory_scattering.md",
+        ],
         "Voxel Modelling" => [
             "Start Here" => "voxel_overview.md",
             "From Triangles To Voxels" => "triangles_to_voxels.md",
@@ -90,11 +95,6 @@ makedocs(;
         "Outputs" => "outputs.md",
         "Evaluation" => "evaluation.md",
         "Performance Benchmarks" => "performance_benchmarks.md",
-        "Under The Hood" => [
-            "Pipeline Overview" => "theory_pipeline.md",
-            "First-Order Interception" => "theory_interception.md",
-            "Scattering And Assumptions" => "theory_scattering.md",
-        ],
         "Advanced Usage" => [
             "PlantSimEngine Coupling" => "plantsimengine.md",
             "File-Based Example" => "full_example.md",
