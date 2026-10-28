@@ -6,6 +6,7 @@ on:
       - "src/**"
       - "ext/**"
       - "test/**"
+      - "scripts/build_evaluation_asset.jl"
       - "validation/scattering_comparison/*.jl"
       - "*.toml"
       - ".github/workflows/TestOnPRs.yml"

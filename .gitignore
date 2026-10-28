@@ -16,8 +16,6 @@ java_implementation/*
 /benchmark/results/*
 !/benchmark/results/artifact_scene_matrix_cpu.tsv
 !/benchmark/results/artifact_scene_matrix_summary.md
-!/benchmark/results/voxel_cpu_baseline.md
-!/benchmark/results/voxel_scattering_cpu_baseline.md
 /benchmark/.asv/
 /benchmark/benchmark_scenes/
 /benchmark/benchmark_scenes.zip

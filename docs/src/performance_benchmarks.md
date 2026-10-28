@@ -219,7 +219,7 @@ The same complete case converged in 6 PAR iterations and 16 NIR iterations,
 with relative energy residuals below `3e-16`. The difference is expected from
 the example single-scattering albedos (`0.17` versus `0.85`). See the checked
 record in
-[`benchmark/results/voxel_scattering_cpu_baseline.md`](https://github.com/VEZY/ArchimedLight.jl/blob/main/benchmark/results/voxel_scattering_cpu_baseline.md)
+[historical voxel scattering measurements](https://github.com/VEZY/ArchimedLight.jl/blob/main/benchmark/README.md#voxel-scattering-cpu-baseline)
 for the environment, allocation counts, setup scaling, and interpretation.
 
 Voxel transport memory scales with cached path segments—occupied voxels times
@@ -272,10 +272,9 @@ For 4 rays per horizontal voxel, one directional response took 52.8 µs on an
 4.64 ms, or about 0.097 ms per step, clearly separating geometric construction
 from a warmed many-timestep workload.
 
-These are minimum warmed timings, not portable guarantees. The complete
-parameters, allocation counts, and proposed callback-based allocation
-optimization are recorded in
-[`benchmark/results/voxel_cpu_baseline.md`](https://github.com/VEZY/ArchimedLight.jl/blob/main/benchmark/results/voxel_cpu_baseline.md).
+These are minimum warmed timings, not portable guarantees. The historical
+parameters and allocation counts are recorded in
+[historical voxel CPU measurements](https://github.com/VEZY/ArchimedLight.jl/blob/main/benchmark/README.md#voxel-cpu-baseline).
 
 ## Reproduce The Figures And Tables
 
