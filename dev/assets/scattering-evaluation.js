@@ -1,6 +1,6 @@
 /*
  * Scene evaluation viewer. Add <div id="scattering-evaluation"></div> to a page.
- * Regenerate the embedded results with scripts/build_evaluation_asset.py.
+ * Regenerate the embedded results with scripts/build_evaluation_asset.jl.
  * Geometry and powers are fixed data; controls change the view, not the model.
  */
 (() => {
