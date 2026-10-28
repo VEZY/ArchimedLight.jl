@@ -1,0 +1,74 @@
+NIR = false
+assumed_ground_elevation_m = -5.0
+direct_fraction = 0.8
+display_bounds_m = [0.0, 60.0, -53.0, 7.0, -5.0, 60.0]
+fixed_colour_range_W_m2 = [0.0, 600.0]
+framerate = 8
+frames = 73
+interpolated_light_results = false
+largest_batch_retained_bytes = 117410178
+leaf_PAR_reflectance = 0.08
+leaf_PAR_transmittance = 0.07
+leaf_g = 0.5
+maximum_relative_first_order_PAR_balance_residual = 3.4313613031998496e-16
+missing_PAD_zero_imputed = 9375
+model_hours = [6.0, 6.166666666666667, 6.333333333333333, 6.5, 6.666666666666667, 6.833333333333333, 7.0, 7.166666666666667, 7.333333333333333, 7.5, 7.666666666666667, 7.833333333333333, 8.0, 8.166666666666666, 8.333333333333334, 8.5, 8.666666666666666, 8.833333333333334, 9.0, 9.166666666666666, 9.333333333333334, 9.5, 9.666666666666666, 9.833333333333334, 10.0, 10.166666666666666, 10.333333333333334, 10.5, 10.666666666666666, 10.833333333333334, 11.0, 11.166666666666666, 11.333333333333334, 11.5, 11.666666666666666, 11.833333333333334, 12.0, 12.166666666666666, 12.333333333333334, 12.5, 12.666666666666666, 12.833333333333334, 13.0, 13.166666666666666, 13.333333333333334, 13.5, 13.666666666666666, 13.833333333333334, 14.0, 14.166666666666666, 14.333333333333334, 14.5, 14.666666666666666, 14.833333333333334, 15.0, 15.166666666666666, 15.333333333333334, 15.5, 15.666666666666666, 15.833333333333334, 16.0, 16.166666666666668, 16.333333333333332, 16.5, 16.666666666666668, 16.833333333333332, 17.0, 17.166666666666668, 17.333333333333332, 17.5, 17.666666666666668, 17.833333333333332, 18.0]
+native_batch_size = 8
+rays_per_voxel = 256
+retained_plot_result_slots = 2
+scattering = false
+scene_rotation_deg = 0.0
+script_sha256 = "79bfc455ed0187d4c75d7acbbf0742d6c38487f1c5b2e402a879743721d17a6a"
+sky_sectors = 16
+snapshot_seconds = 60.0
+source = "Olivier Martin and Pol Kennel, CIRAD–AMAP · CC0 1.0 · doi:10.5281/zenodo.23695138"
+synthetic_maximum_sun_elevation_deg = 60.0
+synthetic_peak_horizontal_PAR_W_m2 = 600.0
+toricity = false
+unknown_PAR_reflectance = 0.08
+unknown_PAR_transmittance = 0.07
+unknown_optics = "same material as leaf; organ identities unchanged"
+video = "belinga_daylight.mp4"
+video_compression_crf = 20
+video_pixels_per_unit = 1.0
+view_only_crop = false
+view_selection = "full scene"
+
+video_sha256 = "b65d83315386de0e3ead377727da352c0acb532aee5ca304d76bc048b34bbaa5"
+poster_sha256 = "4ec17fd633ac4e205808d636cc014952478e59530e7882ce479bc8e943a1ff71"
+composition_sha256 = "4679b6f2638b53c12c8178ba87740e61a2842560a929dfd157973091149fd71b"
+dataset_doi = "10.5281/zenodo.23695138"
+video_codec = "h264"
+video_pixel_format = "yuv420p"
+video_dimensions = [1700, 1000]
+video_duration_seconds = 9.125
+video_size_bytes = 1913866
+
+[sampling_check]
+reference_rays_per_voxel = 1024
+reference_is_exact = false
+ground_flux_error_units = "W m^-2"
+
+[sampling_check.model_hour_8.rays_16]
+rmse = 25.846965766623228
+maximum_absolute_error = 75.1550403327004
+
+[sampling_check.model_hour_8.rays_256]
+rmse = 8.495279523931872
+maximum_absolute_error = 24.184315266283704
+
+[sampling_check.model_hour_12.rays_16]
+rmse = 10.670969788954025
+maximum_absolute_error = 66.79617553230105
+
+[sampling_check.model_hour_12.rays_256]
+rmse = 6.0892854015453475
+maximum_absolute_error = 19.93938722582942
+
+[sampling_check.model_hour_16.rays_16]
+rmse = 27.60257539747802
+maximum_absolute_error = 78.06903392662144
+
+[sampling_check.model_hour_16.rays_256]
+rmse = 8.969300430436416
+maximum_absolute_error = 24.45881038293777
