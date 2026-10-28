@@ -1,8 +1,8 @@
 /* The preview stays painted while WebGL initializes in the layer underneath. */
-#live-wheat {
+.live-light-demo {
   margin: 1.5rem 0 2rem;
 }
-#live-wheat .live-wheat-stage {
+.live-light-demo .live-wheat-stage {
   position: relative;
   width: 100%;
   height: 720px;
@@ -11,15 +11,15 @@
   border-radius: 0.75rem;
   background: #fff;
 }
-#live-wheat .live-wheat-preview,
-#live-wheat .live-wheat-frame {
+.live-light-demo .live-wheat-preview,
+.live-light-demo .live-wheat-frame {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   border: 0;
 }
-#live-wheat .live-wheat-preview {
+.live-light-demo .live-wheat-preview {
   display: block;
   z-index: 1;
   object-fit: contain;
@@ -27,29 +27,29 @@
   opacity: 1;
   transition: opacity 160ms ease;
 }
-#live-wheat .live-wheat-frame {
+.live-light-demo .live-wheat-frame {
   opacity: 0;
   pointer-events: none;
 }
-#live-wheat[data-state="ready"] .live-wheat-frame {
+.live-light-demo[data-state="ready"] .live-wheat-frame {
   opacity: 1;
   pointer-events: auto;
 }
-#live-wheat[data-state="ready"] .live-wheat-preview {
+.live-light-demo[data-state="ready"] .live-wheat-preview {
   opacity: 0;
   pointer-events: none;
 }
-#live-wheat .live-wheat-caption {
+.live-light-demo .live-wheat-caption {
   margin-top: 0.65rem;
   font-size: 0.9em;
 }
-#live-wheat .live-wheat-status {
+.live-light-demo .live-wheat-status {
   display: inline;
 }
-#live-wheat .live-wheat-status:not(:empty)::after {
+.live-light-demo .live-wheat-status:not(:empty)::after {
   content: " ";
 }
-#live-wheat[data-state="ready"] .live-wheat-status {
+.live-light-demo[data-state="ready"] .live-wheat-status {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -70,18 +70,36 @@
   border-radius: 0.75rem;
 }
 @media (max-width: 600px) {
-  #live-wheat .live-wheat-stage { height: 690px; }
+  .live-light-demo .live-wheat-stage { height: 690px; }
   .archimed-animations { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {
-  #live-wheat .live-wheat-preview { transition: none; }
+  .live-light-demo .live-wheat-preview { transition: none; }
 }
 
 /* The package introduction and logo lead; the optional demo stays in the body. */
 .VPHome .VPHero { padding-bottom: 40px; }
 .VPHome .VPHero .image { width: clamp(220px, 30vw, 340px); }
 .VPHome .VPHero .image img { display: block; aspect-ratio: 1; }
-#live-wheat { max-width: 1000px; margin-inline: auto; }
+.live-light-demo { max-width: 1000px; margin-inline: auto; }
 @media (min-width: 1000px) {
-  #live-wheat .live-wheat-stage { height: 650px; }
+  .live-light-demo .live-wheat-stage { height: 650px; }
+}
+
+.live-light-demo[hidden] { display: none; }
+#live-demo-switcher { max-width: 1000px; margin: 1.5rem auto; }
+#live-demo-switcher button {
+  padding: 0.65rem 1rem;
+  margin: 0 0.5rem 0.5rem 0;
+  border: 1px solid #b8c2cc;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+#live-demo-switcher button[aria-pressed="true"] {
+  background: #b94c48;
+  border-color: #b94c48;
+  color: #fff;
 }
