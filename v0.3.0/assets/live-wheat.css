@@ -1,0 +1,105 @@
+/* The preview stays painted while WebGL initializes in the layer underneath. */
+.live-light-demo {
+  margin: 1.5rem 0 2rem;
+}
+.live-light-demo .live-wheat-stage {
+  position: relative;
+  width: 100%;
+  height: 720px;
+  overflow: hidden;
+  border: 1px solid #d8dee6;
+  border-radius: 0.75rem;
+  background: #fff;
+}
+.live-light-demo .live-wheat-preview,
+.live-light-demo .live-wheat-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+.live-light-demo .live-wheat-preview {
+  display: block;
+  z-index: 1;
+  object-fit: contain;
+  background: #fff;
+  opacity: 1;
+  transition: opacity 160ms ease;
+}
+.live-light-demo .live-wheat-frame {
+  opacity: 0;
+  pointer-events: none;
+}
+.live-light-demo[data-state="ready"] .live-wheat-frame {
+  opacity: 1;
+  pointer-events: auto;
+}
+.live-light-demo[data-state="ready"] .live-wheat-preview {
+  opacity: 0;
+  pointer-events: none;
+}
+.live-light-demo .live-wheat-caption {
+  margin-top: 0.65rem;
+  font-size: 0.9em;
+}
+.live-light-demo .live-wheat-status {
+  display: inline;
+}
+.live-light-demo .live-wheat-status:not(:empty)::after {
+  content: " ";
+}
+.live-light-demo[data-state="ready"] .live-wheat-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+.archimed-animations {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+.archimed-animations img {
+  width: 100%;
+  height: auto;
+  border-radius: 0.75rem;
+}
+@media (max-width: 600px) {
+  .live-light-demo .live-wheat-stage { height: 690px; }
+  .archimed-animations { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-light-demo .live-wheat-preview { transition: none; }
+}
+
+/* The package introduction and logo lead; the optional demo stays in the body. */
+.VPHome .VPHero { padding-bottom: 40px; }
+.VPHome .VPHero .image { width: clamp(220px, 30vw, 340px); }
+.VPHome .VPHero .image img { display: block; aspect-ratio: 1; }
+.live-light-demo { max-width: 1000px; margin-inline: auto; }
+@media (min-width: 1000px) {
+  .live-light-demo .live-wheat-stage { height: 650px; }
+}
+
+.live-light-demo[hidden] { display: none; }
+#live-demo-switcher { max-width: 1000px; margin: 1.5rem auto; }
+#live-demo-switcher button {
+  padding: 0.65rem 1rem;
+  margin: 0 0.5rem 0.5rem 0;
+  border: 1px solid #b8c2cc;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+#live-demo-switcher button[aria-pressed="true"] {
+  background: #b94c48;
+  border-color: #b94c48;
+  color: #fff;
+}
