@@ -585,7 +585,10 @@ end
 
 # Both raster modes report horizontal projected area. The finite-scene
 # raster converts its ray-normal pixel area back to this basis internally.
-@inline _sky_sector_weight(sector) = 2 * sector.weight * Float64(sector.direction[3])
+@inline function _sky_sector_weight(sector::TurtleSector)
+    dz = Float64(sector.direction[3])::Float64
+    return 2 * sector.weight * dz
+end
 
 function _sky_has_transmitting_geometry(prepared)
     return any(eachindex(prepared.node_transparency_by_index)) do i
