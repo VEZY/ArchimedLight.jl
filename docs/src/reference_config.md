@@ -320,7 +320,7 @@ when `opf_variables` reuses the same YAML anchor as `component_variables`.
 
 This output is useful for coupled models such as PlantBiophysics that need a sky-view fraction on each MTG object. When requested, `read_options` sets `LightOptions.include_sky_fraction=true`, and `attach_light_step!` / `attach_light_series!` can export it back to the MTG with `fields=[:sky_fraction]`.
 
-The calculation reuses the same directional visible-area machinery as the light interception code. Because it is an additional output and not needed for the core light budget, it is not stored unless the output variable is requested or `LightOptions(include_sky_fraction=true)` is constructed directly in Julia.
+See [Longwave sky-view factor](outputs.md#longwave-sky-view-factor) for the two-face convention, raw turtle quadrature, and export behavior.
 
 ### `cache_pixel_table`
 

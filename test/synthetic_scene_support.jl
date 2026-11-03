@@ -63,7 +63,7 @@ function _synthetic_options(;
     )
 end
 
-function _default_synthetic_models()
+function _default_synthetic_models(; transparency=0.0)
     ArchimedLight.prepare_models([
         ArchimedLight.GroupModel(
             "*";
@@ -71,7 +71,7 @@ function _default_synthetic_models()
                 "*" => ArchimedLight.TypeModel(
                     interception=ArchimedLight.InterceptionModel(
                         model="Translucent",
-                        transparency=0.0,
+                        transparency=transparency,
                         optical_properties=ArchimedLight.OpticalProperties(0.15, 0.30),
                     ),
                 ),

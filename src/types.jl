@@ -811,7 +811,8 @@ Fields:
   has no NIR [`OpticalProperties`](@ref).
 - `cache_radiation`: reuse directional responses across series steps when
   possible.
-- `include_sky_fraction`: store the per-node `sky_fraction` map in each
+- `include_sky_fraction`: store the per-node isotropic upper-hemisphere longwave
+  sky-view factor in the `sky_fraction` map of each
   [`LightStepResult`](@ref). Leave `false` unless downstream code needs it.
   [`ArchimedLightModel`](@ref) enables this automatically for its organ outputs.
   When options are read from a config file, this is enabled by requesting

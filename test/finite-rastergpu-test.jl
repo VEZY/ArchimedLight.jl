@@ -89,3 +89,26 @@ end
         end
     end
 end
+
+@testitem "RasterGPU triangle steps share the geometric longwave sky view" tags=[:fast, :raster_gpu, :sky_fraction] setup=[HelperModule] begin
+    import KernelAbstractions
+    AL = ArchimedLight
+    scene = HelperModule._synthetic_quad_scene([
+        (p1=(0.0, 0.0, 0.0), p2=(0.5, 0.0, sqrt(3) / 2),
+         p3=(0.5, 1.0, sqrt(3) / 2), p4=(0.0, 1.0, 0.0)),
+    ])
+    models = HelperModule._default_synthetic_models()
+    sky = AL.SkyState(180.0, 60.0, 100.0, 50.0, 0.5, 0.5)
+    gpu = AL.RasterGPUBackend(backend=KernelAbstractions.CPU())
+    for toricity in (false, true)
+        scene.scene_xy_bounds = (-3.0, -3.0, 4.0, 4.0)
+        options = AL.LightOptions(; toricity, pixel_size=0.05, scattering=false,
+            turtle_sectors=17, include_sky_fraction=true)
+        cpu_sim = AL.LightSimulation(scene, models; options)
+        gpu_sim = AL.LightSimulation(scene, models; options, interception_backend=gpu)
+        cpu_step = AL.run_light(cpu_sim, sky; step_duration_seconds=1.0)
+        gpu_step = AL.run_light(gpu_sim, sky; step_duration_seconds=1.0)
+        @test gpu_sim.cache.resolved_interception_backend === gpu
+        @test gpu_step.sky_fraction == cpu_step.sky_fraction
+    end
+end

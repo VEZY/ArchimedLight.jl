@@ -622,19 +622,14 @@ function _key_columns_for_file(name::String, cols::Vector{String})
     return String[]
 end
 
-function _fixture_id_from_label(label::AbstractString)
-    isempty(label) && return ""
-    return first(split(String(label), ":"; limit=2))
-end
-
-function _stable_value_columns(name::String, cols::Vector{String}; label::AbstractString="")
-    fixture_id = _fixture_id_from_label(label)
+function _stable_value_columns(name::String, cols::Vector{String})
+    # Historical Java sky_fraction uses a different directional average.
+    # Longwave sky view is checked against geometry in finite-projection-test.jl.
     wanted =
         if name == "component_values.csv"
             [
                 "area",
                 "barycentre_z",
-                "sky_fraction",
                 "Ri_PAR_0_f",
                 "Ri_NIR_0_f",
                 "Ri_PAR_0_q",
@@ -657,9 +652,6 @@ function _stable_value_columns(name::String, cols::Vector{String}; label::Abstra
         else
             cols
         end
-    if name == "component_values.csv" && startswith(fixture_id, "test-cafeier_sensor")
-        wanted = [c for c in wanted if c != "sky_fraction"]
-    end
     keep = Set(wanted)
     return [c for c in cols if c in keep]
 end
@@ -698,7 +690,7 @@ function compare_csv_reference(expected_path::AbstractString, observed_path::Abs
     cols = String[string(n) for n in propertynames(first(exp_rows))]
     key_cols = _key_columns_for_file(name, cols)
     isempty(key_cols) && error("$(label): unable to infer key columns for $(name)")
-    value_cols = [c for c in _stable_value_columns(name, cols; label=label) if !(c in key_cols)]
+    value_cols = [c for c in _stable_value_columns(name, cols) if !(c in key_cols)]
 
     keyf(row) = Tuple(_row_get(row, c) for c in key_cols)
     exp_map = Dict{Tuple,Any}(keyf(r) => r for r in exp_rows)

@@ -250,6 +250,7 @@ struct SectorResponsesCache
     emitter_escaped_power_nir::DenseNodeMap{Float64}
     emitter_transfer::Union{Nothing,EmitterTransferResult}
     scattering_topology::Union{Nothing,ScatteringTopologyCache}
+    sky_visible_sum::Union{Nothing,Vector{Float64}}
 end
 
 function _dense_sector_response_storage(
@@ -300,6 +301,7 @@ end
 function _sector_responses_host_bytes(responses::SectorResponsesCache)
     dense = responses.dense
     return sizeof(responses.node_ids) +
+           (responses.sky_visible_sum === nothing ? 0 : _cache_vector_retained_bytes(responses.sky_visible_sum)) +
            sizeof(dense.projected_area_by_sector) +
            sizeof(dense.projected_area_active_indices) +
            sizeof(dense.projected_area_active_offsets) +
@@ -449,12 +451,23 @@ function _build_sector_responses(
     scattering_scratch = options.scattering ? ScatteringStackScratch() : nothing
     opaque_ground = _prepared_opaque_ground_context(prepared)
     no_virtual_nodes = isempty(prepared.virtual_nodes)
+    # An opaque response with no one-sided ground filtering is already geometric.
+    sky_needs_opaque_reduction = options.include_sky_fraction &&
+        (opaque_ground !== nothing || _sky_has_transmitting_geometry(prepared))
+    sky_visible_sum = sky_needs_opaque_reduction ? zeros(Float64, length(geometry.node_ids)) : nothing
+    opaque_area = sky_needs_opaque_reduction ? similar(sky_visible_sum) : nothing
+    zero_transparency = sky_needs_opaque_reduction ? zeros(Float64, length(geometry.node_ids)) : nothing
 
     for i in 1:n
         sector = turtle.sectors[i]
         projection = _prepared_direction_projection(prepared, sector.direction, options)
         sector_area = _first_order_visible_area(prepared, projection,
             sector.direction, options, opaque_ground)
+        if sky_visible_sum !== nothing && sector.source == :sky
+            _opaque_sky_area!(opaque_area, prepared, projection, options, zero_transparency;
+                stacks_sorted=opaque_ground === nothing)
+            _accumulate_scaled!(sky_visible_sum, opaque_area, _sky_sector_weight(sector))
+        end
         _store_sector_area_and_active_indices!(
             projected_area_by_sector,
             projected_area_active_indices,
@@ -561,6 +574,7 @@ function _build_sector_responses(
         emitter_escaped_power_nir,
         emitter_transfer,
         scattering_topology,
+        sky_visible_sum,
     )
 end
 
@@ -569,29 +583,49 @@ function _build_sector_responses(scene::PlantGeom.SceneGeometry, models::LightMo
     return _build_sector_responses(prepared, scene, models, turtle, options)
 end
 
+# Both raster modes report horizontal projected area. The finite-scene
+# raster converts its ray-normal pixel area back to this basis internally.
+@inline _sky_sector_weight(sector) = 2 * sector.weight * Float64(sector.direction[3])
+
+function _sky_has_transmitting_geometry(prepared)
+    return any(eachindex(prepared.node_transparency_by_index)) do i
+        !prepared.virtual_node_mask[i] && !iszero(prepared.node_transparency_by_index[i])
+    end
+end
+
+function _opaque_sky_area!(area, prepared, projection, options, zero_transparency; stacks_sorted=false)
+    geometry = prepared.geometry
+    return _visible_area_from_projection_dense!(area, projection, options, geometry.plotbox,
+        prepared.virtual_node_mask, zero_transparency, geometry, stacks_sorted)
+end
+
+function _sky_fraction_by_node(scene, node_ids, visible_sum)
+    out = Dict{Int,Float64}()
+    sizehint!(out, length(node_ids))
+    @inbounds for (i, nid) in enumerate(node_ids)
+        area = _scene_area(scene, nid, 0.0)
+        out[nid] = area > 0.0 ? visible_sum[i] / area : 0.0
+    end
+    return out
+end
+
 function _sky_fraction_from_sector_responses(
     scene::PlantGeom.SceneGeometry,
     responses::SectorResponsesCache,
     turtle::TurtleGrid,
 )
-    sky_count = 0
-    visible_sum = zeros(Float64, length(responses.node_ids))
-    for (i, sector) in enumerate(turtle.sectors)
-        sector.source == :sun && continue
-        sky_count += 1
-        @inbounds for j in _sector_active_indices(responses, i)
-            pa = _sector_area_value(responses, i, j)
-            visible_sum[j] += pa
+    visible_sum = responses.sky_visible_sum
+    if visible_sum === nothing
+        visible_sum = zeros(Float64, length(responses.node_ids))
+        for (i, sector) in enumerate(turtle.sectors)
+            sector.source == :sky || continue
+            weight = _sky_sector_weight(sector)
+            @inbounds for j in _sector_active_indices(responses, i)
+                visible_sum[j] += weight * _sector_area_value(responses, i, j)
+            end
         end
     end
-
-    out = Dict{Int,Float64}()
-    @inbounds for i in eachindex(responses.node_ids)
-        nid = responses.node_ids[i]
-        area = _scene_area(scene, nid, 0.0)
-        out[nid] = area <= 0.0 || sky_count == 0 ? 0.0 : visible_sum[i] / sky_count / area
-    end
-    return out
+    return _sky_fraction_by_node(scene, responses.node_ids, visible_sum)
 end
 
 function _compute_sky_fraction(
@@ -602,15 +636,21 @@ function _compute_sky_fraction(
     prepared::Union{Nothing,PreparedInterceptionData}=nothing,
     responses_cache::Union{Nothing,SectorResponsesCache}=nothing,
 )
-    responses =
-        if responses_cache !== nothing
-            responses_cache
-        elseif prepared !== nothing
-            _build_sector_responses(prepared, scene, models, turtle, options)
-        else
-            _build_sector_responses(scene, models, turtle, options)
-        end
-    return _sky_fraction_from_sector_responses(scene, responses, turtle)
+    responses_cache === nothing ||
+        return _sky_fraction_from_sector_responses(scene, responses_cache, turtle)
+
+    prepared === nothing && (prepared = _prepare_interception_data(scene, models, options))
+    node_ids = prepared.geometry.node_ids
+    visible_sum = zeros(Float64, length(node_ids))
+    opaque_area = similar(visible_sum)
+    zero_transparency = zeros(Float64, length(node_ids))
+    for sector in turtle.sectors
+        sector.source == :sky || continue
+        projection = _prepared_direction_projection(prepared, sector.direction, options)
+        _opaque_sky_area!(opaque_area, prepared, projection, options, zero_transparency)
+        _accumulate_scaled!(visible_sum, opaque_area, _sky_sector_weight(sector))
+    end
+    return _sky_fraction_by_node(scene, node_ids, visible_sum)
 end
 
 function _combine_sector_responses(

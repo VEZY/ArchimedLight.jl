@@ -898,8 +898,8 @@ end
     runtime = H.object_runtime(kernel, (:lower, :upper); consumer=true)
     simulation = run!(runtime; outputs=:none)
     # The one-sector fixture looks straight up: an exposed horizontal leaf
-    # has unit visibility, and the identical opaque leaf below is hidden.
-    @test final_state(simulation, :upper).sky_fraction ≈ 1.0
+    # gets raw quadrature weight 2, and the identical leaf below is hidden.
+    @test final_state(simulation, :upper).sky_fraction ≈ 2.0
     @test final_state(simulation, :lower).sky_fraction ≈ 0.0 atol=1e-12
     @test final_state(simulation, :lower).seen_sky_fraction ≈ 0.0 atol=1e-12
 end

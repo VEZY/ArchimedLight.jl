@@ -76,10 +76,31 @@ step budget exposes every emitted band, including custom bands, through
 `step.budget.emitter_escaped_energy_per_band[band]`. For PAR and NIR this is the
 corresponding escaped power multiplied by the step duration in seconds.
 
-If you need canopy-view metadata for coupled models, `step.sky_fraction` stores
-the per-node visible-sky fraction when `options.include_sky_fraction=true`.
-When using a YAML config, `read_options` enables that option when
-`component_variables.sky_fraction` or `opf_variables.sky_fraction` is `true`.
+### Longwave sky-view factor
+
+`step.sky_fraction` gives the dimensionless geometric view of an isotropic upper
+hemisphere for each triangle-mesh component, on the two-face convention used by
+Monteith. For each sky sector, ArchimedLight multiplies the visible horizontal
+projected area by `2 * sector.weight * sector.direction[3]`. It sums those areas
+and divides by the component's true one-sided mesh area. The explicit sun is
+excluded. Scene surfaces are opaque for this calculation and virtual sensors
+retain their non-blocking behavior. Shortwave forcing, scattering, material
+transmission and emitter power do not enter the calculation.
+
+The calculation uses the configured turtle directions and their raw solid-angle
+weights, without horizontal renormalization or clipping. An unobstructed planar
+leaf approaches 1 at any inclination as quadrature converges. A coarse turtle
+can deviate substantially. For example, a single zenith sector gives 2 for an
+unobstructed horizontal leaf.
+
+Set `LightOptions(include_sky_fraction=true)` to retain the values. YAML
+`component_variables.sky_fraction: true` and `opf_variables.sky_fraction: true`
+enable the same option. The PlantSimEngine adapter requests the field for its
+organ outputs. Ordinary triangle runs skip the calculation. The explicit
+`write_component_values` export includes the column and reconstructs it from
+geometry if the supplied result has no retained values. A matching directional
+cache can supply opaque visible areas without rasterizing again. Raster GPU runs use the
+CPU geometry path for this diagnostic. Voxel results do not provide this field.
 
 ## 2. Query Values By Scene Metadata
 
