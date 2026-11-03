@@ -173,7 +173,57 @@ end
         step = AL.run_light(simulation, sky; step_duration_seconds=1.0)
         @test all(iszero, values(step.first_order.incident_power.par))
         @test all(iszero, values(step.first_order.incident_power.nir))
-        @test isapprox(step.sky_fraction[1], 1.0; atol=2e-6)
+        expected = sum(2 * sector.weight * sector.direction[3] for sector in step.turtle.sectors)
+        @test isapprox(step.sky_fraction[1], expected; atol=2e-6)
+    end
+end
+
+@testitem "Isotropic longwave sky view uses opaque geometry and solid angles" tags = [:synthetic, :fast, :sky_fraction] setup = [HelperModule] begin
+    AL = ArchimedLight
+    H = HelperModule
+    models = H._default_synthetic_models()
+    translucent = H._default_synthetic_models(; transparency=0.8)
+    sky = AL.SkyState(180.0, 60.0, 100.0, 50.0, 0.5, 0.5)
+    horizontal = (p1=(0.0, 0.0, 0.0), p2=(1.0, 0.0, 0.0),
+        p3=(1.0, 1.0, 0.0), p4=(0.0, 1.0, 0.0), group="leaf")
+    tilted = merge(horizontal, (p2=(0.5, 0.0, sqrt(3) / 2), p3=(0.5, 1.0, sqrt(3) / 2)))
+    upper = merge(horizontal, (p1=(0.0, 0.0, 0.1), p2=(1.0, 0.0, 0.1),
+        p3=(1.0, 1.0, 0.1), p4=(0.0, 1.0, 0.1)))
+
+    solve(scene, models, options) = AL.run_light(AL.LightSimulation(scene, models; options), sky;
+        step_duration_seconds=1.0)
+    for toricity in (false, true), cache_radiation in (false, true)
+        options = AL.LightOptions(; toricity, cache_radiation, pixel_size=0.05,
+            turtle_sectors=61, scattering=false, include_sky_fraction=true)
+        for (quad, normal) in ((horizontal, (0.0, 0.0, 1.0)), (tilted, (-sqrt(3) / 2, 0.0, 0.5)))
+            scene = H._synthetic_quad_scene([quad])
+            scene.scene_xy_bounds = (-3.0, -3.0, 4.0, 4.0)
+            step = solve(scene, models, options)
+            expected = sum(2 * s.weight * abs(sum(normal .* s.direction))
+                for s in step.turtle.sectors if s.source == :sky)
+            @test step.sky_fraction[1] ≈ expected atol=0.02
+            @test step.sky_fraction[1] ≈ 1.0 atol=0.04
+        end
+        scene = H._synthetic_quad_scene([horizontal, upper])
+        zenith = AL.LightOptions(options; turtle_sectors=1)
+        opaque_step = solve(scene, models, zenith)
+        translucent_step = solve(scene, translucent, zenith)
+        disabled_step = solve(scene, translucent, AL.LightOptions(zenith; include_sky_fraction=false))
+        @test translucent_step.sky_fraction == opaque_step.sky_fraction
+        @test opaque_step.sky_fraction[1] == 0.0
+        @test opaque_step.sky_fraction[2] ≈ 2.0
+        @test disabled_step.sky_fraction === nothing
+        @test disabled_step.first_order.incident_power.par == translucent_step.first_order.incident_power.par
+    end
+end
+
+@testitem "YAML output requests opt in to longwave sky view" tags = [:fast, :sky_fraction] begin
+    for block in ("component_variables", "opf_variables"), enabled in (false, true)
+        mktemp() do path, io
+            write(io, "$(block):\n  sky_fraction: $(enabled)\n")
+            close(io)
+            @test ArchimedLight.read_options(path).include_sky_fraction == enabled
+        end
     end
 end
 

@@ -145,7 +145,7 @@ The default `:coupling` schema keeps the hot publication path compact:
 | `Ra_SW_f` | `Ra_PAR_f + Ra_NIR_f` | `W m⁻²` |
 | `aPPFD` | absorbed photosynthetic photon flux density | `μmol m⁻² s⁻¹` |
 | `area` | mesh surface area used by the light solver for normalization | `m²` |
-| `sky_fraction` | simulated visible-sky fraction, area-weighted over the organ components | dimensionless |
+| `sky_fraction` | isotropic longwave sky-view factor, area-weighted over the organ components | dimensionless |
 
 `area` is the sum of the retained geometric triangle areas mapped to each
 target object. For a leaf represented by a single lamina surface, this is its

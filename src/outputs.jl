@@ -484,31 +484,31 @@ function _component_sky_fraction_per_node(
     models::LightModels,
     step::LightStepResult,
     options::LightOptions,
-    node_ids,
+    _node_ids=nothing;
+    prepared=nothing,
 )
     step.sky_fraction !== nothing && return step.sky_fraction
 
-    responses = _build_sector_responses(scene, models, step.turtle, options)
-    sky_count = 0
-    visible_sum = Dict{Int,Float64}()
-    for (i, sector) in enumerate(step.turtle.sectors)
-        sector.source == :sun && continue
-        sky_count += 1
-        for (nid, area) in _sector_projected_area_pairs(responses, i)
-            visible_sum[nid] = get(visible_sum, nid, 0.0) + area
-        end
-    end
+    return _compute_sky_fraction(scene, models, step.turtle, options; prepared)
+end
 
-    out = Dict{Int,Float64}()
-    for nid in node_ids
-        area = _scene_area(scene, nid, 0.0)
-        if area <= 0.0 || sky_count == 0
-            out[nid] = 0.0
-        else
-            out[nid] = get(visible_sum, nid, 0.0) / sky_count / area
+function _component_export_sky_fraction(sim::LightSimulation, step::LightStepResult)
+    step.sky_fraction !== nothing && return step.sky_fraction
+    cache = sim.cache
+    prepared = nothing
+    if cache !== nothing && cache.scene === sim.scene && step.render_geometry === cache.render_geometry
+        prepared = cache.prepared
+        entry = get(cache.entries, _turtle_cache_key(step.turtle, sim.options), nothing)
+        if entry !== nothing
+            responses = entry.responses_cache
+            if responses.sky_visible_sum !== nothing ||
+               (!_sky_has_transmitting_geometry(responses.prepared) &&
+                !any(_is_opaque_interception, responses.prepared.node_interception_by_index))
+                return _sky_fraction_from_sector_responses(sim.scene, responses, step.turtle)
+            end
         end
     end
-    return out
+    return _component_sky_fraction_per_node(sim.scene, sim.models, step, sim.options; prepared)
 end
 
 function _component_display_type(scene::PlantGeom.SceneGeometry, models::LightModels, nid::Int)
@@ -522,11 +522,9 @@ function _component_rows_for_step(
     metadata,
     order;
     include_scattering_columns::Bool,
+    sky_fraction=_component_export_sky_fraction(sim, step),
 )
     scene = sim.scene
-    models = sim.models
-    options = sim.options
-    sky_fraction = _component_sky_fraction_per_node(scene, models, step, options, metadata.node_id)
     rows = OrderedDict{String,Any}[]
     for i in order
         nid = metadata.node_id[i]
@@ -615,6 +613,7 @@ function write_component_values(
 
     rows = OrderedDict{String,Any}[]
     contexts = IdDict{Any,Any}()
+    reconstructed_sky = Dict{UInt64,Dict{Int,Float64}}()
     for (i, step) in enumerate(steps)
         # Results from one prepared scene share the snapshot (or render geometry
         # when metadata storage is disabled). Prepare identity/order once per set.
@@ -622,6 +621,14 @@ function write_component_values(
         metadata, order = get!(contexts, key) do
             metadata = _component_output_metadata(sim, step)
             (metadata, _component_output_order(metadata))
+        end
+        sky_fraction = step.sky_fraction
+        if sky_fraction === nothing
+            # The writer uses a single scene context and the explicit sun does
+            # not affect the sky-view factor.
+            sky_fraction = get!(reconstructed_sky, _turtle_cache_key(step.turtle, sim.options)) do
+                _component_export_sky_fraction(sim, step)
+            end
         end
         append!(
             rows,
@@ -632,6 +639,7 @@ function write_component_values(
                 metadata,
                 order;
                 include_scattering_columns=include_scattering_columns,
+                sky_fraction=sky_fraction,
             ),
         )
     end

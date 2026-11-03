@@ -29,9 +29,9 @@ The separate [`component_values`](@ref) table API names this quantity
 `radiative_mesh_area`.
 
 Both schemas also publish dimensionless `sky_fraction`, the mesh-area-weighted
-mean of `LightStepResult.sky_fraction` over each organ's components. This
-preserves the solver's existing mean-visible-projected-area convention without
-rescaling it. It remains available under zero incident radiation.
+mean of the two-face isotropic upper-hemisphere longwave view factors in
+`LightStepResult.sky_fraction`. It remains available under zero incident
+shortwave radiation.
 
 The model owns these declarations. Bind its destination objects with
 `outputs_to=(OutputTo(selector),)`, or use a tuple of variable names in
